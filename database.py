@@ -66,6 +66,7 @@ class Database:
                 item_number INTEGER NOT NULL,
                 score INTEGER,
                 no_opportunity BOOLEAN DEFAULT FALSE,
+                not_applicable BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (rater_id) REFERENCES raters(id),
                 UNIQUE(rater_id, item_number)
@@ -293,19 +294,20 @@ class Database:
         
         Args:
             rater_id: The rater's ID
-            ratings: Dict of {item_number: score} where score is 1-5 or 'NO' for no opportunity
+            ratings: Dict of {item_number: score} where score is 1-5, 'NO' for no opportunity, or 'NA' for not applicable
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
         for item_num, score in ratings.items():
-            no_opp = score == 'NO' or score is None
-            actual_score = None if no_opp else int(score)
+            no_opp = score == 'NO'
+            not_applicable = score == 'NA'
+            actual_score = None if (no_opp or not_applicable) else int(score)
             
             cursor.execute("""
-                INSERT OR REPLACE INTO ratings (rater_id, item_number, score, no_opportunity)
-                VALUES (?, ?, ?, ?)
-            """, (rater_id, item_num, actual_score, no_opp))
+                INSERT OR REPLACE INTO ratings (rater_id, item_number, score, no_opportunity, not_applicable)
+                VALUES (?, ?, ?, ?, ?)
+            """, (rater_id, item_num, actual_score, no_opp, not_applicable))
         
         conn.commit()
         conn.close()
