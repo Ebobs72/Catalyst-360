@@ -73,6 +73,15 @@ class Database:
             )
         """)
         
+        # Cohorts table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cohorts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # Comments table (qualitative feedback)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS comments (
@@ -529,3 +538,66 @@ class Database:
         conn.close()
         
         return stats
+    
+    # ==========================================
+    # COHORT MANAGEMENT
+    # ==========================================
+    
+    def add_cohort(self, name):
+        """Add a new cohort."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(
+                "INSERT INTO cohorts (name) VALUES (?)",
+                (name,)
+            )
+            conn.commit()
+            cohort_id = cursor.lastrowid
+        except:
+            cohort_id = None
+        
+        conn.close()
+        return cohort_id
+    
+    def get_all_cohorts(self):
+        """Get all cohorts."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM cohorts ORDER BY name")
+        cohorts = [dict(row) for row in cursor.fetchall()]
+        
+        conn.close()
+        return cohorts
+    
+    def delete_cohort(self, cohort_id):
+        """Delete a cohort (doesn't affect leaders assigned to it)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("DELETE FROM cohorts WHERE id = ?", (cohort_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_leaders_by_cohort(self, cohort_name):
+        """Get all active leaders in a specific cohort."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT l.*,
+                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id) as total_raters,
+                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.completed_at IS NOT NULL) as completed_raters,
+                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.relationship = 'Self' AND r.completed_at IS NOT NULL) as self_completed
+            FROM leaders l
+            WHERE l.status = 'active' AND l.cohort = ?
+            ORDER BY l.name
+        """, (cohort_name,))
+        
+        leaders = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return leaders
