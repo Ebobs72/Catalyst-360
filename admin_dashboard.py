@@ -380,7 +380,7 @@ def render_links_tab(db):
     # Get base URL (would need to be configured for production)
     base_url = st.text_input(
         "Base URL for links",
-        value="https://catalyst-360-lzzrho2enboscw82cimrex.streamlit.app",
+        value="https://catalyst-360-arbncruhflmazjemep8uzh.streamlit.app",
         help="Change this to your deployed app URL"
     )
     
