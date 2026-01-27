@@ -460,33 +460,35 @@ def render_reports_tab(db):
         return
     
     # Check which leaders are ready for reports
-    ready_leaders = []
+    ready_for_full_360 = []
+    ready_for_self_only = []
     not_ready_leaders = []
     
     for leader in leaders:
+        raters = db.get_raters_for_leader(leader['id'])
+        has_self = any(r['relationship'] == 'Self' and r['completed'] for r in raters)
+        
         if leader['completed_raters'] >= MIN_RESPONSES_FOR_REPORT:
-            ready_leaders.append(leader)
+            ready_for_full_360.append((leader, has_self))
+        elif has_self:
+            ready_for_self_only.append(leader)
         else:
             not_ready_leaders.append(leader)
     
-    if ready_leaders:
-        st.success(f"{len(ready_leaders)} leader(s) ready for report generation")
+    # Leaders ready for Full 360
+    if ready_for_full_360:
+        st.success(f"{len(ready_for_full_360)} leader(s) ready for Full 360 report")
         
-        for leader in ready_leaders:
+        for leader, has_self in ready_for_full_360:
             col1, col2, col3 = st.columns([3, 1, 1])
             
             with col1:
                 st.write(f"**{leader['name']}** ({leader['completed_raters']} responses)")
             
             with col2:
-                # Check if self-assessment exists
-                raters = db.get_raters_for_leader(leader['id'])
-                has_self = any(r['relationship'] == 'Self' and r['completed'] for r in raters)
-                has_others = any(r['relationship'] != 'Self' and r['completed'] for r in raters)
-                
                 report_type = st.selectbox(
                     "Report Type",
-                    options=['Self-Assessment', 'Full 360', 'Progress Report'] if has_self else ['Full 360'],
+                    options=['Full 360', 'Self-Assessment', 'Progress Report'] if has_self else ['Full 360'],
                     key=f"report_type_{leader['id']}",
                     label_visibility="collapsed"
                 )
@@ -495,7 +497,6 @@ def render_reports_tab(db):
                 if st.button("Generate", key=f"gen_{leader['id']}"):
                     with st.spinner(f"Generating {report_type} for {leader['name']}..."):
                         try:
-                            # Import and run report generator
                             from report_generator import generate_report
                             
                             data, comments = db.get_leader_feedback_data(leader['id'])
@@ -510,7 +511,6 @@ def render_reports_tab(db):
                             
                             st.success(f"Report generated!")
                             
-                            # Offer download
                             with open(output_path, 'rb') as f:
                                 st.download_button(
                                     "📥 Download Report",
@@ -522,23 +522,66 @@ def render_reports_tab(db):
                         except Exception as e:
                             st.error(f"Error generating report: {str(e)}")
     
+    # Leaders ready for Self-Assessment only
+    if ready_for_self_only:
+        st.info(f"{len(ready_for_self_only)} leader(s) ready for Self-Assessment report only")
+        
+        for leader in ready_for_self_only:
+            col1, col2, col3 = st.columns([3, 1, 1])
+            
+            with col1:
+                st.write(f"**{leader['name']}** (Self-assessment complete)")
+            
+            with col2:
+                st.write("Self-Assessment")
+            
+            with col3:
+                if st.button("Generate", key=f"gen_self_{leader['id']}"):
+                    with st.spinner(f"Generating Self-Assessment for {leader['name']}..."):
+                        try:
+                            from report_generator import generate_report
+                            
+                            data, comments = db.get_leader_feedback_data(leader['id'])
+                            output_path = generate_report(
+                                leader['name'],
+                                'Self-Assessment',
+                                data,
+                                comments,
+                                leader.get('dealership'),
+                                leader.get('cohort')
+                            )
+                            
+                            st.success(f"Report generated!")
+                            
+                            with open(output_path, 'rb') as f:
+                                st.download_button(
+                                    "📥 Download Report",
+                                    f,
+                                    file_name=f"{leader['name'].replace(' ', '_')}_Self-Assessment.docx",
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    key=f"download_self_{leader['id']}"
+                                )
+                        except Exception as e:
+                            st.error(f"Error generating report: {str(e)}")
+    
+    # Leaders not ready
     if not_ready_leaders:
         st.markdown("---")
-        st.warning(f"{len(not_ready_leaders)} leader(s) need more responses")
+        st.warning(f"{len(not_ready_leaders)} leader(s) not ready for any reports")
         
         for leader in not_ready_leaders:
-            st.write(f"• {leader['name']}: {leader['completed_raters']}/{MIN_RESPONSES_FOR_REPORT} minimum responses")
+            st.write(f"• {leader['name']}: No self-assessment completed yet")
     
     # Batch generation
     st.markdown("---")
     st.subheader("Batch Report Generation")
     
-    if ready_leaders:
-        if st.button("Generate All Ready Reports", type="primary"):
+    if ready_for_full_360:
+        if st.button("Generate All Full 360 Reports", type="primary"):
             progress = st.progress(0)
             status = st.empty()
             
-            for i, leader in enumerate(ready_leaders):
+            for i, (leader, has_self) in enumerate(ready_for_full_360):
                 status.text(f"Generating report for {leader['name']}...")
                 
                 try:
@@ -556,9 +599,9 @@ def render_reports_tab(db):
                 except Exception as e:
                     st.error(f"Error for {leader['name']}: {str(e)}")
                 
-                progress.progress((i + 1) / len(ready_leaders))
+                progress.progress((i + 1) / len(ready_for_full_360))
             
             status.text("All reports generated!")
-            st.success(f"Generated {len(ready_leaders)} reports. Check the 'reports' folder.")
+            st.success(f"Generated {len(ready_for_full_360)} reports. Check the 'reports' folder.")
     else:
-        st.info("No leaders are ready for report generation yet.")
+        st.info("No leaders are ready for Full 360 report generation yet.")
