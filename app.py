@@ -227,6 +227,79 @@ st.markdown("""
 # Initialize database
 db = Database()
 
+# Auto-load demo data on first run if database is empty
+def load_demo_data_if_empty():
+    """Load demo data if no leaders exist."""
+    leaders = db.get_all_leaders()
+    if len(leaders) == 0:
+        import numpy as np
+        from framework import DIMENSIONS, ITEMS
+        
+        # Demo leaders
+        demo_leaders = [
+            {'name': 'Sarah Mitchell', 'email': 'sarah.mitchell@bentley.com', 'dealership': 'Bentley London', 'cohort': 'January 2026'},
+            {'name': 'James Thompson', 'email': 'james.thompson@bentley.com', 'dealership': 'Bentley Manchester', 'cohort': 'January 2026'},
+            {'name': 'Emma Richardson', 'email': 'emma.richardson@bentley.com', 'dealership': 'Bentley Edinburgh', 'cohort': 'January 2026'}
+        ]
+        
+        comments_pool = {
+            'Leading Self': ["Could benefit from stepping back from operational detail more often.", "Always makes time for us even when busy.", "Handles pressure exceptionally well."],
+            'Developing Others': ["Really invests in their people.", "The coaching conversations have been transformational.", "Creates genuine learning opportunities."],
+            'Building High-Performing Teams': ["Creates a great team spirit.", "Knows how to get the best out of different personalities.", "Brings positive energy even on tough days."],
+            'Driving Results': ["Consistently delivers. One of the most reliable leaders.", "Sets high standards and meets them.", "Clear on expectations."],
+            'Leading Change': ["Communication during change could be earlier.", "Not always the first to embrace new initiatives.", "Helps the team understand the 'why'."],
+            'Communicating & Influencing': ["Great listener. Makes you feel heard.", "Adapts communication style brilliantly.", "Feedback is always constructive."],
+            'Building Trust': ["Completely trustworthy.", "One of the most genuine people in the leadership team.", "Always admits when they've got something wrong."],
+            'Thinking Strategically': ["Would like to see more strategic thinking.", "Good at their area but could connect more with wider business.", "Excellent at balancing priorities."],
+            'strengths': ["Builds excellent relationships with the team.", "Trustworthy, consistent, and genuinely cares.", "Really invests in development.", "Great at building team spirit."],
+            'development': ["Could be more strategic and less operational.", "Could be quicker to embrace change.", "Would like more delegation.", "Communication during change could be more proactive."]
+        }
+        
+        np.random.seed(42)
+        
+        for leader_info in demo_leaders:
+            leader_id = db.add_leader(leader_info['name'], leader_info['email'], leader_info['dealership'], leader_info['cohort'])
+            
+            # Add raters
+            for rel, name, count in [('Self', leader_info['name'], 1), ('Boss', None, 1), ('Peers', None, 4), ('DRs', None, 5), ('Others', None, 2)]:
+                for _ in range(count):
+                    db.add_rater(leader_id, rel, name)
+            
+            raters = db.get_raters_for_leader(leader_id)
+            leader_strengths = list(np.random.choice(list(DIMENSIONS.keys()), 3, replace=False))
+            leader_dev_areas = [d for d in DIMENSIONS.keys() if d not in leader_strengths][:2]
+            
+            for rater in raters:
+                ratings = {}
+                rel = rater['relationship']
+                
+                for item_num in range(1, 43):
+                    dim_name = None
+                    for d, (start, end) in DIMENSIONS.items():
+                        if start <= item_num <= end:
+                            dim_name = d
+                            break
+                    
+                    base = 4.3 if dim_name in leader_strengths else (3.5 if dim_name in leader_dev_areas else 4.0)
+                    if rel == 'Self' and dim_name in leader_dev_areas:
+                        base += 0.5
+                    
+                    score = int(round(min(5.0, max(1.0, base + np.random.uniform(-0.5, 0.5)))))
+                    ratings[item_num] = 'NO' if (rel == 'Others' and np.random.random() < 0.1) else score
+                
+                comments = {}
+                for dim in list(np.random.choice(list(DIMENSIONS.keys()), np.random.randint(2, 4), replace=False)):
+                    if dim in comments_pool:
+                        comments[dim] = np.random.choice(comments_pool[dim])
+                
+                if rel != 'Self':
+                    comments['strengths'] = np.random.choice(comments_pool['strengths'])
+                    comments['development'] = np.random.choice(comments_pool['development'])
+                
+                db.submit_feedback(rater['id'], ratings, comments)
+
+load_demo_data_if_empty()
+
 def get_route():
     """Determine which page to show based on URL parameters."""
     params = st.query_params
