@@ -39,6 +39,95 @@ def render_admin_dashboard(db):
 def render_settings_tab(db):
     """Render the settings/admin tab."""
     
+    settings_subtab1, settings_subtab2, settings_subtab3 = st.tabs(["📁 Cohorts", "🗄️ Database", "ℹ️ App Info"])
+    
+    with settings_subtab1:
+        render_cohort_management(db)
+    
+    with settings_subtab2:
+        render_database_management(db)
+    
+    with settings_subtab3:
+        render_app_info(db)
+
+
+def render_cohort_management(db):
+    """Render cohort management section."""
+    
+    st.subheader("Cohort Management")
+    
+    # Get existing cohorts from leaders
+    leaders = db.get_all_leaders()
+    existing_cohorts = sorted(set(l.get('cohort', 'Unassigned') for l in leaders if l.get('cohort')))
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Add New Cohort**")
+        new_cohort = st.text_input("Cohort Name", placeholder="e.g., April 2026")
+        if st.button("➕ Add Cohort", disabled=not new_cohort):
+            if new_cohort not in existing_cohorts:
+                # Store cohort in a cohorts table
+                db.add_cohort(new_cohort)
+                st.success(f"Cohort '{new_cohort}' created!")
+                st.rerun()
+            else:
+                st.warning("Cohort already exists.")
+    
+    with col2:
+        st.markdown("**Existing Cohorts**")
+        all_cohorts = db.get_all_cohorts()
+        if all_cohorts:
+            for cohort in all_cohorts:
+                cohort_leaders = [l for l in leaders if l.get('cohort') == cohort['name']]
+                completed = sum(1 for l in cohort_leaders if l['completed_raters'] >= 5)
+                
+                col_name, col_stats, col_del = st.columns([3, 2, 1])
+                with col_name:
+                    st.write(f"**{cohort['name']}**")
+                with col_stats:
+                    st.caption(f"{len(cohort_leaders)} leaders, {completed} ready")
+                with col_del:
+                    if st.button("🗑️", key=f"del_cohort_{cohort['id']}", help="Delete cohort"):
+                        db.delete_cohort(cohort['id'])
+                        st.rerun()
+        else:
+            st.info("No cohorts created yet. Add one or they'll be created automatically when adding leaders.")
+    
+    st.markdown("---")
+    
+    # Cohort filtering for main views
+    st.markdown("**Dashboard Filter**")
+    st.write("Select a cohort to filter the Overview, Links, and Reports tabs:")
+    
+    filter_options = ["All Cohorts"] + [c['name'] for c in db.get_all_cohorts()]
+    
+    # Also include any cohorts from leaders that aren't in the cohorts table
+    for cohort in existing_cohorts:
+        if cohort and cohort not in filter_options:
+            filter_options.append(cohort)
+    
+    selected_filter = st.selectbox(
+        "Active Cohort Filter",
+        options=filter_options,
+        key="cohort_filter"
+    )
+    
+    # Store in session state for other tabs to use
+    if selected_filter == "All Cohorts":
+        st.session_state['active_cohort_filter'] = None
+    else:
+        st.session_state['active_cohort_filter'] = selected_filter
+    
+    if st.session_state.get('active_cohort_filter'):
+        st.success(f"Filtering by: {st.session_state['active_cohort_filter']}")
+    else:
+        st.info("Showing all cohorts")
+
+
+def render_database_management(db):
+    """Render database management section."""
+    
     st.subheader("Database Management")
     
     st.warning("⚠️ These actions cannot be undone. Use with caution.")
@@ -84,6 +173,7 @@ def render_settings_tab(db):
                         row = {
                             'Leader': leader['name'],
                             'Dealership': leader.get('dealership', ''),
+                            'Cohort': leader.get('cohort', ''),
                             'Item': item_num,
                             'Statement': scores.get('text', ''),
                             'Self': scores.get('Self'),
@@ -96,7 +186,6 @@ def render_settings_tab(db):
                         }
                         export_data.append(row)
                 
-                import pandas as pd
                 df = pd.DataFrame(export_data)
                 csv = df.to_csv(index=False)
                 st.download_button(
@@ -107,64 +196,69 @@ def render_settings_tab(db):
                 )
             else:
                 st.info("No data to export.")
-    
-    st.markdown("---")
+
+
+def render_app_info(db):
+    """Render app info section."""
     
     st.subheader("App Information")
-    st.write(f"**Database location:** compass_360.db")
+    
     stats = db.get_dashboard_stats()
-    st.write(f"**Leaders:** {stats['total_leaders']}")
-    st.write(f"**Total raters:** {stats['total_raters']}")
-    st.write(f"**Completed responses:** {stats['completed_responses']}")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write(f"**Database location:** compass_360.db")
+        st.write(f"**Total leaders:** {stats['total_leaders']}")
+        st.write(f"**Total raters:** {stats['total_raters']}")
+    
+    with col2:
+        st.write(f"**Completed responses:** {stats['completed_responses']}")
+        st.write(f"**Ready for Full 360:** {stats['ready_for_report']}")
+        
+        # Count cohorts
+        cohorts = db.get_all_cohorts()
+        st.write(f"**Cohorts:** {len(cohorts)}")
 
 
 def render_overview_tab(db):
     """Render the overview/stats tab."""
     
-    stats = db.get_dashboard_stats()
+    # Check for cohort filter
+    cohort_filter = st.session_state.get('active_cohort_filter')
+    
+    if cohort_filter:
+        st.info(f"📁 Filtered by cohort: **{cohort_filter}** (change in Settings → Cohorts)")
+        leaders = db.get_leaders_by_cohort(cohort_filter)
+    else:
+        leaders = db.get_all_leaders()
+    
+    # Calculate stats for filtered leaders
+    total_leaders = len(leaders)
+    total_raters = sum(l['total_raters'] for l in leaders)
+    completed_responses = sum(l['completed_raters'] for l in leaders)
+    ready_for_report = sum(1 for l in leaders if l['completed_raters'] >= MIN_RESPONSES_FOR_REPORT)
     
     # Stats row
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown(f"""
-        <div class="stat-box">
-            <div class="stat-number">{stats['total_leaders']}</div>
-            <div class="stat-label">Leaders</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("Leaders", total_leaders)
     
     with col2:
-        st.markdown(f"""
-        <div class="stat-box">
-            <div class="stat-number">{stats['total_raters']}</div>
-            <div class="stat-label">Total Raters</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("Total Raters", total_raters)
     
     with col3:
-        completion_rate = round(stats['completed_responses'] / stats['total_raters'] * 100) if stats['total_raters'] > 0 else 0
-        st.markdown(f"""
-        <div class="stat-box">
-            <div class="stat-number">{completion_rate}%</div>
-            <div class="stat-label">Response Rate</div>
-        </div>
-        """, unsafe_allow_html=True)
+        completion_rate = round(completed_responses / total_raters * 100) if total_raters > 0 else 0
+        st.metric("Response Rate", f"{completion_rate}%")
     
     with col4:
-        st.markdown(f"""
-        <div class="stat-box">
-            <div class="stat-number">{stats['ready_for_report']}</div>
-            <div class="stat-label">Ready for Report</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("Ready for Report", ready_for_report)
     
     st.markdown("<br>", unsafe_allow_html=True)
     
     # Leaders summary
     st.subheader("Leader Status Overview")
-    
-    leaders = db.get_all_leaders()
     
     if not leaders:
         st.info("No leaders added yet. Go to the 'Leaders' tab to add leaders.")
@@ -453,7 +547,14 @@ def render_reports_tab(db):
     
     st.subheader("Generate Reports")
     
-    leaders = db.get_all_leaders()
+    # Check for cohort filter
+    cohort_filter = st.session_state.get('active_cohort_filter')
+    
+    if cohort_filter:
+        st.info(f"📁 Filtered by cohort: **{cohort_filter}** (change in Settings → Cohorts)")
+        leaders = db.get_leaders_by_cohort(cohort_filter)
+    else:
+        leaders = db.get_all_leaders()
     
     if not leaders:
         st.info("Add leaders first.")
