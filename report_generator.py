@@ -279,9 +279,12 @@ def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=Non
     doc.add_page_break()
 
 
-def add_response_summary(doc, response_counts):
+def add_response_summary(doc, data):
     """Add response summary table."""
     doc.add_heading("Response Summary", level=2)
+    
+    response_counts = data.get('response_counts', {})
+    hidden_groups = data.get('hidden_groups', [])
     
     table = doc.add_table(rows=1, cols=2)
     table.style = 'Table Grid'
@@ -307,6 +310,22 @@ def add_response_summary(doc, response_counts):
     row[0].paragraphs[0].runs[0].bold = True
     row[1].text = str(total)
     row[1].paragraphs[0].runs[0].bold = True
+    
+    doc.add_paragraph()
+    
+    # Add anonymity note if groups were hidden
+    if hidden_groups:
+        from framework import ANONYMITY_THRESHOLD
+        note = doc.add_paragraph()
+        note_text = (
+            f"Note: To protect anonymity, respondent groups with fewer than {ANONYMITY_THRESHOLD} "
+            f"responses have been combined into 'Others'. "
+            f"Groups combined: {', '.join(GROUP_DISPLAY.get(g, g) for g in hidden_groups)}."
+        )
+        run = note.add_run(note_text)
+        run.font.size = Pt(9)
+        run.font.italic = True
+        run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
     
     doc.add_paragraph()
 
@@ -783,7 +802,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         )
         doc.add_page_break()
         
-        add_response_summary(doc, data.get('response_counts', {}))
+        add_response_summary(doc, data)
         add_executive_summary(doc, data)
         add_papu_nanu_section(doc, data)
         
