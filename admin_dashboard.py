@@ -397,7 +397,7 @@ def render_links_tab(db):
     for rel in ['Self', 'Boss', 'Peers', 'DRs', 'Others']:
         if rel in raters_by_group:
             for i, rater in enumerate(raters_by_group[rel], 1):
-                link = f"{base_url}?token={rater['token']}"
+                link = f"{base_url}?t={rater['token']}"
                 status = "✓ Complete" if rater['completed'] else "○ Pending"
                 
                 link_data.append({
