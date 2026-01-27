@@ -195,15 +195,16 @@ def create_item_bar_chart(scores, output_path):
 
 def create_self_only_bar(score, output_path):
     """Create horizontal bar chart for self-assessment only."""
-    fig, ax = plt.subplots(figsize=(4, 0.6))
+    fig, ax = plt.subplots(figsize=(4, 0.8))
     
     if score is not None:
-        ax.barh([0], [score], color=COLOURS['primary_blue'], height=0.55)
-        ax.text(score + 0.08, 0, f'{score:.1f}', va='center', fontsize=8)
+        ax.barh([0], [score], color=COLOURS['primary_blue'], height=0.5)
+        ax.text(score + 0.15, 0, f'{score:.1f}', va='center', fontsize=9, fontweight='bold')
     
-    ax.set_xlim(0, 5.5)
+    ax.set_xlim(0, 5.8)
     ax.set_ylim(-0.5, 0.5)
     ax.set_xticks([1, 2, 3, 4, 5])
+    ax.set_xticklabels(['1', '2', '3', '4', '5'], fontsize=8)
     ax.set_yticks([])
     
     ax.axvline(x=4, color='green', linestyle='--', alpha=0.3, linewidth=1)
@@ -700,6 +701,76 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         # Detailed sections
         for dim_name in DIMENSIONS.keys():
             add_dimension_section(doc, dim_name, data, comments, is_self_only=True)
+        
+        # Overall Effectiveness
+        doc.add_heading("Overall Effectiveness", level=1)
+        for item_num in [41, 42]:
+            item_scores = data['by_item'].get(item_num, {})
+            item_text = item_scores.get('text', ITEMS.get(item_num, ''))
+            # Adjust for self-assessment
+            item_text = item_text.replace("this person", "myself")
+            
+            layout_table = doc.add_table(rows=1, cols=2)
+            make_table_borderless(layout_table)
+            
+            text_cell = layout_table.rows[0].cells[0]
+            text_cell.width = Inches(3.5)
+            text_para = text_cell.paragraphs[0]
+            text_para.add_run(f"Q{item_num}. {item_text}")
+            
+            chart_cell = layout_table.rows[0].cells[1]
+            chart_cell.width = Inches(3.0)
+            
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                create_self_only_bar(item_scores.get('Self'), tmp.name)
+                chart_para = chart_cell.paragraphs[0]
+                chart_para.add_run().add_picture(tmp.name, width=Inches(2.8))
+                os.unlink(tmp.name)
+            
+            doc.add_paragraph()
+        
+        doc.add_page_break()
+        
+        # Reflection Questions
+        doc.add_heading("Reflection Questions", level=1)
+        doc.add_paragraph(
+            "Use these questions to prepare for your coaching conversation:"
+        )
+        
+        reflection_questions = [
+            "Looking at your highest-rated dimensions, what specific behaviours or habits contribute to these strengths?",
+            "Which areas did you rate lowest, and what factors might be contributing to this?",
+            "Are there any dimensions where you feel uncertain about your rating? What would help you get clearer?",
+            "What patterns do you notice across your self-assessment?",
+            "If you were to focus on developing one area over the next three months, which would have the biggest impact?",
+            "What support or resources would help you develop in your chosen area?",
+        ]
+        
+        for i, question in enumerate(reflection_questions, 1):
+            para = doc.add_paragraph()
+            para.add_run(f"{i}. ").bold = True
+            para.add_run(question)
+        
+        doc.add_page_break()
+        
+        # What Happens Next
+        doc.add_heading("What Happens Next", level=1)
+        doc.add_paragraph(
+            "This self-assessment is the first step in your 360-degree feedback process. Here's what comes next:"
+        )
+        
+        next_steps = [
+            ("Feedback Collection", "Your line manager, peers, and direct reports will be invited to provide their perspective on your leadership using the same framework."),
+            ("Full 360 Report", "Once feedback is collected, you'll receive a comprehensive report comparing your self-assessment with how others see you."),
+            ("Coaching Conversation", "You'll discuss your results with your coach to identify key insights and development priorities."),
+            ("Development Planning", "Together with your coach, you'll create a focused development plan for the coming months."),
+        ]
+        
+        for title, description in next_steps:
+            para = doc.add_paragraph()
+            para.add_run(f"{title}: ").bold = True
+            para.add_run(description)
+            doc.add_paragraph()
         
     elif report_type == 'Full 360':
         create_cover_page(doc, leader_name, "Feedback Report", dealership, cohort)
