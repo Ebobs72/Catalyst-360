@@ -48,10 +48,29 @@ def render_feedback_form(db, rater_info):
         st.markdown(f"""
         <div style="background: #F8F9FA; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #024731;">
             <p style="margin: 0; color: #333; line-height: 1.6;">
-                <strong>About this feedback</strong><br>
-                Your honest feedback will help <strong>{leader_name}</strong> understand how their leadership 
-                is perceived and identify areas for development. All feedback is confidential and will be 
-                aggregated with others in your category. Please be constructive and specific where possible.
+                Thank you for taking the time to complete this questionnaire. The results will be shared with 
+                <strong>{leader_name}</strong> as part of the Bentley Compass Leadership Development Programme.
+            </p>
+            <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
+                This 360 feedback instrument provides leaders with a rounded view of their leadership effectiveness, 
+                covering both functional leadership competencies and behavioural self-awareness.
+            </p>
+            <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
+                Please take some time to complete this form, and note that all responses will be treated with 
+                complete confidentiality. If you are part of a group response to this questionnaire, your individual 
+                answers will be aggregated into overall scores and will not be individually identifiable.
+            </p>
+            <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
+                Any comments you make will be anonymised to the group title you respond from – 
+                <strong>unless you are the direct line manager of the individual.</strong>
+            </p>
+            <p style="margin: 1rem 0 0 0; color: #C00000; line-height: 1.6;">
+                <strong>If any of the individual statements are Not Applicable to your specific relationship 
+                with this individual, please choose the N/A option.</strong>
+            </p>
+            <p style="margin: 1rem 0 0 0; color: #C00000; line-height: 1.6;">
+                <strong>If any of the individual statements ARE applicable to your specific relationship, 
+                but you have not had an opportunity to witness them behaving in that way, choose No Opportunity.</strong>
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -62,8 +81,8 @@ def render_feedback_form(db, rater_info):
     if 'comments' not in st.session_state:
         st.session_state.comments = {}
     
-    # Rating options
-    rating_options = [""] + [str(i) for i in range(1, 6)] + ["N/O"]
+    # Rating options - now includes N/A
+    rating_options = [""] + [str(i) for i in range(1, 6)] + ["N/A", "N/O"]
     rating_labels = {
         "": "Select...",
         "1": "1 - Strongly Disagree",
@@ -71,7 +90,8 @@ def render_feedback_form(db, rater_info):
         "3": "3 - Neither",
         "4": "4 - Agree",
         "5": "5 - Strongly Agree",
-        "N/O": "No Opportunity to Observe"
+        "N/A": "N/A - Not Applicable",
+        "N/O": "N/O - No Opportunity to Observe"
     }
     
     # Form
@@ -225,6 +245,8 @@ def render_feedback_form(db, rater_info):
                 for item_num, rating in st.session_state.ratings.items():
                     if rating == "N/O":
                         processed_ratings[item_num] = "NO"
+                    elif rating == "N/A":
+                        processed_ratings[item_num] = "NA"
                     elif rating:
                         processed_ratings[item_num] = int(rating)
                 
