@@ -18,7 +18,7 @@ def render_admin_dashboard(db):
     st.markdown('<p class="subtitle">Administrator Dashboard</p>', unsafe_allow_html=True)
     
     # Navigation tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "👥 Leaders", "📧 Links & Tracking", "📄 Reports"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "👥 Leaders", "📧 Links & Tracking", "📄 Reports", "⚙️ Settings"])
     
     with tab1:
         render_overview_tab(db)
@@ -31,6 +31,91 @@ def render_admin_dashboard(db):
     
     with tab4:
         render_reports_tab(db)
+    
+    with tab5:
+        render_settings_tab(db)
+
+
+def render_settings_tab(db):
+    """Render the settings/admin tab."""
+    
+    st.subheader("Database Management")
+    
+    st.warning("⚠️ These actions cannot be undone. Use with caution.")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Clear All Data**")
+        st.write("Delete all leaders, raters, and feedback. Reloads demo data on next refresh.")
+        
+        if st.button("🗑️ Clear Database", type="secondary"):
+            st.session_state['confirm_clear'] = True
+        
+        if st.session_state.get('confirm_clear'):
+            st.error("Are you sure? This will delete ALL data.")
+            col_yes, col_no = st.columns(2)
+            with col_yes:
+                if st.button("Yes, clear everything", type="primary"):
+                    # Delete the database file
+                    import os
+                    if os.path.exists('compass_360.db'):
+                        os.remove('compass_360.db')
+                    st.session_state['confirm_clear'] = False
+                    st.success("Database cleared. Refresh the page to reload demo data.")
+                    st.rerun()
+            with col_no:
+                if st.button("Cancel"):
+                    st.session_state['confirm_clear'] = False
+                    st.rerun()
+    
+    with col2:
+        st.markdown("**Export Data**")
+        st.write("Download all feedback data as CSV for backup.")
+        
+        if st.button("📥 Export All Data"):
+            # Get all leaders and their data
+            leaders = db.get_all_leaders()
+            if leaders:
+                export_data = []
+                for leader in leaders:
+                    data, comments = db.get_leader_feedback_data(leader['id'])
+                    for item_num, scores in data['by_item'].items():
+                        row = {
+                            'Leader': leader['name'],
+                            'Dealership': leader.get('dealership', ''),
+                            'Item': item_num,
+                            'Statement': scores.get('text', ''),
+                            'Self': scores.get('Self'),
+                            'Boss': scores.get('Boss'),
+                            'Peers': scores.get('Peers'),
+                            'DRs': scores.get('DRs'),
+                            'Others': scores.get('Others'),
+                            'Combined': scores.get('Combined'),
+                            'Gap': scores.get('Gap')
+                        }
+                        export_data.append(row)
+                
+                import pandas as pd
+                df = pd.DataFrame(export_data)
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    "Download CSV",
+                    csv,
+                    f"compass_360_export_{datetime.now().strftime('%Y%m%d')}.csv",
+                    "text/csv"
+                )
+            else:
+                st.info("No data to export.")
+    
+    st.markdown("---")
+    
+    st.subheader("App Information")
+    st.write(f"**Database location:** compass_360.db")
+    stats = db.get_dashboard_stats()
+    st.write(f"**Leaders:** {stats['total_leaders']}")
+    st.write(f"**Total raters:** {stats['total_raters']}")
+    st.write(f"**Completed responses:** {stats['completed_responses']}")
 
 
 def render_overview_tab(db):
@@ -103,22 +188,24 @@ def render_overview_tab(db):
             status_class = "progress-none"
             status_text = f"Awaiting responses (0/{total})"
         
-        st.markdown(f"""
-        <div class="leader-card">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <strong style="font-size: 1.1rem;">{leader['name']}</strong>
-                    {f'<span style="color: #999; margin-left: 0.5rem;">({leader["dealership"]})</span>' if leader.get('dealership') else ''}
-                </div>
-                <div class="{status_class}">{status_text}</div>
-            </div>
-            <div style="margin-top: 0.5rem; font-size: 0.9rem; color: #666;">
-                Self: {'✓' if self_done else '○'} | 
-                Cohort: {leader.get('cohort', 'Not set')} | 
-                Year: {leader.get('assessment_year', 1)}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Use Streamlit components instead of raw HTML to avoid escaping issues
+        with st.container():
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                dealer_text = f" ({leader['dealership']})" if leader.get('dealership') else ""
+                st.markdown(f"**{leader['name']}**{dealer_text}")
+                cohort = leader.get('cohort', 'Not set')
+                year = leader.get('assessment_year', 1)
+                self_icon = '✓' if self_done else '○'
+                st.caption(f"Self: {self_icon} | Cohort: {cohort} | Year: {year}")
+            with col2:
+                if "Ready" in status_text:
+                    st.success(status_text)
+                elif "progress" in status_text:
+                    st.warning(status_text)
+                else:
+                    st.info(status_text)
+            st.divider()
 
 
 def render_leaders_tab(db):
