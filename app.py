@@ -304,7 +304,9 @@ def get_route():
     """Determine which page to show based on URL parameters."""
     params = st.query_params
     
-    # Check for feedback form token
+    # Check for feedback form token (supports both 't' and 'token' for backwards compatibility)
+    if 't' in params:
+        return 'feedback', params['t']
     if 'token' in params:
         return 'feedback', params['token']
     
