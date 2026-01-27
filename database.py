@@ -194,7 +194,7 @@ class Database:
     
     def generate_token(self):
         """Generate a unique, URL-safe token."""
-        return secrets.token_urlsafe(16)
+        return secrets.token_urlsafe(6)  # Generates 8 characters
     
     def add_rater(self, leader_id, relationship, name=None, email=None):
         """Add a rater for a leader and generate their unique link."""
