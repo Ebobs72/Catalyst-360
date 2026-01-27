@@ -172,6 +172,12 @@ HIGH_SCORE_THRESHOLD = 4.0
 SIGNIFICANT_GAP = 0.5
 MIN_RESPONSES_FOR_REPORT = 5
 
+# Anonymity threshold - groups with fewer responses than this
+# will have their scores folded into "Others" category
+# Boss is exempt (always shown with n=1)
+# Self is exempt (always shown)
+ANONYMITY_THRESHOLD = 3
+
 # ============================================
 # COMMENT SECTIONS
 # ============================================
