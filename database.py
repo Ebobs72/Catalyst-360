@@ -356,11 +356,17 @@ class Database:
         """
         Get all feedback data for a leader in the format needed for report generation.
         
+        Applies anonymity threshold - groups with fewer than ANONYMITY_THRESHOLD
+        respondents have their data folded into 'Others' category.
+        Boss and Self are exempt from this threshold.
+        
         Returns:
             Tuple of (data_dict, comments_dict) matching the report generator format
         """
         conn = self.get_connection()
         cursor = conn.cursor()
+        
+        from framework import ITEMS, DIMENSIONS, ANONYMITY_THRESHOLD
         
         # Get response counts by relationship
         cursor.execute("""
@@ -370,51 +376,113 @@ class Database:
             GROUP BY relationship
         """, (leader_id,))
         
-        response_counts = {}
+        raw_response_counts = {}
         relationship_map = {'Self': 'Self', 'Boss': 'Boss', 'Peers': 'Peers', 
                           'DRs': 'DRs', 'Others': 'Others'}
         for row in cursor.fetchall():
-            response_counts[relationship_map.get(row['relationship'], row['relationship'])] = row['count']
+            raw_response_counts[relationship_map.get(row['relationship'], row['relationship'])] = row['count']
+        
+        # Determine which groups meet the anonymity threshold
+        # Self and Boss are always shown; others need >= ANONYMITY_THRESHOLD
+        visible_groups = ['Self', 'Boss']  # Always visible
+        hidden_groups = []  # Groups that will be folded into Others
+        
+        for group in ['Peers', 'DRs', 'Others']:
+            count = raw_response_counts.get(group, 0)
+            if count >= ANONYMITY_THRESHOLD:
+                visible_groups.append(group)
+            elif count > 0:
+                hidden_groups.append(group)
+        
+        # Build response_counts for visible groups only
+        # Hidden groups get added to Others count
+        response_counts = {}
+        others_count = raw_response_counts.get('Others', 0)
+        
+        for group in ['Self', 'Boss', 'Peers', 'DRs']:
+            if group in visible_groups:
+                response_counts[group] = raw_response_counts.get(group, 0)
+            elif group in hidden_groups:
+                others_count += raw_response_counts.get(group, 0)
+        
+        if others_count > 0 or 'Others' in visible_groups:
+            response_counts['Others'] = others_count
+        
+        # Create a mapping for hidden groups -> Others
+        def map_group(group):
+            if group in hidden_groups:
+                return 'Others'
+            return group
         
         # Get all ratings grouped by item and relationship
         cursor.execute("""
             SELECT 
                 rt.item_number,
                 r.relationship,
-                AVG(CASE WHEN rt.no_opportunity = 0 THEN rt.score END) as avg_score,
-                SUM(CASE WHEN rt.no_opportunity = 1 THEN 1 ELSE 0 END) as no_opp_count
+                rt.score,
+                rt.no_opportunity
             FROM ratings rt
             JOIN raters r ON rt.rater_id = r.id
             WHERE r.leader_id = ? AND r.completed_at IS NOT NULL
-            GROUP BY rt.item_number, r.relationship
         """, (leader_id,))
         
-        # Build the by_item structure
-        from framework import ITEMS, DIMENSIONS
-        
+        # Build the by_item structure with anonymity applied
         by_item = {}
         no_opportunity = {}
         
         for item_num in range(1, 43):
             by_item[item_num] = {'text': ITEMS.get(item_num, '')}
         
+        # Collect scores by item and mapped group
+        item_scores = {}  # {item_num: {group: [scores]}}
+        item_no_opp = {}  # {item_num: {group: count}}
+        
         for row in cursor.fetchall():
             item_num = row['item_number']
-            rel = relationship_map.get(row['relationship'], row['relationship'])
+            raw_group = relationship_map.get(row['relationship'], row['relationship'])
+            mapped_group = map_group(raw_group)
             
-            if row['avg_score'] is not None:
-                by_item[item_num][rel] = round(row['avg_score'], 1)
+            if item_num not in item_scores:
+                item_scores[item_num] = {}
+                item_no_opp[item_num] = {}
             
-            if row['no_opp_count'] and row['no_opp_count'] > 0:
-                if item_num not in no_opportunity:
-                    no_opportunity[item_num] = {'count': 0, 'groups': [], 'text': ITEMS.get(item_num, '')}
-                no_opportunity[item_num]['count'] += row['no_opp_count']
-                no_opportunity[item_num]['groups'].extend([rel] * row['no_opp_count'])
+            if mapped_group not in item_scores[item_num]:
+                item_scores[item_num][mapped_group] = []
+                item_no_opp[item_num][mapped_group] = 0
+            
+            if row['no_opportunity']:
+                item_no_opp[item_num][mapped_group] += 1
+            elif row['score'] is not None:
+                item_scores[item_num][mapped_group].append(row['score'])
+        
+        # Calculate averages per item per group
+        for item_num in range(1, 43):
+            if item_num in item_scores:
+                for group, scores in item_scores[item_num].items():
+                    if scores:
+                        by_item[item_num][group] = round(sum(scores) / len(scores), 1)
+            
+            # Track no opportunity
+            if item_num in item_no_opp:
+                total_no_opp = sum(item_no_opp[item_num].values())
+                if total_no_opp > 0:
+                    no_opportunity[item_num] = {
+                        'count': total_no_opp,
+                        'groups': [],
+                        'text': ITEMS.get(item_num, '')
+                    }
+                    for group, count in item_no_opp[item_num].items():
+                        no_opportunity[item_num]['groups'].extend([group] * count)
         
         # Calculate combined scores and gaps
         for item_num in by_item:
             item = by_item[item_num]
-            other_scores = [item.get(g) for g in ['Boss', 'Peers', 'DRs', 'Others'] if item.get(g) is not None]
+            # Only include visible groups in Combined (excluding Self)
+            other_scores = []
+            for g in ['Boss', 'Peers', 'DRs', 'Others']:
+                if g in visible_groups or g == 'Others':
+                    if item.get(g) is not None:
+                        other_scores.append(item[g])
             
             if other_scores:
                 item['Combined'] = round(sum(other_scores) / len(other_scores), 2)
@@ -434,7 +502,7 @@ class Database:
             
             by_dimension[dim_name] = {}
             for g, scores in dim_scores.items():
-                if scores:
+                if scores and (g in visible_groups or g in ['Self', 'Combined', 'Others']):
                     by_dimension[dim_name][g] = round(sum(scores) / len(scores), 2)
             
             if 'Self' in by_dimension[dim_name] and 'Combined' in by_dimension[dim_name]:
@@ -447,15 +515,20 @@ class Database:
         for item_num in [41, 42]:
             overall[item_num] = by_item.get(item_num, {})
         
+        # Store info about hidden groups for reporting
         data = {
             'by_item': by_item,
             'by_dimension': by_dimension,
             'overall': overall,
             'response_counts': response_counts,
-            'no_opportunity': no_opportunity
+            'raw_response_counts': raw_response_counts,
+            'no_opportunity': no_opportunity,
+            'visible_groups': visible_groups,
+            'hidden_groups': hidden_groups,
+            'anonymity_applied': len(hidden_groups) > 0
         }
         
-        # Get comments
+        # Get comments - also apply anonymity mapping
         cursor.execute("""
             SELECT c.section, c.comment_text, r.relationship
             FROM comments c
@@ -471,7 +544,10 @@ class Database:
         
         for row in cursor.fetchall():
             section = row['section']
-            comment = {'group': row['relationship'], 'text': row['comment_text']}
+            raw_group = row['relationship']
+            mapped_group = map_group(raw_group)
+            
+            comment = {'group': mapped_group, 'text': row['comment_text']}
             
             if section == 'strengths':
                 comments['strengths'].append(comment)
