@@ -270,17 +270,20 @@ def render_overview_tab(db):
         self_done = leader['self_completed'] > 0
         
         if total == 0:
-            status_class = "progress-none"
             status_text = "No raters assigned"
+            status_type = "info"
         elif completed >= MIN_RESPONSES_FOR_REPORT:
-            status_class = "progress-complete"
-            status_text = f"✓ Ready ({completed}/{total} responses)"
+            status_text = f"✓ Ready for Full 360 ({completed}/{total})"
+            status_type = "success"
+        elif self_done and completed < MIN_RESPONSES_FOR_REPORT:
+            status_text = f"✓ Self done, awaiting others ({completed}/{total})"
+            status_type = "success"
         elif completed > 0:
-            status_class = "progress-partial"
-            status_text = f"In progress ({completed}/{total} responses)"
+            status_text = f"In progress ({completed}/{total})"
+            status_type = "warning"
         else:
-            status_class = "progress-none"
             status_text = f"Awaiting responses (0/{total})"
+            status_type = "info"
         
         # Use Streamlit components instead of raw HTML to avoid escaping issues
         with st.container():
@@ -293,9 +296,9 @@ def render_overview_tab(db):
                 self_icon = '✓' if self_done else '○'
                 st.caption(f"Self: {self_icon} | Cohort: {cohort} | Year: {year}")
             with col2:
-                if "Ready" in status_text:
+                if status_type == "success":
                     st.success(status_text)
-                elif "progress" in status_text:
+                elif status_type == "warning":
                     st.warning(status_text)
                 else:
                     st.info(status_text)
