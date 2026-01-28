@@ -227,82 +227,141 @@ def render_overview_tab(db):
     # Check for cohort filter
     cohort_filter = st.session_state.get('active_cohort_filter')
     
-    if cohort_filter:
-        st.info(f"📁 Filtered by cohort: **{cohort_filter}** (change in Settings → Cohorts)")
-        leaders = db.get_leaders_by_cohort(cohort_filter)
-    else:
-        leaders = db.get_all_leaders()
+    # Get all leaders
+    all_leaders = db.get_all_leaders()
     
-    # Calculate stats for filtered leaders
-    total_leaders = len(leaders)
-    total_raters = sum(l['total_raters'] for l in leaders)
-    completed_responses = sum(l['completed_raters'] for l in leaders)
-    ready_for_report = sum(1 for l in leaders if l['completed_raters'] >= MIN_RESPONSES_FOR_REPORT)
-    
-    # Stats row
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Leaders", total_leaders)
-    
-    with col2:
-        st.metric("Total Raters", total_raters)
-    
-    with col3:
-        completion_rate = round(completed_responses / total_raters * 100) if total_raters > 0 else 0
-        st.metric("Response Rate", f"{completion_rate}%")
-    
-    with col4:
-        st.metric("Ready for Report", ready_for_report)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Leaders summary
-    st.subheader("Leader Status Overview")
-    
-    if not leaders:
+    if not all_leaders:
         st.info("No leaders added yet. Go to the 'Leaders' tab to add leaders.")
         return
     
-    for leader in leaders:
-        completed = leader['completed_raters']
-        total = leader['total_raters']
-        self_done = leader['self_completed'] > 0
+    # Group leaders by cohort
+    cohorts = {}
+    for leader in all_leaders:
+        cohort_name = leader.get('cohort') or 'Unassigned'
+        if cohort_name not in cohorts:
+            cohorts[cohort_name] = []
+        cohorts[cohort_name].append(leader)
+    
+    # If no filter active, show cohort summary buttons
+    if not cohort_filter:
+        st.subheader("Cohorts")
         
-        if total == 0:
-            status_text = "No raters assigned"
-            status_type = "info"
-        elif completed >= MIN_RESPONSES_FOR_REPORT:
-            status_text = f"✓ Ready for Full 360 ({completed}/{total})"
-            status_type = "success"
-        elif self_done and completed < MIN_RESPONSES_FOR_REPORT:
-            status_text = f"✓ Self done, awaiting others ({completed}/{total})"
-            status_type = "success"
-        elif completed > 0:
-            status_text = f"In progress ({completed}/{total})"
-            status_type = "warning"
-        else:
-            status_text = f"Awaiting responses (0/{total})"
-            status_type = "info"
-        
-        # Use Streamlit components instead of raw HTML to avoid escaping issues
-        with st.container():
-            col1, col2 = st.columns([3, 1])
+        # Calculate stats per cohort
+        for cohort_name in sorted(cohorts.keys()):
+            cohort_leaders = cohorts[cohort_name]
+            total_leaders = len(cohort_leaders)
+            total_raters = sum(l['total_raters'] for l in cohort_leaders)
+            completed = sum(l['completed_raters'] for l in cohort_leaders)
+            ready = sum(1 for l in cohort_leaders if l['completed_raters'] >= MIN_RESPONSES_FOR_REPORT)
+            response_rate = round(completed / total_raters * 100) if total_raters > 0 else 0
+            
+            col1, col2 = st.columns([4, 1])
+            
             with col1:
-                dealer_text = f" ({leader['dealership']})" if leader.get('dealership') else ""
-                st.markdown(f"**{leader['name']}**{dealer_text}")
-                cohort = leader.get('cohort', 'Not set')
-                year = leader.get('assessment_year', 1)
-                self_icon = '✓' if self_done else '○'
-                st.caption(f"Self: {self_icon} | Cohort: {cohort} | Year: {year}")
+                # Cohort summary card
+                st.markdown(f"""
+                **{cohort_name}**  
+                {total_leaders} leaders · {ready} ready for Full 360 · {response_rate}% response rate
+                """)
+            
             with col2:
-                if status_type == "success":
-                    st.success(status_text)
-                elif status_type == "warning":
-                    st.warning(status_text)
-                else:
-                    st.info(status_text)
+                if st.button("View →", key=f"view_cohort_{cohort_name}"):
+                    st.session_state['active_cohort_filter'] = cohort_name
+                    st.rerun()
+            
             st.divider()
+        
+        # Overall stats at bottom
+        st.markdown("---")
+        st.subheader("Overall Statistics")
+        
+        total_leaders = len(all_leaders)
+        total_raters = sum(l['total_raters'] for l in all_leaders)
+        completed_responses = sum(l['completed_raters'] for l in all_leaders)
+        ready_for_report = sum(1 for l in all_leaders if l['completed_raters'] >= MIN_RESPONSES_FOR_REPORT)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Leaders", total_leaders)
+        with col2:
+            st.metric("Total Raters", total_raters)
+        with col3:
+            completion_rate = round(completed_responses / total_raters * 100) if total_raters > 0 else 0
+            st.metric("Response Rate", f"{completion_rate}%")
+        with col4:
+            st.metric("Ready for Report", ready_for_report)
+    
+    else:
+        # Filtered view - show leaders in selected cohort
+        leaders = [l for l in all_leaders if (l.get('cohort') or 'Unassigned') == cohort_filter]
+        
+        # Back button and cohort header
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("← All Cohorts"):
+                st.session_state['active_cohort_filter'] = None
+                st.rerun()
+        with col2:
+            st.subheader(f"📁 {cohort_filter}")
+        
+        # Stats for this cohort
+        total_leaders = len(leaders)
+        total_raters = sum(l['total_raters'] for l in leaders)
+        completed_responses = sum(l['completed_raters'] for l in leaders)
+        ready_for_report = sum(1 for l in leaders if l['completed_raters'] >= MIN_RESPONSES_FOR_REPORT)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Leaders", total_leaders)
+        with col2:
+            st.metric("Total Raters", total_raters)
+        with col3:
+            completion_rate = round(completed_responses / total_raters * 100) if total_raters > 0 else 0
+            st.metric("Response Rate", f"{completion_rate}%")
+        with col4:
+            st.metric("Ready for Report", ready_for_report)
+        
+        st.markdown("---")
+        st.subheader("Leader Status")
+        
+        # Show leaders in this cohort
+        for leader in leaders:
+            completed = leader['completed_raters']
+            total = leader['total_raters']
+            self_done = leader['self_completed'] > 0
+            
+            if total == 0:
+                status_text = "No raters assigned"
+                status_type = "info"
+            elif completed >= MIN_RESPONSES_FOR_REPORT:
+                status_text = f"✓ Ready for Full 360 ({completed}/{total})"
+                status_type = "success"
+            elif self_done and completed < MIN_RESPONSES_FOR_REPORT:
+                status_text = f"✓ Self done, awaiting others ({completed}/{total})"
+                status_type = "success"
+            elif completed > 0:
+                status_text = f"In progress ({completed}/{total})"
+                status_type = "warning"
+            else:
+                status_text = f"Awaiting responses (0/{total})"
+                status_type = "info"
+            
+            with st.container():
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    dealer_text = f" ({leader['dealership']})" if leader.get('dealership') else ""
+                    st.markdown(f"**{leader['name']}**{dealer_text}")
+                    year = leader.get('assessment_year', 1)
+                    self_icon = '✓' if self_done else '○'
+                    st.caption(f"Self: {self_icon} | Year: {year}")
+                with col2:
+                    if status_type == "success":
+                        st.success(status_text)
+                    elif status_type == "warning":
+                        st.warning(status_text)
+                    else:
+                        st.info(status_text)
+                st.divider()
 
 
 def render_leaders_tab(db):
