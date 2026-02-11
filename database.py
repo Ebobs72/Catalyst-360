@@ -73,15 +73,6 @@ class Database:
             )
         """)
         
-        # Cohorts table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS cohorts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
         # Comments table (qualitative feedback)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS comments (
@@ -116,6 +107,15 @@ class Database:
                 data_json TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (leader_id) REFERENCES leaders(id)
+            )
+        """)
+        
+        # Cohorts table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cohorts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
@@ -196,6 +196,26 @@ class Database:
     def delete_leader(self, leader_id):
         """Soft delete a leader (set status to inactive)."""
         self.update_leader(leader_id, status='inactive')
+    
+    def get_leaders_by_cohort(self, cohort_name):
+        """Get all active leaders in a specific cohort."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT l.*,
+                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id) as total_raters,
+                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.completed_at IS NOT NULL) as completed_raters,
+                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.relationship = 'Self' AND r.completed_at IS NOT NULL) as self_completed
+            FROM leaders l
+            WHERE l.status = 'active' AND l.cohort = ?
+            ORDER BY l.name
+        """, (cohort_name,))
+        
+        leaders = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return leaders
     
     # ==========================================
     # RATER MANAGEMENT
@@ -427,10 +447,11 @@ class Database:
         """, (leader_id,))
         
         # Build the by_item structure with anonymity applied
+        # Now 47 items (1-45 dimensions, 46-47 overall)
         by_item = {}
         no_opportunity = {}
         
-        for item_num in range(1, 43):
+        for item_num in range(1, 48):
             by_item[item_num] = {'text': ITEMS.get(item_num, '')}
         
         # Collect scores by item and mapped group
@@ -456,7 +477,7 @@ class Database:
                 item_scores[item_num][mapped_group].append(row['score'])
         
         # Calculate averages per item per group
-        for item_num in range(1, 43):
+        for item_num in range(1, 48):
             if item_num in item_scores:
                 for group, scores in item_scores[item_num].items():
                     if scores:
@@ -510,9 +531,9 @@ class Database:
                     by_dimension[dim_name]['Self'] - by_dimension[dim_name]['Combined'], 2
                 )
         
-        # Build overall items
+        # Build overall items (now Q46 and Q47)
         overall = {}
-        for item_num in [41, 42]:
+        for item_num in [46, 47]:
             overall[item_num] = by_item.get(item_num, {})
         
         # Store info about hidden groups for reporting
@@ -592,30 +613,6 @@ class Database:
         return json.loads(row['data_json']) if row else None
     
     # ==========================================
-    # STATISTICS
-    # ==========================================
-    
-    def get_dashboard_stats(self):
-        """Get overall statistics for the admin dashboard."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT 
-                (SELECT COUNT(*) FROM leaders WHERE status = 'active') as total_leaders,
-                (SELECT COUNT(*) FROM raters) as total_raters,
-                (SELECT COUNT(*) FROM raters WHERE completed_at IS NOT NULL) as completed_responses,
-                (SELECT COUNT(DISTINCT leader_id) FROM raters r 
-                 WHERE (SELECT COUNT(*) FROM raters r2 
-                        WHERE r2.leader_id = r.leader_id AND r2.completed_at IS NOT NULL) >= 5) as ready_for_report
-        """)
-        
-        stats = dict(cursor.fetchone())
-        conn.close()
-        
-        return stats
-    
-    # ==========================================
     # COHORT MANAGEMENT
     # ==========================================
     
@@ -658,22 +655,26 @@ class Database:
         conn.commit()
         conn.close()
     
-    def get_leaders_by_cohort(self, cohort_name):
-        """Get all active leaders in a specific cohort."""
+    # ==========================================
+    # STATISTICS
+    # ==========================================
+    
+    def get_dashboard_stats(self):
+        """Get overall statistics for the admin dashboard."""
         conn = self.get_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT l.*,
-                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id) as total_raters,
-                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.completed_at IS NOT NULL) as completed_raters,
-                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.relationship = 'Self' AND r.completed_at IS NOT NULL) as self_completed
-            FROM leaders l
-            WHERE l.status = 'active' AND l.cohort = ?
-            ORDER BY l.name
-        """, (cohort_name,))
+            SELECT 
+                (SELECT COUNT(*) FROM leaders WHERE status = 'active') as total_leaders,
+                (SELECT COUNT(*) FROM raters) as total_raters,
+                (SELECT COUNT(*) FROM raters WHERE completed_at IS NOT NULL) as completed_responses,
+                (SELECT COUNT(DISTINCT leader_id) FROM raters r 
+                 WHERE (SELECT COUNT(*) FROM raters r2 
+                        WHERE r2.leader_id = r.leader_id AND r2.completed_at IS NOT NULL) >= 5) as ready_for_report
+        """)
         
-        leaders = [dict(row) for row in cursor.fetchall()]
+        stats = dict(cursor.fetchone())
         conn.close()
         
-        return leaders
+        return stats
