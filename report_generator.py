@@ -2,6 +2,9 @@
 """
 Report generator for the 360 Development Catalyst.
 Generates Word documents for Self-Assessment, Full 360, and Progress Reports.
+
+Updated for 9 dimensions (47 items total) with Performance Excellence dimension.
+Overall Effectiveness is now Q46-47.
 """
 
 import numpy as np
@@ -20,12 +23,15 @@ from pathlib import Path
 
 from framework import (
     DIMENSIONS, ITEMS, DIMENSION_DESCRIPTIONS,
-    COLOURS, GROUP_COLORS, GROUP_DISPLAY,
+    COLOURS, GROUP_COLOURS, GROUP_DISPLAY,
     HIGH_SCORE_THRESHOLD, SIGNIFICANT_GAP
 )
 
 REPORTS_DIR = Path("reports")
 REPORTS_DIR.mkdir(exist_ok=True)
+
+# Overall effectiveness questions (now 46 and 47)
+OVERALL_ITEMS = [46, 47]
 
 
 def set_cell_shading(cell, color):
@@ -60,7 +66,8 @@ def categorize_papu_nanu(data):
     }
     
     for item_num, item_scores in data['by_item'].items():
-        if item_num in [41, 42]:
+        # Skip overall effectiveness items
+        if item_num in OVERALL_ITEMS:
             continue
         
         self_score = item_scores.get('Self')
@@ -115,7 +122,7 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     self_values = [self_scores.get(dim, 0) or 0 for dim in labels]
     self_values += self_values[:1]
     
-    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
     
     ax.plot(angles, self_values, 'o-', linewidth=2, label='Self', color=COLOURS['primary_blue'])
     ax.fill(angles, self_values, alpha=0.25, color=COLOURS['primary_blue'])
@@ -127,7 +134,7 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
         ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['orange'])
     
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, size=9)
+    ax.set_xticklabels(labels, size=8)
     ax.set_ylim(1, 5)
     ax.set_yticks([1, 2, 3, 4, 5])
     
@@ -139,50 +146,48 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     plt.close()
 
 
-def create_item_bar_chart(scores, output_path):
-    """Create horizontal bar chart for an item showing all respondent groups plus Combined."""
+def create_item_bar_chart(scores, output_path, include_combined=True):
+    """Create horizontal bar chart for an item showing all respondent groups."""
     groups = []
     values = []
     colors = []
     
-    # Add individual groups
     for group in ['Self', 'Boss', 'Peers', 'DRs', 'Others']:
         val = scores.get(group)
         if val is not None:
             groups.append(GROUP_DISPLAY[group])
             values.append(val)
-            colors.append(GROUP_COLORS[group])
+            colors.append(GROUP_COLOURS[group])
     
-    # Add Combined Others bar (if we have Combined score)
-    combined = scores.get('Combined')
-    if combined is not None:
+    # Add combined bar if requested and available
+    if include_combined and scores.get('Combined') is not None:
         groups.append('Combined Others')
-        values.append(combined)
-        colors.append('#333333')  # Dark grey/black to distinguish from Line Manager
+        values.append(scores['Combined'])
+        colors.append('#333333')  # Black for combined
     
     if not values:
         return False
     
-    # Reverse for display (Self at top, Combined at bottom)
     groups = groups[::-1]
     values = values[::-1]
     colors = colors[::-1]
     
-    fig, ax = plt.subplots(figsize=(4, max(0.8, len(groups) * 0.35)))
+    fig, ax = plt.subplots(figsize=(4, max(0.8, len(groups) * 0.5)))
     
     y_pos = np.arange(len(groups))
-    bars = ax.barh(y_pos, values, color=colors, height=0.55)
+    bars = ax.barh(y_pos, values, color=colors, height=0.5)
     
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(groups, fontsize=8)
-    ax.set_xlim(0, 5.5)
+    ax.set_yticklabels(groups, fontsize=9, fontweight='bold')
+    ax.set_xlim(0, 5.8)
     ax.set_xticks([1, 2, 3, 4, 5])
     
     ax.axvline(x=4, color='green', linestyle='--', alpha=0.3, linewidth=1)
     ax.axvline(x=3, color='gray', linestyle=':', alpha=0.3, linewidth=1)
     
     for bar, val in zip(bars, values):
-        ax.text(val + 0.08, bar.get_y() + bar.get_height()/2, f'{val:.1f}', va='center', fontsize=8)
+        ax.text(val + 0.15, bar.get_y() + bar.get_height()/2, f'{val:.1f}', 
+                va='center', fontsize=9, fontweight='bold')
     
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -204,7 +209,6 @@ def create_self_only_bar(score, output_path):
     ax.set_xlim(0, 5.8)
     ax.set_ylim(-0.5, 0.5)
     ax.set_xticks([1, 2, 3, 4, 5])
-    ax.set_xticklabels(['1', '2', '3', '4', '5'], fontsize=8)
     ax.set_yticks([])
     
     ax.axvline(x=4, color='green', linestyle='--', alpha=0.3, linewidth=1)
@@ -376,188 +380,118 @@ def add_executive_summary(doc, data):
     doc.add_page_break()
 
 
-def set_column_widths(table, widths_inches):
-    """Set column widths for a table."""
-    for row in table.rows:
-        for i, cell in enumerate(row.cells):
-            if i < len(widths_inches):
-                cell.width = Inches(widths_inches[i])
-
-
-def create_papu_table(doc, items, header_color, title, description, include_not_seen=False):
-    """Create a consistent PAPU-NANU table."""
-    # Title as styled paragraph (not heading)
-    title_para = doc.add_paragraph()
-    title_run = title_para.add_run(title)
-    title_run.bold = True
-    title_run.font.size = Pt(12)
-    title_run.font.color.rgb = RGBColor(
-        int(header_color[0:2], 16),
-        int(header_color[2:4], 16),
-        int(header_color[4:6], 16)
-    )
-    
-    # Description
-    desc_para = doc.add_paragraph(description)
-    desc_para.runs[0].font.size = Pt(10)
-    desc_para.runs[0].font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-    
-    if not items:
-        doc.add_paragraph("No items currently fall into this category.")
-        doc.add_paragraph()
-        return
-    
-    # Determine columns
-    if include_not_seen:
-        cols = 6
-        headers = ['#', 'Behaviour', 'Self', 'Others', 'Gap', 'Not Seen']
-        widths = [0.4, 4.0, 0.55, 0.65, 0.55, 0.75]
-    else:
-        cols = 5
-        headers = ['#', 'Behaviour', 'Self', 'Others', 'Gap']
-        widths = [0.47, 4.0, 0.69, 0.69, 0.69]
-    
-    table = doc.add_table(rows=1, cols=cols)
-    table.style = 'Table Grid'
-    
-    # Header row
-    hdr = table.rows[0].cells
-    for i, header_text in enumerate(headers):
-        hdr[i].text = header_text
-        set_cell_shading(hdr[i], header_color)
-        hdr[i].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-        hdr[i].paragraphs[0].runs[0].font.size = Pt(9)
-        hdr[i].paragraphs[0].runs[0].bold = True
-    
-    # Data rows
-    for item in items:
-        row = table.add_row().cells
-        row[0].text = str(item['item_num'])
-        row[1].text = item['text']
-        row[2].text = f"{item['self']:.1f}"
-        row[3].text = f"{item['combined']:.1f}"
-        row[4].text = f"{item['gap']:+.1f}" if item.get('gap') is not None else "-"
-        
-        if include_not_seen:
-            row[5].text = str(item['no_opp_count']) if item.get('no_opp_count') else "-"
-        
-        # Set font size for all cells
-        for cell in row:
-            for para in cell.paragraphs:
-                for run in para.runs:
-                    run.font.size = Pt(9)
-    
-    set_column_widths(table, widths)
-    doc.add_paragraph()
-
-
 def add_papu_nanu_section(doc, data):
     """Add strengths and development areas analysis."""
     doc.add_heading("Strengths & Development Analysis", level=1)
     
-    intro = doc.add_paragraph(
-        "This analysis compares your self-ratings with how others see you, "
-        "revealing patterns of agreement and potential blind spots."
-    )
-    doc.add_paragraph()
-    
     categories = categorize_papu_nanu(data)
     
-    # Agreed Strengths (dark green)
-    create_papu_table(
-        doc,
-        categories['agreed_strengths'][:8],
-        '375623',
-        'AGREED STRENGTHS',
-        "You and others agree these are strengths - keep doing these."
-    )
+    # Agreed Strengths
+    if categories['agreed_strengths']:
+        doc.add_heading("Agreed Strengths", level=2)
+        doc.add_paragraph("Areas where you and others both rate highly (Combined ≥ 4.0, aligned perception).")
+        
+        table = doc.add_table(rows=1, cols=3)
+        table.style = 'Table Grid'
+        hdr = table.rows[0].cells
+        hdr[0].text = "Item"
+        hdr[1].text = "Self"
+        hdr[2].text = "Combined"
+        for cell in hdr:
+            set_cell_shading(cell, '375623')
+            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+        
+        for item in categories['agreed_strengths'][:8]:
+            row = table.add_row().cells
+            row[0].text = item['text'][:80] + "..." if len(item['text']) > 80 else item['text']
+            row[1].text = f"{item['self']:.1f}"
+            row[2].text = f"{item['combined']:.1f}"
+        
+        doc.add_paragraph()
     
-    # Good News (blue)
-    create_papu_table(
-        doc,
-        categories['good_news'],
-        '2F5496',
-        'GOOD NEWS',
-        "Others see these as strengths but you rate yourself lower - you're doing better than you think!"
-    )
+    # Good News
+    if categories['good_news']:
+        doc.add_heading("Good News", level=2)
+        doc.add_paragraph("Areas where others rate you higher than you rate yourself.")
+        
+        table = doc.add_table(rows=1, cols=4)
+        table.style = 'Table Grid'
+        hdr = table.rows[0].cells
+        hdr[0].text = "Item"
+        hdr[1].text = "Self"
+        hdr[2].text = "Combined"
+        hdr[3].text = "Gap"
+        for cell in hdr:
+            set_cell_shading(cell, '2F5496')
+            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+        
+        for item in categories['good_news']:
+            row = table.add_row().cells
+            row[0].text = item['text'][:80] + "..." if len(item['text']) > 80 else item['text']
+            row[1].text = f"{item['self']:.1f}"
+            row[2].text = f"{item['combined']:.1f}"
+            row[3].text = f"{item['gap']:+.1f}"
+        
+        doc.add_paragraph()
     
-    # Development Areas (orange)
-    create_papu_table(
-        doc,
-        categories['development_areas'][:8],
-        'C65911',
-        'DEVELOPMENT AREAS',
-        "Both you and others see room for growth - priority focus for development."
-    )
+    # Development Areas
+    if categories['development_areas']:
+        doc.add_heading("Development Areas", level=2)
+        doc.add_paragraph("Areas where combined ratings are below 4.0 - opportunities for growth.")
+        
+        table = doc.add_table(rows=1, cols=4)
+        table.style = 'Table Grid'
+        hdr = table.rows[0].cells
+        hdr[0].text = "Item"
+        hdr[1].text = "Self"
+        hdr[2].text = "Combined"
+        hdr[3].text = "Gap"
+        for cell in hdr:
+            set_cell_shading(cell, 'C65911')
+            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+        
+        for item in categories['development_areas'][:8]:
+            row = table.add_row().cells
+            row[0].text = item['text'][:80] + "..." if len(item['text']) > 80 else item['text']
+            row[1].text = f"{item['self']:.1f}"
+            row[2].text = f"{item['combined']:.1f}"
+            row[3].text = f"{item['gap']:+.1f}" if item['gap'] else "-"
+        
+        doc.add_paragraph()
     
-    # Hidden Talents (purple) - includes Not Seen column
+    # Hidden Talents
     if categories['hidden_talents']:
-        # Add explanatory note before Hidden Talents table
-        note = doc.add_paragraph()
-        note_run = note.add_run(
-            "'Not Seen' shows how many respondents selected 'No Opportunity' to observe this behaviour. "
-            "A high number may indicate a visibility issue rather than a genuine gap."
-        )
-        note_run.font.size = Pt(9)
-        note_run.font.italic = True
-        note_run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-    
-    create_papu_table(
-        doc,
-        categories['hidden_talents'],
-        '7030A0',
-        'HIDDEN TALENTS',
-        "You rate yourself higher than others do. These may be genuine talents that aren't visible to others, or potential blind spots.",
-        include_not_seen=True
-    )
+        doc.add_heading("Hidden Talents", level=2)
+        doc.add_paragraph("Areas where you rate yourself higher than others do - potential blind spots or visibility issues.")
+        
+        table = doc.add_table(rows=1, cols=5)
+        table.style = 'Table Grid'
+        hdr = table.rows[0].cells
+        hdr[0].text = "Item"
+        hdr[1].text = "Self"
+        hdr[2].text = "Combined"
+        hdr[3].text = "Gap"
+        hdr[4].text = "Not Seen"
+        for cell in hdr:
+            set_cell_shading(cell, '7030A0')
+            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+        
+        for item in categories['hidden_talents']:
+            row = table.add_row().cells
+            row[0].text = item['text'][:70] + "..." if len(item['text']) > 70 else item['text']
+            row[1].text = f"{item['self']:.1f}"
+            row[2].text = f"{item['combined']:.1f}"
+            row[3].text = f"{item['gap']:+.1f}"
+            row[4].text = str(item['no_opp_count']) if item['no_opp_count'] else "-"
+        
+        doc.add_paragraph()
     
     doc.add_page_break()
 
 
-def add_comments_table(doc, comments_list, title=None):
-    """Add a comments table with Source/Comment columns matching sample format."""
-    if not comments_list:
-        return
-    
-    if title:
-        heading = doc.add_paragraph()
-        run = heading.add_run(title)
-        run.bold = True
-        run.font.size = Pt(11)
-    
-    table = doc.add_table(rows=1, cols=2)
-    table.style = 'Table Grid'
-    
-    # Header row
-    hdr = table.rows[0].cells
-    hdr[0].text = "Source"
-    hdr[1].text = "Comment"
-    
-    for cell in hdr:
-        set_cell_shading(cell, 'D9D9D9')
-        cell.paragraphs[0].runs[0].font.bold = True
-        cell.paragraphs[0].runs[0].font.size = Pt(9)
-    
-    # Data rows
-    for comment in comments_list:
-        row = table.add_row().cells
-        row[0].text = GROUP_DISPLAY.get(comment['group'], comment['group'])
-        row[1].text = comment['text']
-        
-        for cell in row:
-            for para in cell.paragraphs:
-                for run in para.runs:
-                    run.font.size = Pt(9)
-    
-    # Set column widths (narrow source, wide comment)
-    set_column_widths(table, [1.1, 5.4])
-    
-    doc.add_paragraph()
-
-
 def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
     """Add a dimension section with items and charts."""
-    doc.add_heading(dim_name, level=1)
+    doc.add_heading(dim_name, level=2)
     
     desc = doc.add_paragraph()
     run = desc.add_run(DIMENSION_DESCRIPTIONS[dim_name])
@@ -578,7 +512,8 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
         text_cell = layout_table.rows[0].cells[0]
         text_cell.width = Inches(3.5)
         text_para = text_cell.paragraphs[0]
-        text_para.add_run(f"Q{item_num}. {item_text}")
+        text_para.add_run(f"{item_num}. ").bold = True
+        text_para.add_run(item_text)
         
         chart_cell = layout_table.rows[0].cells[1]
         chart_cell.width = Inches(3.0)
@@ -595,47 +530,160 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
         
         doc.add_paragraph()
     
-    # Comments table for this section
     section_comments = comments.get('by_section', {}).get(dim_name, [])
     if section_comments:
-        add_comments_table(doc, section_comments, f"Comments on {dim_name}")
+        doc.add_paragraph()
+        comment_heading = doc.add_paragraph()
+        run = comment_heading.add_run(f"Comments on {dim_name}")
+        run.bold = True
+        run.font.size = Pt(11)
+        
+        # Create comments table
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        hdr = table.rows[0].cells
+        hdr[0].text = "Source"
+        hdr[1].text = "Comment"
+        for cell in hdr:
+            set_cell_shading(cell, '024731')
+            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+            cell.paragraphs[0].runs[0].bold = True
+        
+        for comment in section_comments:
+            row = table.add_row().cells
+            row[0].text = GROUP_DISPLAY.get(comment["group"], comment["group"])
+            row[1].text = comment["text"]
+    
+    doc.add_page_break()
+
+
+def add_overall_effectiveness(doc, data, is_self_only=False):
+    """Add Overall Effectiveness section (Q46-47)."""
+    doc.add_heading("Overall Effectiveness", level=1)
+    
+    for item_num in OVERALL_ITEMS:
+        item_scores = data['by_item'].get(item_num, {})
+        item_text = item_scores.get('text', ITEMS.get(item_num, ''))
+        
+        para = doc.add_paragraph()
+        para.add_run(f"{item_num}. {item_text}").bold = True
+        
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            if is_self_only:
+                create_self_only_bar(item_scores.get('Self'), tmp.name)
+            else:
+                create_item_bar_chart(item_scores, tmp.name)
+            doc.add_picture(tmp.name, width=Inches(4))
+            os.unlink(tmp.name)
+        
+        doc.add_paragraph()
     
     doc.add_page_break()
 
 
 def add_overall_comments(doc, comments):
-    """Add overall qualitative feedback section matching sample format."""
+    """Add overall qualitative feedback section."""
     doc.add_heading("Overall Qualitative Feedback", level=1)
     
-    # Strengths section
-    strengths_heading = doc.add_paragraph()
-    run = strengths_heading.add_run("What does this leader do particularly well?")
-    run.bold = True
-    run.font.size = Pt(11)
-    
     if comments.get('strengths'):
-        add_comments_table(doc, comments['strengths'])
-    else:
-        doc.add_paragraph("No comments provided.")
-        doc.add_paragraph()
+        doc.add_heading("Greatest Strengths", level=2)
+        
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        hdr = table.rows[0].cells
+        hdr[0].text = "Source"
+        hdr[1].text = "Comment"
+        for cell in hdr:
+            set_cell_shading(cell, '375623')
+            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+            cell.paragraphs[0].runs[0].bold = True
+        
+        for comment in comments['strengths']:
+            row = table.add_row().cells
+            row[0].text = GROUP_DISPLAY.get(comment["group"], comment["group"])
+            row[1].text = comment["text"]
     
-    # Development section
-    dev_heading = doc.add_paragraph()
-    run = dev_heading.add_run("What could this leader do differently or develop further?")
-    run.bold = True
-    run.font.size = Pt(11)
+    doc.add_paragraph()
     
     if comments.get('development'):
-        add_comments_table(doc, comments['development'])
-    else:
-        doc.add_paragraph("No comments provided.")
-        doc.add_paragraph()
+        doc.add_heading("Development Suggestions", level=2)
+        
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        hdr = table.rows[0].cells
+        hdr[0].text = "Source"
+        hdr[1].text = "Comment"
+        for cell in hdr:
+            set_cell_shading(cell, 'C65911')
+            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+            cell.paragraphs[0].runs[0].bold = True
+        
+        for comment in comments['development']:
+            row = table.add_row().cells
+            row[0].text = GROUP_DISPLAY.get(comment["group"], comment["group"])
+            row[1].text = comment["text"]
     
     doc.add_page_break()
 
 
+def add_reflection_questions(doc):
+    """Add reflection questions for coaching preparation."""
+    doc.add_heading("Reflection Questions", level=1)
+    
+    doc.add_paragraph(
+        "Before your coaching session, take some time to reflect on your self-assessment. "
+        "Consider the following questions:"
+    )
+    
+    questions = [
+        "Which dimensions did you rate yourself highest on? What evidence supports these ratings?",
+        "Which dimensions did you rate yourself lowest on? What makes these areas challenging?",
+        "Were there any items where you found it difficult to decide on a rating? What made them difficult?",
+        "Which 2-3 areas would you most like to develop? Why are these important to you?",
+        "What support or resources might help you develop in these areas?",
+        "What would success look like for you in your leadership development journey?",
+    ]
+    
+    for i, question in enumerate(questions, 1):
+        para = doc.add_paragraph()
+        para.add_run(f"{i}. ").bold = True
+        para.add_run(question)
+        doc.add_paragraph()  # Space for notes
+    
+    doc.add_page_break()
+
+
+def add_what_happens_next(doc):
+    """Add What Happens Next section for self-assessment reports."""
+    doc.add_heading("What Happens Next", level=1)
+    
+    steps = [
+        ("Feedback Collection", 
+         "Your nominated respondents will receive a link to provide their feedback on your leadership. "
+         "This includes your line manager, peers, direct reports, and any others you've nominated."),
+        ("Feedback Report", 
+         "Once sufficient responses have been received (minimum 5 respondents), your full 360 feedback "
+         "report will be generated. This will show how others' perceptions compare with your self-assessment."),
+        ("Coaching Session", 
+         "You will meet with your coach to explore your feedback in depth. This is an opportunity to "
+         "understand the data, identify patterns, and begin planning your development."),
+        ("Development Planning", 
+         "Working with your coach, you will create a focused development plan targeting 2-3 key areas "
+         "for growth over the coming months."),
+        ("Ongoing Support", 
+         "Your development continues with support from your coach, your line manager, and the resources "
+         "available through the Compass programme."),
+    ]
+    
+    for i, (title, description) in enumerate(steps, 1):
+        para = doc.add_paragraph()
+        para.add_run(f"{i}. {title}: ").bold = True
+        para.add_run(description)
+        doc.add_paragraph()
+
+
 def add_next_steps(doc):
-    """Add next steps section."""
+    """Add next steps section for full 360 reports."""
     doc.add_heading("Next Steps", level=1)
     
     doc.add_paragraph(
@@ -684,7 +732,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         doc.add_heading("About This Report", level=1)
         doc.add_paragraph(
             "This self-assessment report captures your own view of your leadership effectiveness "
-            "across the eight dimensions of the Compass framework. It forms the starting point for "
+            "across the nine dimensions of the Compass framework. It forms the starting point for "
             "your 360-degree feedback process."
         )
         doc.add_page_break()
@@ -695,7 +743,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         table.style = 'Table Grid'
         hdr = table.rows[0].cells
         hdr[0].text = "Dimension"
-        hdr[1].text = "Self"
+        hdr[1].text = "Your Score"
         for cell in hdr:
             set_cell_shading(cell, '024731')
             cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
@@ -722,74 +770,13 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             add_dimension_section(doc, dim_name, data, comments, is_self_only=True)
         
         # Overall Effectiveness
-        doc.add_heading("Overall Effectiveness", level=1)
-        for item_num in [41, 42]:
-            item_scores = data['by_item'].get(item_num, {})
-            item_text = item_scores.get('text', ITEMS.get(item_num, ''))
-            # Adjust for self-assessment
-            item_text = item_text.replace("this person", "myself")
-            
-            layout_table = doc.add_table(rows=1, cols=2)
-            make_table_borderless(layout_table)
-            
-            text_cell = layout_table.rows[0].cells[0]
-            text_cell.width = Inches(3.5)
-            text_para = text_cell.paragraphs[0]
-            text_para.add_run(f"Q{item_num}. {item_text}")
-            
-            chart_cell = layout_table.rows[0].cells[1]
-            chart_cell.width = Inches(3.0)
-            
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                create_self_only_bar(item_scores.get('Self'), tmp.name)
-                chart_para = chart_cell.paragraphs[0]
-                chart_para.add_run().add_picture(tmp.name, width=Inches(2.8))
-                os.unlink(tmp.name)
-            
-            doc.add_paragraph()
-        
-        doc.add_page_break()
+        add_overall_effectiveness(doc, data, is_self_only=True)
         
         # Reflection Questions
-        doc.add_heading("Reflection Questions", level=1)
-        doc.add_paragraph(
-            "Use these questions to prepare for your coaching conversation:"
-        )
-        
-        reflection_questions = [
-            "Looking at your highest-rated dimensions, what specific behaviours or habits contribute to these strengths?",
-            "Which areas did you rate lowest, and what factors might be contributing to this?",
-            "Are there any dimensions where you feel uncertain about your rating? What would help you get clearer?",
-            "What patterns do you notice across your self-assessment?",
-            "If you were to focus on developing one area over the next three months, which would have the biggest impact?",
-            "What support or resources would help you develop in your chosen area?",
-        ]
-        
-        for i, question in enumerate(reflection_questions, 1):
-            para = doc.add_paragraph()
-            para.add_run(f"{i}. ").bold = True
-            para.add_run(question)
-        
-        doc.add_page_break()
+        add_reflection_questions(doc)
         
         # What Happens Next
-        doc.add_heading("What Happens Next", level=1)
-        doc.add_paragraph(
-            "This self-assessment is the first step in your 360-degree feedback process. Here's what comes next:"
-        )
-        
-        next_steps = [
-            ("Feedback Collection", "Your line manager, peers, and direct reports will be invited to provide their perspective on your leadership using the same framework."),
-            ("Full 360 Report", "Once feedback is collected, you'll receive a comprehensive report comparing your self-assessment with how others see you."),
-            ("Coaching Conversation", "You'll discuss your results with your coach to identify key insights and development priorities."),
-            ("Development Planning", "Together with your coach, you'll create a focused development plan for the coming months."),
-        ]
-        
-        for title, description in next_steps:
-            para = doc.add_paragraph()
-            para.add_run(f"{title}: ").bold = True
-            para.add_run(description)
-            doc.add_paragraph()
+        add_what_happens_next(doc)
         
     elif report_type == 'Full 360':
         create_cover_page(doc, leader_name, "Feedback Report", dealership, cohort)
@@ -812,23 +799,8 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         for dim_name in DIMENSIONS.keys():
             add_dimension_section(doc, dim_name, data, comments, is_self_only=False)
         
-        # Overall effectiveness
-        doc.add_heading("Overall Effectiveness", level=1)
-        for item_num in [41, 42]:
-            item_scores = data['by_item'].get(item_num, {})
-            item_text = item_scores.get('text', ITEMS.get(item_num, ''))
-            
-            para = doc.add_paragraph()
-            para.add_run(f"{item_num}. {item_text}").bold = True
-            
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                create_item_bar_chart(item_scores, tmp.name)
-                doc.add_picture(tmp.name, width=Inches(4))
-                os.unlink(tmp.name)
-            
-            doc.add_paragraph()
-        
-        doc.add_page_break()
+        # Overall effectiveness (now Q46-47)
+        add_overall_effectiveness(doc, data, is_self_only=False)
         
         add_overall_comments(doc, comments)
         add_next_steps(doc)
@@ -847,7 +819,6 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
 
 def generate_all_reports(db, leader_ids=None):
     """Generate reports for multiple leaders."""
-    from database import Database
     
     if leader_ids is None:
         leaders = db.get_all_leaders()
