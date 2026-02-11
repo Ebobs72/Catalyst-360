@@ -122,7 +122,13 @@ DIMENSION_DESCRIPTIONS = {
 # RELATIONSHIP TYPES
 # ============================================
 
-RELATIONSHIP_TYPES = ['Self', 'Boss', 'Peers', 'DRs', 'Others']
+RELATIONSHIP_TYPES = {
+    'Self': 'Self',
+    'Boss': 'Line Manager',
+    'Peers': 'Peers',
+    'DRs': 'Direct Reports',
+    'Others': 'Others',
+}
 
 GROUP_DISPLAY = {
     'Self': 'Self',
