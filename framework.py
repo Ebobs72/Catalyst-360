@@ -18,10 +18,11 @@ DIMENSIONS = {
     'Communicating & Influencing': (26, 30),
     'Building Trust': (31, 35),
     'Thinking Strategically': (36, 40),
+    'Performance Excellence': (41, 45),
 }
 
 # ============================================
-# ALL 42 ITEMS
+# ALL 47 ITEMS
 # ============================================
 
 ITEMS = {
@@ -48,28 +49,28 @@ ITEMS = {
     
     # Driving Results (16-20)
     16: "Sets clear expectations so people know what success looks like",
-    17: "Holds people accountable for their commitments",
+    17: "Holds people accountable for their commitments in a fair and consistent way",
     18: "Makes timely decisions rather than delaying unnecessarily",
-    19: "Follows through on agreed actions and expects others to do the same",
-    20: "Delivers results consistently",
+    19: "Follows through on agreed actions and expects the same from others",
+    20: "Maintains focus on priorities rather than being distracted by less important issues",
     
     # Leading Change (21-25)
-    21: "Prepares their team well when change is coming",
-    22: "Helps people understand the reasons behind change, not just what's changing",
-    23: "Addresses resistance to change constructively rather than ignoring it",
-    24: "Maintains momentum through the difficult middle stages of change",
-    25: "Looks for opportunities to improve and innovate, not just maintain the status quo",
+    21: "Helps their team understand the reasons behind changes",
+    22: "Supports their people through uncertainty rather than leaving them to cope alone",
+    23: "Encourages new ideas and ways of working",
+    24: "Adapts their approach when circumstances change rather than sticking rigidly to plans",
+    25: "Builds commitment to change rather than just compliance",
     
     # Communicating & Influencing (26-30)
-    26: "Listens genuinely rather than just waiting to speak",
+    26: "Listens well and considers different perspectives before reaching conclusions",
     27: "Communicates clearly so people understand what's expected",
-    28: "Gives feedback that is timely, specific, and constructive",
-    29: "Adapts their communication style to different people and situations",
-    30: "Influences through engagement rather than just telling people what to do",
+    28: "Keeps people appropriately informed rather than leaving them guessing",
+    29: "Adapts their communication style to different audiences",
+    30: "Is able to influence others without relying on positional authority",
     
     # Building Trust (31-35)
     31: "Does what they say they will do",
-    32: "Admits mistakes and takes responsibility when things go wrong",
+    32: "Is honest even when the message is difficult",
     33: "Shares information openly rather than keeping people in the dark",
     34: "Acknowledges and celebrates good work",
     35: "Creates an environment where people feel safe to speak up",
@@ -81,9 +82,16 @@ ITEMS = {
     39: "Involves their team in shaping direction rather than dictating it",
     40: "Identifies and manages risks before they become problems",
     
-    # Overall Effectiveness (41-42)
-    41: "Overall, is an effective leader",
-    42: "I would want to work with this person again",
+    # Performance Excellence (41-45)
+    41: "Uses the Performance Excellence framework to prioritise opportunities based on data rather than instinct",
+    42: "Clearly defines problem statements before jumping into solutions",
+    43: "Breaks larger issues into structured, manageable stages to ensure problems are solved at the right level",
+    44: "Engages the right people at each stage of the funnel to validate assumptions and strengthen solutions",
+    45: "Follows through on improvement actions and tracks impact to ensure benefits are realised and sustained",
+    
+    # Overall Effectiveness (46-47)
+    46: "Overall, is an effective leader",
+    47: "I would want to work with this person again",
 }
 
 # ============================================
@@ -91,46 +99,30 @@ ITEMS = {
 # ============================================
 
 DIMENSION_DESCRIPTIONS = {
-    'Leading Self': "Personal effectiveness, self-management, and leading by example. Leaders strong in this area manage their time well, delegate appropriately, stay composed under pressure, and actively seek feedback to improve.",
+    'Leading Self': "Personal effectiveness, self-management, and leading by example. Leaders strong in this area manage their time and energy well, stay composed under pressure, and continuously work on their own development.",
     
-    'Developing Others': "Growing capability in individuals and teams. Leaders strong in this area invest in development conversations, create learning environments, coach rather than direct, and build team independence.",
+    'Developing Others': "Growing capability in individuals and teams. Leaders strong in this area invest in development conversations, create learning opportunities, and build their team's ability to operate independently.",
     
-    'Building High-Performing Teams': "Creating the conditions for teams to thrive. Leaders strong in this area build collaborative teams, address dysfunction, bring energy, adapt their style, and balance challenge with care.",
+    'Building High-Performing Teams': "Creating the conditions for teams to thrive. Leaders strong in this area build collaborative teams, address dysfunction, and adapt their style to get the best from different people.",
     
-    'Driving Results': "Delivering performance through others. Leaders strong in this area set clear expectations, hold people accountable, make timely decisions, follow through, and deliver consistently.",
+    'Driving Results': "Delivering performance through others. Leaders strong in this area set clear expectations, hold people accountable fairly, make timely decisions, and maintain focus on what matters most.",
     
-    'Leading Change': "Navigating teams through uncertainty and transformation. Leaders strong in this area prepare people for change, explain the why, address resistance, maintain momentum, and seek innovation.",
+    'Leading Change': "Navigating teams through uncertainty and transformation. Leaders strong in this area help people understand and commit to change, support them through transitions, and encourage innovation.",
     
-    'Communicating & Influencing': "Connecting with others and getting buy-in. Leaders strong in this area listen well, communicate clearly, give constructive feedback, adapt their style, and influence through engagement.",
+    'Communicating & Influencing': "Connecting with others and getting buy-in. Leaders strong in this area listen well, communicate clearly, keep people informed, and can influence without relying on authority.",
     
-    'Building Trust': "Creating psychological safety and credibility. Leaders strong in this area keep promises, admit mistakes, share information, recognise good work, and create safety for speaking up.",
+    'Building Trust': "Creating psychological safety and credibility. Leaders strong in this area keep their commitments, share information openly, are honest even when difficult, and create an environment where people feel safe to speak up.",
     
-    'Thinking Strategically': "Seeing the bigger picture and planning ahead. Leaders strong in this area think beyond their area, balance short and long-term, build stakeholder relationships, involve others, and manage risk.",
+    'Thinking Strategically': "Seeing the bigger picture and planning ahead. Leaders strong in this area think beyond their immediate area, balance short and long-term priorities, build stakeholder relationships, and manage risks proactively.",
+    
+    'Performance Excellence': "Driving business performance through structured problem-solving. Leaders strong in this area use data to prioritise, define problems clearly, break issues into manageable stages, engage the right people, and track impact of improvement actions.",
 }
 
 # ============================================
-# RATING SCALE
+# RELATIONSHIP TYPES
 # ============================================
 
-RATING_SCALE = {
-    1: "Strongly Disagree",
-    2: "Disagree", 
-    3: "Neither Agree nor Disagree",
-    4: "Agree",
-    5: "Strongly Agree",
-}
-
-# ============================================
-# RESPONDENT GROUPS
-# ============================================
-
-RELATIONSHIP_TYPES = {
-    'Self': 'Self-Assessment',
-    'Boss': 'Line Manager',
-    'Peers': 'Peer',
-    'DRs': 'Direct Report',
-    'Others': 'Other Colleague',
-}
+RELATIONSHIP_TYPES = ['Self', 'Boss', 'Peers', 'DRs', 'Others']
 
 GROUP_DISPLAY = {
     'Self': 'Self',
@@ -138,6 +130,7 @@ GROUP_DISPLAY = {
     'Peers': 'Peers',
     'DRs': 'Direct Reports',
     'Others': 'Others',
+    'Combined': 'Combined Others'
 }
 
 # ============================================
@@ -145,18 +138,17 @@ GROUP_DISPLAY = {
 # ============================================
 
 COLOURS = {
-    'primary_blue': '#2F5496',
-    'orange': '#C65911',
-    'green': '#548235',
-    'dark_green': '#375623',
-    'purple': '#7030A0',
-    'gold': '#BF9000',
-    'grey': '#808080',
-    'light_grey': '#B0B0B0',
-    'bentley_green': '#024731',
+    'primary_green': '#024731',
+    'primary_blue': '#1B365D',
+    'orange': '#D35400',
+    'green': '#27AE60',
+    'purple': '#8E44AD',
+    'gold': '#C5A028',
+    'light_grey': '#F5F5F5',
+    'dark_grey': '#333333',
 }
 
-GROUP_COLORS = {
+GROUP_COLOURS = {
     'Self': COLOURS['primary_blue'],
     'Boss': COLOURS['orange'],
     'Peers': COLOURS['green'],
