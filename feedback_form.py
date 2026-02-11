@@ -8,7 +8,7 @@ Provides a clean, branded experience for submitting 360 feedback.
 import streamlit as st
 from framework import (
     DIMENSIONS, ITEMS, DIMENSION_DESCRIPTIONS, 
-    RATING_SCALE, RELATIONSHIP_TYPES
+    RELATIONSHIP_TYPES, GROUP_DISPLAY
 )
 
 def render_feedback_form(db, rater_info):
@@ -16,7 +16,6 @@ def render_feedback_form(db, rater_info):
     
     leader_name = rater_info['leader_name']
     relationship = rater_info['relationship']
-    relationship_display = RELATIONSHIP_TYPES.get(relationship, relationship)
     is_self = relationship == 'Self'
     
     # Header
@@ -27,7 +26,7 @@ def render_feedback_form(db, rater_info):
             {'Self-Assessment' if is_self else f'Feedback for <strong>{leader_name}</strong>'}
         </p>
         <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 0.5rem;">
-            {f'Providing feedback as: {relationship_display}' if not is_self else 'Bentley Compass Leadership Programme'}
+            {f'Providing feedback as: {GROUP_DISPLAY.get(relationship, relationship)}' if not is_self else 'Bentley Compass Leadership Programme'}
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -96,7 +95,7 @@ def render_feedback_form(db, rater_info):
     
     # Form
     with st.form("feedback_form"):
-        # Iterate through dimensions
+        # Iterate through dimensions (now includes Performance Excellence)
         for dim_name, (start_item, end_item) in DIMENSIONS.items():
             st.markdown(f'<div class="dimension-header">{dim_name}</div>', unsafe_allow_html=True)
             
@@ -118,7 +117,7 @@ def render_feedback_form(db, rater_info):
                     item_text = item_text.replace("their leadership", "my leadership")
                     item_text = item_text.replace("their area", "my area")
                     item_text = item_text.replace("their immediate", "my immediate")
-                    item_text = item_text.replace("this person", "me")
+                    item_text = item_text.replace("this person", "myself")
                 
                 col1, col2 = st.columns([3, 1])
                 
@@ -158,13 +157,13 @@ def render_feedback_form(db, rater_info):
             
             st.markdown("<hr style='margin: 2rem 0; border: none; border-top: 1px solid #E0E0E0;'>", unsafe_allow_html=True)
         
-        # Overall Effectiveness
+        # Overall Effectiveness (now Q46 and Q47)
         st.markdown('<div class="dimension-header">Overall Effectiveness</div>', unsafe_allow_html=True)
         
-        for item_num in [41, 42]:
+        for item_num in [46, 47]:
             item_text = ITEMS[item_num]
             if is_self:
-                item_text = item_text.replace("this person", "me")
+                item_text = item_text.replace("this person", "myself")
             
             col1, col2 = st.columns([3, 1])
             
@@ -230,9 +229,9 @@ def render_feedback_form(db, rater_info):
         )
         
         if submitted:
-            # Validate - check that all items have been rated
+            # Validate - check that all items have been rated (now 47 items)
             missing = []
-            for item_num in range(1, 43):
+            for item_num in range(1, 48):
                 rating = st.session_state.ratings.get(item_num, "")
                 if rating == "":
                     missing.append(item_num)
