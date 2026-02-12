@@ -125,25 +125,26 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     self_values += self_values[:1]
     
     # Create figure with more space for labels
-    fig, ax = plt.subplots(figsize=(12, 12), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(14, 14), subplot_kw=dict(polar=True))
     
-    # Style the grid
+    # Style the grid - more visible lines
     ax.set_facecolor('white')
-    ax.spines['polar'].set_color('#CCCCCC')
-    ax.grid(color='#CCCCCC', linestyle='-', linewidth=0.5, alpha=0.7)
+    ax.spines['polar'].set_color('#999999')
+    ax.spines['polar'].set_linewidth(1.5)
+    ax.grid(color='#999999', linestyle='-', linewidth=1, alpha=0.8)
     
     # Plot Self scores
-    ax.plot(angles, self_values, 'o-', linewidth=2.5, label='Self', 
-            color=COLOURS['primary_blue'], markersize=8)
-    ax.fill(angles, self_values, alpha=0.2, color=COLOURS['primary_blue'])
+    ax.plot(angles, self_values, 'o-', linewidth=3, label='Self', 
+            color=COLOURS['primary_blue'], markersize=10)
+    ax.fill(angles, self_values, alpha=0.25, color=COLOURS['primary_blue'])
     
     # Plot Combined scores if available
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
-        ax.plot(angles, combined_values, 'o-', linewidth=2.5, label='Combined Others', 
-                color=COLOURS['orange'], markersize=8)
-        ax.fill(angles, combined_values, alpha=0.2, color=COLOURS['orange'])
+        ax.plot(angles, combined_values, 'o-', linewidth=3, label='Combined Others', 
+                color=COLOURS['orange'], markersize=10)
+        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['orange'])
     
     # Configure the chart
     ax.set_xticks(angles[:-1])
@@ -151,11 +152,11 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     
     ax.set_ylim(0, 5)
     ax.set_yticks([1, 2, 3, 4, 5])
-    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=10, color='#666666')
+    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=14, color='#333333', fontweight='bold')
     ax.set_rlabel_position(22.5)  # Position radial labels between spokes
     
-    # Add dimension labels outside the chart
-    label_padding = 5.6  # Distance from center for labels
+    # Add dimension labels outside the chart - LARGER TEXT
+    label_padding = 5.8  # Distance from center for labels
     
     for i, (angle, label) in enumerate(zip(angles[:-1], labels)):
         # Convert angle to degrees for text rotation
@@ -172,16 +173,16 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
             ha, va = 'right', 'center'
         
         ax.text(angle, label_padding, label, 
-                size=11, fontweight='bold', color='#333333',
+                size=14, fontweight='bold', color='#333333',
                 ha=ha, va=va)
     
     # Add legend at bottom
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
-        ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.12), 
-                  ncol=2, fontsize=12, frameon=False)
+        ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.1), 
+                  ncol=2, fontsize=14, frameon=False)
     
     plt.tight_layout()
-    plt.savefig(output_path, dpi=180, bbox_inches='tight', facecolor='white', 
+    plt.savefig(output_path, dpi=200, bbox_inches='tight', facecolor='white', 
                 edgecolor='none', pad_inches=0.3)
     plt.close()
 
