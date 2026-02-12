@@ -122,25 +122,51 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     self_values = [self_scores.get(dim, 0) or 0 for dim in labels]
     self_values += self_values[:1]
     
-    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
     
-    ax.plot(angles, self_values, 'o-', linewidth=2, label='Self', color=COLOURS['primary_blue'])
+    ax.plot(angles, self_values, 'o-', linewidth=2.5, label='Self', color=COLOURS['primary_blue'])
     ax.fill(angles, self_values, alpha=0.25, color=COLOURS['primary_blue'])
     
     if combined_scores:
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
-        ax.plot(angles, combined_values, 'o-', linewidth=2, label='Combined Others', color=COLOURS['orange'])
+        ax.plot(angles, combined_values, 'o-', linewidth=2.5, label='Combined Others', color=COLOURS['orange'])
         ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['orange'])
     
+    # Position labels outside the chart
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, size=11, fontweight='bold')
-    ax.set_ylim(1, 5)
+    ax.set_xticklabels([])  # Remove default labels
+    
+    # Add labels manually, positioned outside
+    for i, (angle, label) in enumerate(zip(angles[:-1], labels)):
+        # Calculate position - push labels out beyond the chart
+        rotation = np.degrees(angle)
+        
+        # Adjust alignment based on position
+        if angle == 0:
+            ha = 'center'
+            va = 'bottom'
+        elif 0 < angle < np.pi:
+            ha = 'left'
+            va = 'center'
+        elif angle == np.pi:
+            ha = 'center'
+            va = 'top'
+        else:
+            ha = 'right'
+            va = 'center'
+        
+        # Position label outside the outer ring
+        ax.text(angle, 5.8, label, size=11, fontweight='bold',
+                ha=ha, va=va)
+    
+    ax.set_ylim(0, 5.5)
     ax.set_yticks([1, 2, 3, 4, 5])
-    ax.tick_params(axis='y', labelsize=10)
+    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=10)
+    ax.set_rlabel_position(45)  # Move radial labels to avoid overlap
     
     if combined_scores:
-        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.15), fontsize=11)
+        ax.legend(loc='upper right', bbox_to_anchor=(1.15, 1.1), fontsize=11)
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=180, bbox_inches='tight', facecolor='white')
@@ -173,23 +199,24 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
     values = values[::-1]
     colors = colors[::-1]
     
-    fig, ax = plt.subplots(figsize=(4, max(0.8, len(groups) * 0.5)))
+    fig, ax = plt.subplots(figsize=(4.5, max(0.8, len(groups) * 0.5)))
     
     y_pos = np.arange(len(groups))
     bars = ax.barh(y_pos, values, color=colors, height=0.5)
     
     ax.set_yticks(y_pos)
     ax.set_yticklabels(groups, fontsize=10, fontweight='bold')
-    ax.set_xlim(0, 5.8)
+    ax.set_xlim(0, 6.0)
     ax.set_xticks([1, 2, 3, 4, 5])
     ax.tick_params(axis='x', labelsize=10)
     
     ax.axvline(x=4, color='green', linestyle='--', alpha=0.3, linewidth=1)
     ax.axvline(x=3, color='gray', linestyle=':', alpha=0.3, linewidth=1)
     
+    # Place all scores at fixed right-aligned position
     for bar, val in zip(bars, values):
-        ax.text(val + 0.15, bar.get_y() + bar.get_height()/2, f'{val:.1f}', 
-                va='center', fontsize=12, fontweight='bold')
+        ax.text(5.7, bar.get_y() + bar.get_height()/2, f'{val:.1f}', 
+                va='center', ha='right', fontsize=12, fontweight='bold')
     
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -202,13 +229,14 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
 
 def create_self_only_bar(score, output_path):
     """Create horizontal bar chart for self-assessment only."""
-    fig, ax = plt.subplots(figsize=(4, 0.8))
+    fig, ax = plt.subplots(figsize=(4.5, 0.8))
     
     if score is not None:
         ax.barh([0], [score], color=COLOURS['primary_blue'], height=0.5)
-        ax.text(score + 0.15, 0, f'{score:.1f}', va='center', fontsize=12, fontweight='bold')
+        # Place score at fixed right-aligned position
+        ax.text(5.7, 0, f'{score:.1f}', va='center', ha='right', fontsize=12, fontweight='bold')
     
-    ax.set_xlim(0, 5.8)
+    ax.set_xlim(0, 6.0)
     ax.set_ylim(-0.5, 0.5)
     ax.set_xticks([1, 2, 3, 4, 5])
     ax.tick_params(axis='x', labelsize=10)
