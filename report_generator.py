@@ -134,15 +134,16 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
         ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['orange'])
     
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, size=8)
+    ax.set_xticklabels(labels, size=11, fontweight='bold')
     ax.set_ylim(1, 5)
     ax.set_yticks([1, 2, 3, 4, 5])
+    ax.tick_params(axis='y', labelsize=10)
     
     if combined_scores:
-        ax.legend(loc='upper right', bbox_to_anchor=(1.25, 1.1))
+        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.15), fontsize=11)
     
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=180, bbox_inches='tight', facecolor='white')
     plt.close()
 
 
@@ -178,22 +179,23 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
     bars = ax.barh(y_pos, values, color=colors, height=0.5)
     
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(groups, fontsize=9, fontweight='bold')
+    ax.set_yticklabels(groups, fontsize=10, fontweight='bold')
     ax.set_xlim(0, 5.8)
     ax.set_xticks([1, 2, 3, 4, 5])
+    ax.tick_params(axis='x', labelsize=10)
     
     ax.axvline(x=4, color='green', linestyle='--', alpha=0.3, linewidth=1)
     ax.axvline(x=3, color='gray', linestyle=':', alpha=0.3, linewidth=1)
     
     for bar, val in zip(bars, values):
         ax.text(val + 0.15, bar.get_y() + bar.get_height()/2, f'{val:.1f}', 
-                va='center', fontsize=9, fontweight='bold')
+                va='center', fontsize=12, fontweight='bold')
     
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     
     plt.tight_layout()
-    plt.savefig(output_path, dpi=130, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
     return True
 
@@ -204,11 +206,12 @@ def create_self_only_bar(score, output_path):
     
     if score is not None:
         ax.barh([0], [score], color=COLOURS['primary_blue'], height=0.5)
-        ax.text(score + 0.15, 0, f'{score:.1f}', va='center', fontsize=9, fontweight='bold')
+        ax.text(score + 0.15, 0, f'{score:.1f}', va='center', fontsize=12, fontweight='bold')
     
     ax.set_xlim(0, 5.8)
     ax.set_ylim(-0.5, 0.5)
     ax.set_xticks([1, 2, 3, 4, 5])
+    ax.tick_params(axis='x', labelsize=10)
     ax.set_yticks([])
     
     ax.axvline(x=4, color='green', linestyle='--', alpha=0.3, linewidth=1)
@@ -218,7 +221,7 @@ def create_self_only_bar(score, output_path):
     ax.spines['right'].set_visible(False)
     
     plt.tight_layout()
-    plt.savefig(output_path, dpi=130, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
 
 
