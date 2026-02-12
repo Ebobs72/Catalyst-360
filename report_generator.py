@@ -116,8 +116,9 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     labels = list(dimensions.keys())
     num_vars = len(labels)
     
-    # Calculate angles for each dimension
-    angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+    # Calculate angles - start at top (90 degrees / pi/2) and go CLOCKWISE
+    # By using negative step, we go clockwise instead of anticlockwise
+    angles = np.linspace(np.pi/2, np.pi/2 - 2*np.pi, num_vars, endpoint=False).tolist()
     angles += angles[:1]  # Complete the circle
     
     # Get values
@@ -159,18 +160,18 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     label_padding = 5.8  # Distance from center for labels
     
     for i, (angle, label) in enumerate(zip(angles[:-1], labels)):
-        # Convert angle to degrees for text rotation
-        angle_deg = np.degrees(angle)
+        # Convert angle to degrees for positioning
+        angle_deg = np.degrees(angle) % 360
         
         # Determine text alignment based on position
-        if 80 < angle_deg < 100:  # Top
+        if 60 < angle_deg < 120:  # Top area
             ha, va = 'center', 'bottom'
-        elif 260 < angle_deg < 280:  # Bottom
+        elif 240 < angle_deg < 300:  # Bottom area
             ha, va = 'center', 'top'
-        elif angle_deg <= 80 or angle_deg >= 280:  # Right side
-            ha, va = 'left', 'center'
-        else:  # Left side
+        elif 120 <= angle_deg <= 240:  # Left side
             ha, va = 'right', 'center'
+        else:  # Right side
+            ha, va = 'left', 'center'
         
         ax.text(angle, label_padding, label, 
                 size=18, fontweight='bold', color='#333333',
