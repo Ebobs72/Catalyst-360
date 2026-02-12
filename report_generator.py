@@ -414,12 +414,17 @@ def add_executive_summary(doc, data):
     
     doc.add_paragraph()
     
-    # Radar chart
+    # Radar chart - larger and centred
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
         self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
         combined_scores = {dim: data['by_dimension'].get(dim, {}).get('Combined') for dim in DIMENSIONS}
         create_radar_chart(DIMENSIONS, self_scores, combined_scores, tmp.name)
-        doc.add_picture(tmp.name, width=Inches(5))
+        
+        # Add picture and centre it
+        para = doc.add_paragraph()
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = para.add_run()
+        run.add_picture(tmp.name, width=Inches(6))
         os.unlink(tmp.name)
     
     doc.add_page_break()
@@ -801,11 +806,16 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         
         doc.add_paragraph()
         
-        # Radar
+        # Radar - larger and centred
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
             create_radar_chart(DIMENSIONS, self_scores, None, tmp.name)
-            doc.add_picture(tmp.name, width=Inches(5))
+            
+            # Add picture and centre it
+            para = doc.add_paragraph()
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = para.add_run()
+            run.add_picture(tmp.name, width=Inches(6))
             os.unlink(tmp.name)
         
         doc.add_page_break()
