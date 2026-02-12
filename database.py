@@ -263,7 +263,7 @@ class Database:
         
         if updates:
             set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
-            values = list(updates.values()) + [leader_id]
+            values = tuple(list(updates.values()) + [leader_id])
             
             cursor.execute(f"UPDATE leaders SET {set_clause} WHERE id = ?", values)
             conn.commit()
