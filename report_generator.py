@@ -152,7 +152,7 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     
     ax.set_ylim(0, 5)
     ax.set_yticks([1, 2, 3, 4, 5])
-    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=14, color='#333333', fontweight='bold')
+    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=16, color='#333333', fontweight='bold')
     ax.set_rlabel_position(22.5)  # Position radial labels between spokes
     
     # Add dimension labels outside the chart - LARGER TEXT
@@ -173,13 +173,13 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
             ha, va = 'right', 'center'
         
         ax.text(angle, label_padding, label, 
-                size=14, fontweight='bold', color='#333333',
+                size=18, fontweight='bold', color='#333333',
                 ha=ha, va=va)
     
     # Add legend at bottom
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.1), 
-                  ncol=2, fontsize=14, frameon=False)
+                  ncol=2, fontsize=16, frameon=False)
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=200, bbox_inches='tight', facecolor='white', 
