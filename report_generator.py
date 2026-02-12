@@ -112,64 +112,77 @@ def categorize_papu_nanu(data):
 
 
 def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
-    """Create radar chart for dimension overview."""
+    """Create radar chart for dimension overview - professional style."""
     labels = list(dimensions.keys())
     num_vars = len(labels)
     
+    # Calculate angles for each dimension
     angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
-    angles += angles[:1]
+    angles += angles[:1]  # Complete the circle
     
+    # Get values
     self_values = [self_scores.get(dim, 0) or 0 for dim in labels]
     self_values += self_values[:1]
     
-    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
+    # Create figure with more space for labels
+    fig, ax = plt.subplots(figsize=(12, 12), subplot_kw=dict(polar=True))
     
-    ax.plot(angles, self_values, 'o-', linewidth=2.5, label='Self', color=COLOURS['primary_blue'])
-    ax.fill(angles, self_values, alpha=0.25, color=COLOURS['primary_blue'])
+    # Style the grid
+    ax.set_facecolor('white')
+    ax.spines['polar'].set_color('#CCCCCC')
+    ax.grid(color='#CCCCCC', linestyle='-', linewidth=0.5, alpha=0.7)
     
-    if combined_scores:
+    # Plot Self scores
+    ax.plot(angles, self_values, 'o-', linewidth=2.5, label='Self', 
+            color=COLOURS['primary_blue'], markersize=8)
+    ax.fill(angles, self_values, alpha=0.2, color=COLOURS['primary_blue'])
+    
+    # Plot Combined scores if available
+    if combined_scores and any(combined_scores.get(dim) for dim in labels):
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
-        ax.plot(angles, combined_values, 'o-', linewidth=2.5, label='Combined Others', color=COLOURS['orange'])
-        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['orange'])
+        ax.plot(angles, combined_values, 'o-', linewidth=2.5, label='Combined Others', 
+                color=COLOURS['orange'], markersize=8)
+        ax.fill(angles, combined_values, alpha=0.2, color=COLOURS['orange'])
     
-    # Position labels outside the chart
+    # Configure the chart
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels([])  # Remove default labels
+    ax.set_xticklabels([])  # We'll add custom labels
     
-    # Add labels manually, positioned outside
+    ax.set_ylim(0, 5)
+    ax.set_yticks([1, 2, 3, 4, 5])
+    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=10, color='#666666')
+    ax.set_rlabel_position(22.5)  # Position radial labels between spokes
+    
+    # Add dimension labels outside the chart
+    label_padding = 5.6  # Distance from center for labels
+    
     for i, (angle, label) in enumerate(zip(angles[:-1], labels)):
-        # Calculate position - push labels out beyond the chart
-        rotation = np.degrees(angle)
+        # Convert angle to degrees for text rotation
+        angle_deg = np.degrees(angle)
         
-        # Adjust alignment based on position
-        if angle == 0:
-            ha = 'center'
-            va = 'bottom'
-        elif 0 < angle < np.pi:
-            ha = 'left'
-            va = 'center'
-        elif angle == np.pi:
-            ha = 'center'
-            va = 'top'
-        else:
-            ha = 'right'
-            va = 'center'
+        # Determine text alignment based on position
+        if 80 < angle_deg < 100:  # Top
+            ha, va = 'center', 'bottom'
+        elif 260 < angle_deg < 280:  # Bottom
+            ha, va = 'center', 'top'
+        elif angle_deg <= 80 or angle_deg >= 280:  # Right side
+            ha, va = 'left', 'center'
+        else:  # Left side
+            ha, va = 'right', 'center'
         
-        # Position label outside the outer ring
-        ax.text(angle, 5.8, label, size=11, fontweight='bold',
+        ax.text(angle, label_padding, label, 
+                size=11, fontweight='bold', color='#333333',
                 ha=ha, va=va)
     
-    ax.set_ylim(0, 5.5)
-    ax.set_yticks([1, 2, 3, 4, 5])
-    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=10)
-    ax.set_rlabel_position(45)  # Move radial labels to avoid overlap
-    
-    if combined_scores:
-        ax.legend(loc='upper right', bbox_to_anchor=(1.15, 1.1), fontsize=11)
+    # Add legend at bottom
+    if combined_scores and any(combined_scores.get(dim) for dim in labels):
+        ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.12), 
+                  ncol=2, fontsize=12, frameon=False)
     
     plt.tight_layout()
-    plt.savefig(output_path, dpi=180, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=180, bbox_inches='tight', facecolor='white', 
+                edgecolor='none', pad_inches=0.3)
     plt.close()
 
 
