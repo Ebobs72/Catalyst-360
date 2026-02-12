@@ -127,10 +127,11 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     self_values = [self_scores.get(dim, 0) or 0 for dim in labels]
     self_values += self_values[:1]
     
-    # Create figure with more space for labels
-    fig, ax = plt.subplots(figsize=(14, 14), subplot_kw=dict(polar=True))
+    # Create figure - larger to accommodate labels
+    fig = plt.figure(figsize=(16, 16))
+    ax = fig.add_subplot(111, polar=True)
     
-    # Style the grid - more visible lines
+    # Style the grid
     ax.set_facecolor('white')
     ax.spines['polar'].set_color('#999999')
     ax.spines['polar'].set_linewidth(1.5)
@@ -149,48 +150,52 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
                 color=COLOURS['orange'], markersize=10)
         ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['orange'])
     
-    # Configure the chart
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels([])  # We'll add custom labels
-    
+    # Configure the chart - set limits BEFORE adding labels
     ax.set_ylim(0, 5)
     ax.set_yticks([1, 2, 3, 4, 5])
-    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=16, color='#333333', fontweight='bold')
-    ax.set_rlabel_position(22.5)  # Position radial labels between spokes
+    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=14, color='#333333', fontweight='bold')
+    ax.set_rlabel_position(22.5)
     
-    # Add dimension labels outside the chart
-    label_padding = 5.8  # Distance from center for labels
+    # Remove default x-axis labels
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels([])
     
+    # Use matplotlib's built-in label positioning but with custom text
+    # This ensures labels are placed correctly relative to spokes
     for i, (angle, label) in enumerate(zip(angles[:-1], labels)):
-        # Normalize angle to 0-360 degrees
-        angle_deg = np.degrees(angle) % 360
+        # Convert to degrees and normalize
+        angle_deg = np.degrees(angle)
+        while angle_deg < 0:
+            angle_deg += 360
+        angle_deg = angle_deg % 360
         
-        # Determine text alignment based on position around the circle
-        # Top quadrant (45-135 degrees)
-        if 45 < angle_deg < 135:
+        # Determine alignment based on position
+        if 60 <= angle_deg <= 120:  # Top
             ha, va = 'center', 'bottom'
-        # Bottom quadrant (225-315 degrees)
-        elif 225 < angle_deg < 315:
+        elif 240 <= angle_deg <= 300:  # Bottom  
             ha, va = 'center', 'top'
-        # Right side (315-360 or 0-45 degrees)
-        elif angle_deg >= 315 or angle_deg <= 45:
-            ha, va = 'left', 'center'
-        # Left side (135-225 degrees)
-        else:
+        elif 120 < angle_deg < 240:  # Left side
             ha, va = 'right', 'center'
+        else:  # Right side
+            ha, va = 'left', 'center'
         
-        ax.text(angle, label_padding, label, 
-                size=18, fontweight='bold', color='#333333',
-                ha=ha, va=va)
+        # Place label at fixed distance outside the chart
+        ax.text(angle, 5.8, label,
+                size=16, fontweight='bold', color='#333333',
+                ha=ha, va=va,
+                transform=ax.get_xaxis_transform())
     
-    # Add legend at bottom
+    # Add legend
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
-        ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.1), 
-                  ncol=2, fontsize=16, frameon=False)
+        ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.08), 
+                  ncol=2, fontsize=14, frameon=False)
     
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=200, bbox_inches='tight', facecolor='white', 
-                edgecolor='none', pad_inches=0.3)
+    # Adjust subplot to make room for labels
+    plt.subplots_adjust(left=0.15, right=0.85, top=0.9, bottom=0.1)
+    
+    # Save with extra padding
+    plt.savefig(output_path, dpi=200, bbox_inches='tight', facecolor='white',
+                pad_inches=0.8)
     plt.close()
 
 
