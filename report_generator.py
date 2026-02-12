@@ -116,20 +116,30 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     labels = list(dimensions.keys())
     num_vars = len(labels)
     
-    # Calculate angles - start at top (90 degrees / pi/2) and go CLOCKWISE
-    angles = []
-    for i in range(num_vars):
-        angle = np.pi/2 - (2 * np.pi * i / num_vars)
-        angles.append(angle)
+    # Calculate angles - start at top and go CLOCKWISE
+    # We need to go from 90 degrees (top) decreasing (clockwise)
+    angles_deg = [90 - (360 * i / num_vars) for i in range(num_vars)]
+    angles = [np.radians(a) for a in angles_deg]
     angles += angles[:1]  # Complete the circle
     
     # Get values
     self_values = [self_scores.get(dim, 0) or 0 for dim in labels]
     self_values += self_values[:1]
     
-    # Create figure - larger to accommodate labels
-    fig = plt.figure(figsize=(16, 16))
-    ax = fig.add_subplot(111, polar=True)
+    # Create figure
+    fig, ax = plt.subplots(figsize=(12, 12), subplot_kw=dict(polar=True))
+    
+    # Set theta to start from top and go clockwise
+    ax.set_theta_offset(np.pi / 2)  # Start from top
+    ax.set_theta_direction(-1)  # Go clockwise
+    
+    # Recalculate angles for clockwise from top (simpler now with direction set)
+    angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+    angles += angles[:1]
+    
+    # Get values again with new angle order
+    self_values = [self_scores.get(dim, 0) or 0 for dim in labels]
+    self_values += self_values[:1]
     
     # Style the grid
     ax.set_facecolor('white')
@@ -150,52 +160,26 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
                 color=COLOURS['orange'], markersize=10)
         ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['orange'])
     
-    # Configure the chart - set limits BEFORE adding labels
+    # Configure the chart
     ax.set_ylim(0, 5)
     ax.set_yticks([1, 2, 3, 4, 5])
     ax.set_yticklabels(['1', '2', '3', '4', '5'], size=14, color='#333333', fontweight='bold')
-    ax.set_rlabel_position(22.5)
+    ax.set_rlabel_position(30)
     
-    # Remove default x-axis labels
+    # Set the labels directly using matplotlib's built-in method
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels([])
+    ax.set_xticklabels(labels, size=14, fontweight='bold', color='#333333')
     
-    # Use matplotlib's built-in label positioning but with custom text
-    # This ensures labels are placed correctly relative to spokes
-    for i, (angle, label) in enumerate(zip(angles[:-1], labels)):
-        # Convert to degrees and normalize
-        angle_deg = np.degrees(angle)
-        while angle_deg < 0:
-            angle_deg += 360
-        angle_deg = angle_deg % 360
-        
-        # Determine alignment based on position
-        if 60 <= angle_deg <= 120:  # Top
-            ha, va = 'center', 'bottom'
-        elif 240 <= angle_deg <= 300:  # Bottom  
-            ha, va = 'center', 'top'
-        elif 120 < angle_deg < 240:  # Left side
-            ha, va = 'right', 'center'
-        else:  # Right side
-            ha, va = 'left', 'center'
-        
-        # Place label at fixed distance outside the chart
-        ax.text(angle, 5.8, label,
-                size=16, fontweight='bold', color='#333333',
-                ha=ha, va=va,
-                transform=ax.get_xaxis_transform())
+    # Adjust label padding
+    ax.tick_params(axis='x', pad=20)
     
     # Add legend
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
-        ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.08), 
+        ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.15), 
                   ncol=2, fontsize=14, frameon=False)
     
-    # Adjust subplot to make room for labels
-    plt.subplots_adjust(left=0.15, right=0.85, top=0.9, bottom=0.1)
-    
-    # Save with extra padding
-    plt.savefig(output_path, dpi=200, bbox_inches='tight', facecolor='white',
-                pad_inches=0.8)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white', pad_inches=0.3)
     plt.close()
 
 
