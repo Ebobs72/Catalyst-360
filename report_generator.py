@@ -170,8 +170,8 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels(labels, size=14, fontweight='bold', color='#333333')
     
-    # Adjust label padding
-    ax.tick_params(axis='x', pad=20)
+    # Adjust label padding - increase to push labels further from chart
+    ax.tick_params(axis='x', pad=35)
     
     # Add legend
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
