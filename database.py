@@ -2,26 +2,118 @@
 """
 Database module for the 360 Development Catalyst.
 
-Handles all data persistence using SQLite.
+Handles all data persistence using Turso (libSQL) for cloud hosting,
+with fallback to local SQLite for development.
 """
 
-import sqlite3
 import secrets
-import hashlib
 from datetime import datetime
 from pathlib import Path
 import json
+import os
+
+# Try to import libsql for Turso, fall back to sqlite3 for local dev
+try:
+    import libsql_experimental as libsql
+    USING_TURSO = True
+except ImportError:
+    import sqlite3
+    USING_TURSO = False
+
 
 class Database:
     def __init__(self, db_path="compass_360.db"):
+        """
+        Initialize database connection.
+        
+        If Turso credentials are available (via environment or Streamlit secrets),
+        connects to Turso cloud database. Otherwise falls back to local SQLite.
+        """
         self.db_path = db_path
+        self.turso_url = None
+        self.turso_token = None
+        
+        # Try to get Turso credentials
+        self._load_turso_credentials()
+        
         self.init_database()
+    
+    def _load_turso_credentials(self):
+        """Load Turso credentials from environment or Streamlit secrets."""
+        # Try Streamlit secrets first
+        try:
+            import streamlit as st
+            self.turso_url = st.secrets.get("turso", {}).get("url")
+            self.turso_token = st.secrets.get("turso", {}).get("token")
+        except:
+            pass
+        
+        # Fall back to environment variables
+        if not self.turso_url:
+            self.turso_url = os.environ.get("TURSO_DATABASE_URL")
+        if not self.turso_token:
+            self.turso_token = os.environ.get("TURSO_AUTH_TOKEN")
     
     def get_connection(self):
         """Get a database connection."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        if self.turso_url and self.turso_token and USING_TURSO:
+            # Connect to Turso cloud database
+            conn = libsql.connect(
+                database=self.turso_url,
+                auth_token=self.turso_token
+            )
+            return conn
+        else:
+            # Fall back to local SQLite
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+    
+    def _execute(self, query, params=None):
+        """Execute a query and return the cursor."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+        return conn, cursor
+    
+    def _fetchall(self, query, params=None):
+        """Execute a query and fetch all results as list of dicts."""
+        conn, cursor = self._execute(query, params)
+        
+        if USING_TURSO and self.turso_url and self.turso_token:
+            # libsql returns rows differently
+            rows = cursor.fetchall()
+            if rows and len(rows) > 0:
+                # Get column names from cursor description
+                columns = [desc[0] for desc in cursor.description]
+                result = [dict(zip(columns, row)) for row in rows]
+            else:
+                result = []
+        else:
+            result = [dict(row) for row in cursor.fetchall()]
+        
+        conn.close()
+        return result
+    
+    def _fetchone(self, query, params=None):
+        """Execute a query and fetch one result as dict."""
+        conn, cursor = self._execute(query, params)
+        row = cursor.fetchone()
+        
+        if row:
+            if USING_TURSO and self.turso_url and self.turso_token:
+                columns = [desc[0] for desc in cursor.description]
+                result = dict(zip(columns, row))
+            else:
+                result = dict(row)
+        else:
+            result = None
+        
+        conn.close()
+        return result
     
     def init_database(self):
         """Initialize the database schema."""
@@ -144,10 +236,7 @@ class Database:
     
     def get_all_leaders(self):
         """Get all leaders with their response counts."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
+        return self._fetchall("""
             SELECT 
                 l.*,
                 COUNT(DISTINCT r.id) as total_raters,
@@ -159,22 +248,10 @@ class Database:
             GROUP BY l.id
             ORDER BY l.name
         """)
-        
-        leaders = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
-        return leaders
     
     def get_leader(self, leader_id):
         """Get a specific leader by ID."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM leaders WHERE id = ?", (leader_id,))
-        leader = cursor.fetchone()
-        conn.close()
-        
-        return dict(leader) if leader else None
+        return self._fetchone("SELECT * FROM leaders WHERE id = ?", (leader_id,))
     
     def update_leader(self, leader_id, **kwargs):
         """Update leader details."""
@@ -199,10 +276,7 @@ class Database:
     
     def get_leaders_by_cohort(self, cohort_name):
         """Get all active leaders in a specific cohort."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
+        return self._fetchall("""
             SELECT l.*,
                    (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id) as total_raters,
                    (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.completed_at IS NOT NULL) as completed_raters,
@@ -211,11 +285,6 @@ class Database:
             WHERE l.status = 'active' AND l.cohort = ?
             ORDER BY l.name
         """, (cohort_name,))
-        
-        leaders = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
-        return leaders
     
     # ==========================================
     # RATER MANAGEMENT
@@ -245,10 +314,7 @@ class Database:
     
     def get_rater_by_token(self, token):
         """Get rater information by their unique token."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
+        return self._fetchone("""
             SELECT 
                 r.*,
                 l.name as leader_name,
@@ -258,18 +324,10 @@ class Database:
             JOIN leaders l ON r.leader_id = l.id
             WHERE r.token = ?
         """, (token,))
-        
-        rater = cursor.fetchone()
-        conn.close()
-        
-        return dict(rater) if rater else None
     
     def get_raters_for_leader(self, leader_id):
         """Get all raters for a specific leader."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
+        return self._fetchall("""
             SELECT *,
                 CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END as completed
             FROM raters
@@ -283,11 +341,6 @@ class Database:
                     ELSE 5 
                 END
         """, (leader_id,))
-        
-        raters = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
-        return raters
     
     def mark_rater_complete(self, rater_id):
         """Mark a rater as having completed their feedback."""
@@ -333,6 +386,7 @@ class Database:
             not_applicable = score == 'NA'
             actual_score = None if (no_opp or not_applicable) else int(score)
             
+            # Use INSERT OR REPLACE for SQLite compatibility
             cursor.execute("""
                 INSERT OR REPLACE INTO ratings (rater_id, item_number, score, no_opportunity, not_applicable)
                 VALUES (?, ?, ?, ?, ?)
@@ -383,13 +437,10 @@ class Database:
         Returns:
             Tuple of (data_dict, comments_dict) matching the report generator format
         """
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
         from framework import ITEMS, DIMENSIONS, ANONYMITY_THRESHOLD
         
         # Get response counts by relationship
-        cursor.execute("""
+        rows = self._fetchall("""
             SELECT relationship, COUNT(*) as count
             FROM raters
             WHERE leader_id = ? AND completed_at IS NOT NULL
@@ -399,13 +450,12 @@ class Database:
         raw_response_counts = {}
         relationship_map = {'Self': 'Self', 'Boss': 'Boss', 'Peers': 'Peers', 
                           'DRs': 'DRs', 'Others': 'Others'}
-        for row in cursor.fetchall():
+        for row in rows:
             raw_response_counts[relationship_map.get(row['relationship'], row['relationship'])] = row['count']
         
         # Determine which groups meet the anonymity threshold
-        # Self and Boss are always shown; others need >= ANONYMITY_THRESHOLD
-        visible_groups = ['Self', 'Boss']  # Always visible
-        hidden_groups = []  # Groups that will be folded into Others
+        visible_groups = ['Self', 'Boss']
+        hidden_groups = []
         
         for group in ['Peers', 'DRs', 'Others']:
             count = raw_response_counts.get(group, 0)
@@ -415,7 +465,6 @@ class Database:
                 hidden_groups.append(group)
         
         # Build response_counts for visible groups only
-        # Hidden groups get added to Others count
         response_counts = {}
         others_count = raw_response_counts.get('Others', 0)
         
@@ -428,14 +477,13 @@ class Database:
         if others_count > 0 or 'Others' in visible_groups:
             response_counts['Others'] = others_count
         
-        # Create a mapping for hidden groups -> Others
         def map_group(group):
             if group in hidden_groups:
                 return 'Others'
             return group
         
-        # Get all ratings grouped by item and relationship
-        cursor.execute("""
+        # Get all ratings
+        rating_rows = self._fetchall("""
             SELECT 
                 rt.item_number,
                 r.relationship,
@@ -446,8 +494,7 @@ class Database:
             WHERE r.leader_id = ? AND r.completed_at IS NOT NULL
         """, (leader_id,))
         
-        # Build the by_item structure with anonymity applied
-        # Now 47 items (1-45 dimensions, 46-47 overall)
+        # Build the by_item structure (47 items)
         by_item = {}
         no_opportunity = {}
         
@@ -455,10 +502,10 @@ class Database:
             by_item[item_num] = {'text': ITEMS.get(item_num, '')}
         
         # Collect scores by item and mapped group
-        item_scores = {}  # {item_num: {group: [scores]}}
-        item_no_opp = {}  # {item_num: {group: count}}
+        item_scores = {}
+        item_no_opp = {}
         
-        for row in cursor.fetchall():
+        for row in rating_rows:
             item_num = row['item_number']
             raw_group = relationship_map.get(row['relationship'], row['relationship'])
             mapped_group = map_group(raw_group)
@@ -483,7 +530,6 @@ class Database:
                     if scores:
                         by_item[item_num][group] = round(sum(scores) / len(scores), 1)
             
-            # Track no opportunity
             if item_num in item_no_opp:
                 total_no_opp = sum(item_no_opp[item_num].values())
                 if total_no_opp > 0:
@@ -498,7 +544,6 @@ class Database:
         # Calculate combined scores and gaps
         for item_num in by_item:
             item = by_item[item_num]
-            # Only include visible groups in Combined (excluding Self)
             other_scores = []
             for g in ['Boss', 'Peers', 'DRs', 'Others']:
                 if g in visible_groups or g == 'Others':
@@ -531,12 +576,11 @@ class Database:
                     by_dimension[dim_name]['Self'] - by_dimension[dim_name]['Combined'], 2
                 )
         
-        # Build overall items (now Q46 and Q47)
+        # Build overall items (Q46 and Q47)
         overall = {}
         for item_num in [46, 47]:
             overall[item_num] = by_item.get(item_num, {})
         
-        # Store info about hidden groups for reporting
         data = {
             'by_item': by_item,
             'by_dimension': by_dimension,
@@ -549,8 +593,8 @@ class Database:
             'anonymity_applied': len(hidden_groups) > 0
         }
         
-        # Get comments - also apply anonymity mapping
-        cursor.execute("""
+        # Get comments
+        comment_rows = self._fetchall("""
             SELECT c.section, c.comment_text, r.relationship
             FROM comments c
             JOIN raters r ON c.rater_id = r.id
@@ -563,7 +607,7 @@ class Database:
             'development': []
         }
         
-        for row in cursor.fetchall():
+        for row in comment_rows:
             section = row['section']
             raw_group = row['relationship']
             mapped_group = map_group(raw_group)
@@ -578,8 +622,6 @@ class Database:
                 if section not in comments['by_section']:
                     comments['by_section'][section] = []
                 comments['by_section'][section].append(comment)
-        
-        conn.close()
         
         return data, comments
     
@@ -598,17 +640,11 @@ class Database:
     
     def get_historical_data(self, leader_id, year):
         """Retrieve historical feedback data for a specific year."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
+        row = self._fetchone("""
             SELECT data_json FROM historical_scores
             WHERE leader_id = ? AND assessment_year = ?
             ORDER BY created_at DESC LIMIT 1
         """, (leader_id, year))
-        
-        row = cursor.fetchone()
-        conn.close()
         
         return json.loads(row['data_json']) if row else None
     
@@ -636,14 +672,7 @@ class Database:
     
     def get_all_cohorts(self):
         """Get all cohorts."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM cohorts ORDER BY name")
-        cohorts = [dict(row) for row in cursor.fetchall()]
-        
-        conn.close()
-        return cohorts
+        return self._fetchall("SELECT * FROM cohorts ORDER BY name")
     
     def delete_cohort(self, cohort_id):
         """Delete a cohort (doesn't affect leaders assigned to it)."""
@@ -661,10 +690,7 @@ class Database:
     
     def get_dashboard_stats(self):
         """Get overall statistics for the admin dashboard."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
+        return self._fetchone("""
             SELECT 
                 (SELECT COUNT(*) FROM leaders WHERE status = 'active') as total_leaders,
                 (SELECT COUNT(*) FROM raters) as total_raters,
@@ -673,8 +699,18 @@ class Database:
                  WHERE (SELECT COUNT(*) FROM raters r2 
                         WHERE r2.leader_id = r.leader_id AND r2.completed_at IS NOT NULL) >= 5) as ready_for_report
         """)
-        
-        stats = dict(cursor.fetchone())
-        conn.close()
-        
-        return stats
+    
+    def get_connection_info(self):
+        """Return info about the current database connection."""
+        if self.turso_url and self.turso_token and USING_TURSO:
+            return {
+                'type': 'Turso Cloud',
+                'url': self.turso_url,
+                'status': 'Connected'
+            }
+        else:
+            return {
+                'type': 'Local SQLite',
+                'path': self.db_path,
+                'status': 'Connected'
+            }
