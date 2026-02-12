@@ -117,8 +117,10 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     num_vars = len(labels)
     
     # Calculate angles - start at top (90 degrees / pi/2) and go CLOCKWISE
-    # By using negative step, we go clockwise instead of anticlockwise
-    angles = np.linspace(np.pi/2, np.pi/2 - 2*np.pi, num_vars, endpoint=False).tolist()
+    angles = []
+    for i in range(num_vars):
+        angle = np.pi/2 - (2 * np.pi * i / num_vars)
+        angles.append(angle)
     angles += angles[:1]  # Complete the circle
     
     # Get values
@@ -156,22 +158,26 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     ax.set_yticklabels(['1', '2', '3', '4', '5'], size=16, color='#333333', fontweight='bold')
     ax.set_rlabel_position(22.5)  # Position radial labels between spokes
     
-    # Add dimension labels outside the chart - LARGER TEXT
+    # Add dimension labels outside the chart
     label_padding = 5.8  # Distance from center for labels
     
     for i, (angle, label) in enumerate(zip(angles[:-1], labels)):
-        # Convert angle to degrees for positioning
+        # Normalize angle to 0-360 degrees
         angle_deg = np.degrees(angle) % 360
         
-        # Determine text alignment based on position
-        if 60 < angle_deg < 120:  # Top area
+        # Determine text alignment based on position around the circle
+        # Top quadrant (45-135 degrees)
+        if 45 < angle_deg < 135:
             ha, va = 'center', 'bottom'
-        elif 240 < angle_deg < 300:  # Bottom area
+        # Bottom quadrant (225-315 degrees)
+        elif 225 < angle_deg < 315:
             ha, va = 'center', 'top'
-        elif 120 <= angle_deg <= 240:  # Left side
-            ha, va = 'right', 'center'
-        else:  # Right side
+        # Right side (315-360 or 0-45 degrees)
+        elif angle_deg >= 315 or angle_deg <= 45:
             ha, va = 'left', 'center'
+        # Left side (135-225 degrees)
+        else:
+            ha, va = 'right', 'center'
         
         ax.text(angle, label_padding, label, 
                 size=18, fontweight='bold', color='#333333',
