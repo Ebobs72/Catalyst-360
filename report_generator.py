@@ -149,16 +149,16 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     
     # Plot Self scores
     ax.plot(angles, self_values, 'o-', linewidth=3, label='Self', 
-            color=COLOURS['primary_blue'], markersize=10)
-    ax.fill(angles, self_values, alpha=0.25, color=COLOURS['primary_blue'])
+            color=COLOURS['bentley_green'], markersize=10)
+    ax.fill(angles, self_values, alpha=0.25, color=COLOURS['bentley_green'])
     
     # Plot Combined scores if available
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
         ax.plot(angles, combined_values, 'o-', linewidth=3, label='Combined Others', 
-                color=COLOURS['orange'], markersize=10)
-        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['orange'])
+                color=COLOURS['bentley_gold'], markersize=10)
+        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['bentley_gold'])
     
     # Configure the chart
     ax.set_ylim(0, 5)
@@ -242,7 +242,7 @@ def create_self_only_bar(score, output_path):
     fig, ax = plt.subplots(figsize=(4.5, 0.8))
     
     if score is not None:
-        ax.barh([0], [score], color=COLOURS['primary_blue'], height=0.5)
+        ax.barh([0], [score], color=COLOURS['bentley_green'], height=0.5)
         # Place score at fixed right-aligned position
         ax.text(5.7, 0, f'{score:.1f}', va='center', ha='right', fontsize=12, fontweight='bold')
     
