@@ -115,6 +115,18 @@ class Database:
         conn.close()
         return result
     
+    def _safe_add_column(self, table, column, col_type):
+        """Safely add a column to a table if it doesn't exist."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            conn.commit()
+            conn.close()
+        except Exception:
+            # Column likely already exists
+            pass
+    
     def init_database(self):
         """Initialize the database schema."""
         conn = self.get_connection()
@@ -131,27 +143,24 @@ class Database:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 assessment_year INTEGER DEFAULT 1,
                 status TEXT DEFAULT 'active',
-                portal_token TEXT UNIQUE,
+                portal_token TEXT,
                 portal_email_sent_at TIMESTAMP,
                 nomination_reminder_sent_at TIMESTAMP
             )
         """)
         
+        conn.commit()
+        conn.close()
+        
         # Migration: Add portal columns if they don't exist (for existing databases)
-        try:
-            cursor.execute("ALTER TABLE leaders ADD COLUMN portal_token TEXT UNIQUE")
-        except:
-            pass  # Column already exists
+        # Run each in separate connection to ensure proper commit
+        self._safe_add_column("leaders", "portal_token", "TEXT")
+        self._safe_add_column("leaders", "portal_email_sent_at", "TIMESTAMP")
+        self._safe_add_column("leaders", "nomination_reminder_sent_at", "TIMESTAMP")
         
-        try:
-            cursor.execute("ALTER TABLE leaders ADD COLUMN portal_email_sent_at TIMESTAMP")
-        except:
-            pass  # Column already exists
-        
-        try:
-            cursor.execute("ALTER TABLE leaders ADD COLUMN nomination_reminder_sent_at TIMESTAMP")
-        except:
-            pass  # Column already exists
+        # Continue with rest of schema
+        conn = self.get_connection()
+        cursor = conn.cursor()
         
         # Raters table (people providing feedback)
         cursor.execute("""
@@ -329,11 +338,16 @@ class Database:
         
         token = secrets.token_urlsafe(8)  # Generates 11 characters
         
-        cursor.execute("""
-            UPDATE leaders SET portal_token = ? WHERE id = ?
-        """, (token, leader_id))
+        try:
+            cursor.execute("""
+                UPDATE leaders SET portal_token = ? WHERE id = ?
+            """, (token, leader_id))
+            
+            conn.commit()
+        except Exception as e:
+            conn.close()
+            raise Exception(f"Failed to set portal token: {str(e)}. The portal_token column may not exist.")
         
-        conn.commit()
         conn.close()
         
         return token
