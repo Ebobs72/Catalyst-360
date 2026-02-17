@@ -26,10 +26,10 @@ except ImportError:
 
 # Rater requirements
 RATER_REQUIREMENTS = {
-    'Boss': {'min': 1, 'max': 2, 'suggested': 1, 'required_nomination': True},
-    'Peers': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True},
-    'DRs': {'min': 0, 'max': 10, 'suggested': 5, 'required_nomination': False},  # 0 if no direct reports
-    'Others': {'min': 0, 'max': 10, 'suggested': 0, 'required_nomination': False}
+    'Boss': {'min': 1, 'max': 2, 'suggested': 1, 'required_nomination': True, 'show_minimum': True},
+    'Peers': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True, 'show_minimum': True},
+    'DRs': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True, 'show_minimum': True},
+    'Others': {'min': 0, 'max': 10, 'suggested': 0, 'required_nomination': False, 'show_minimum': False}
 }
 
 
@@ -63,17 +63,17 @@ def render_leader_portal(db, leader_info):
     
     st.markdown("---")
     
-    # Tabs for different sections
-    tab1, tab2, tab3 = st.tabs(["📝 Nominate Raters", "📊 Response Progress", "ℹ️ Guidelines"])
+    # Tabs for different sections - Guidelines first so they read instructions
+    tab1, tab2, tab3 = st.tabs(["ℹ️ Guidelines", "📝 Nominate Raters", "📊 Response Progress"])
     
     with tab1:
-        render_nomination_section(db, leader_info, other_raters)
+        render_guidelines_section()
     
     with tab2:
-        render_progress_section(db, leader_info, other_raters)
+        render_nomination_section(db, leader_info, other_raters)
     
     with tab3:
-        render_guidelines_section()
+        render_progress_section(db, leader_info, other_raters)
 
 
 def render_status_overview(self_rater, other_raters):
@@ -131,11 +131,11 @@ def render_nomination_section(db, leader_info, existing_raters):
             count = rater_counts[cat]
             
             # Determine status
-            if cat == 'DRs' and count == 0:
-                # DRs are optional if leader has no direct reports
-                status_icon = "○"
-                status_color = "#666"
-                status_text = "Optional"
+            if cat == 'Others':
+                # Others is always optional
+                status_icon = "✓" if count > 0 else "○"
+                status_color = "#024731" if count > 0 else "#666"
+                status_text = f"{count} nominated" if count > 0 else "Optional"
             elif count >= req['min']:
                 status_icon = "✓"
                 status_color = "#024731"
@@ -144,7 +144,7 @@ def render_nomination_section(db, leader_info, existing_raters):
                 status_icon = "⚠️"
                 status_color = "#B8860B"
                 status_text = f"{count}/{req['min']} minimum"
-                if req['required_nomination']:
+                if req.get('required_nomination', True):
                     all_requirements_met = False
             
             st.markdown(f"""
