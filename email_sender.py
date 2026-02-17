@@ -548,3 +548,339 @@ def send_bulk_reminders(raters, leader_name, base_url, db):
                 failed += 1
     
     return sent, failed, results
+
+
+# ============================================
+# LEADER PORTAL EMAILS
+# ============================================
+
+def _get_portal_invitation_html(leader_name, portal_url):
+    """Generate HTML for leader portal invitation email (post Module 1)."""
+    
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 20px 0;">
+        <tr>
+            <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #024731 0%, #035D40 100%); padding: 30px 40px; text-align: center;">
+                            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                                YOUR 360 FEEDBACK PORTAL
+                            </h1>
+                            <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0 0; font-size: 14px;">
+                                Bentley Compass Leadership Programme
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding: 40px;">
+                            <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                Dear {leader_name},
+                            </p>
+                            
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                                Following Module 1, it's now time to set up your 360-degree feedback. This involves 
+                                nominating colleagues who will provide feedback on your leadership.
+                            </p>
+                            
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                                Click the button below to access your personal portal where you can add your raters.
+                            </p>
+                            
+                            <!-- CTA Button -->
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td align="center" style="padding: 20px 0;">
+                                        <a href="{portal_url}" 
+                                           style="display: inline-block; background: linear-gradient(135deg, #024731 0%, #035D40 100%); 
+                                                  color: #ffffff; text-decoration: none; padding: 16px 40px; 
+                                                  border-radius: 6px; font-size: 16px; font-weight: 600;
+                                                  letter-spacing: 0.5px;">
+                                            Access Your Portal
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <!-- Requirements Box -->
+                            <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #024731;">
+                                <p style="color: #024731; font-weight: 600; margin: 0 0 12px 0;">
+                                    Who should you nominate?
+                                </p>
+                                <table style="width: 100%; color: #666; font-size: 14px; line-height: 1.8;">
+                                    <tr>
+                                        <td style="padding: 4px 0;"><strong>Line Manager:</strong></td>
+                                        <td style="padding: 4px 0;">1 required (max 2 if you have matrix reporting)</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 4px 0;"><strong>Peers:</strong></td>
+                                        <td style="padding: 4px 0;">Minimum 3, suggest 5 (colleagues at same level)</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 4px 0;"><strong>Direct Reports:</strong></td>
+                                        <td style="padding: 4px 0;">Minimum 3, suggest 5 (if applicable)</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 4px 0;"><strong>Others:</strong></td>
+                                        <td style="padding: 4px 0;">Optional (stakeholders, customers, etc.)</td>
+                                    </tr>
+                                </table>
+                                <p style="color: #888; font-size: 13px; margin: 12px 0 0 0; font-style: italic;">
+                                    We require minimum 3 in Peers and Direct Reports to ensure anonymity of responses.
+                                </p>
+                            </div>
+                            
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 20px 0;">
+                                Once you've added your raters, they will automatically receive an invitation email 
+                                with a link to complete their feedback. You can track progress and send reminders 
+                                from your portal.
+                            </p>
+                            
+                            <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
+                                If the button doesn't work, copy and paste this link into your browser:<br>
+                                <a href="{portal_url}" style="color: #024731; word-break: break-all;">{portal_url}</a>
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
+                            <p style="color: #999; font-size: 12px; margin: 0;">
+                                This is an automated message from The Development Catalyst.<br>
+                                If you have any questions, please contact your programme coordinator.
+                            </p>
+                        </td>
+                    </tr>
+                    
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
+def _get_leader_nomination_reminder_html(leader_name, portal_url, nominated_count):
+    """Generate HTML for leader nomination reminder email."""
+    
+    message = "You haven't added any raters yet." if nominated_count == 0 else f"You've nominated {nominated_count} rater(s) so far, but we recommend at least 8-10 for comprehensive feedback."
+    
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 20px 0;">
+        <tr>
+            <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #B8860B 0%, #D4A017 100%); padding: 30px 40px; text-align: center;">
+                            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                                REMINDER: NOMINATE YOUR RATERS
+                            </h1>
+                            <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px;">
+                                Bentley Compass Leadership Programme
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding: 40px;">
+                            <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                Dear {leader_name},
+                            </p>
+                            
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                                This is a friendly reminder to nominate your 360-degree feedback raters. 
+                                {message}
+                            </p>
+                            
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 30px 0;">
+                                Please add your raters as soon as possible to give them enough time to complete their feedback before Module 2.
+                            </p>
+                            
+                            <!-- CTA Button -->
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td align="center" style="padding: 20px 0;">
+                                        <a href="{portal_url}" 
+                                           style="display: inline-block; background: linear-gradient(135deg, #024731 0%, #035D40 100%); 
+                                                  color: #ffffff; text-decoration: none; padding: 16px 40px; 
+                                                  border-radius: 6px; font-size: 16px; font-weight: 600;
+                                                  letter-spacing: 0.5px;">
+                                            Add Raters Now
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
+                                If the button doesn't work, copy and paste this link into your browser:<br>
+                                <a href="{portal_url}" style="color: #024731; word-break: break-all;">{portal_url}</a>
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
+                            <p style="color: #999; font-size: 12px; margin: 0;">
+                                This is an automated message from The Development Catalyst.<br>
+                                If you have any questions, please contact your programme coordinator.
+                            </p>
+                        </td>
+                    </tr>
+                    
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
+def send_portal_invitation(leader, base_url, db):
+    """
+    Send portal invitation email to a leader.
+    
+    Args:
+        leader: Leader dict with id, name, email, portal_token
+        base_url: Base URL for the app
+        db: Database instance for logging
+    
+    Returns:
+        (success: bool, message: str)
+    """
+    if not leader.get('email'):
+        return False, "No email address"
+    
+    if not leader.get('portal_token'):
+        # Generate token if not exists
+        token = db.generate_portal_token(leader['id'])
+    else:
+        token = leader['portal_token']
+    
+    portal_url = f"{base_url}?portal={token}"
+    
+    subject = "Your 360 Feedback Portal — Bentley Compass"
+    html = _get_portal_invitation_html(leader['name'], portal_url)
+    
+    success, message = _send_email(
+        leader['email'],
+        leader['name'],
+        subject,
+        html
+    )
+    
+    # Log the email and mark as sent
+    if db:
+        db.log_email(
+            leader_id=leader['id'],
+            email_type='portal_invitation',
+            to_email=leader['email'],
+            success=success,
+            message=message
+        )
+        if success:
+            db.mark_portal_email_sent(leader['id'])
+    
+    return success, message
+
+
+def send_leader_nomination_reminder(leader, base_url, db):
+    """
+    Send nomination reminder email to a leader who hasn't added enough raters.
+    
+    Args:
+        leader: Leader dict with id, name, email, portal_token
+        base_url: Base URL for the app
+        db: Database instance
+    
+    Returns:
+        (success: bool, message: str)
+    """
+    if not leader.get('email'):
+        return False, "No email address"
+    
+    if not leader.get('portal_token'):
+        return False, "No portal token"
+    
+    portal_url = f"{base_url}?portal={leader['portal_token']}"
+    nominated_count = leader.get('nominated_count', 0)
+    
+    subject = "Reminder: Nominate Your 360 Raters — Bentley Compass"
+    html = _get_leader_nomination_reminder_html(leader['name'], portal_url, nominated_count)
+    
+    success, message = _send_email(
+        leader['email'],
+        leader['name'],
+        subject,
+        html
+    )
+    
+    # Log the email and mark reminder sent
+    if db:
+        db.log_email(
+            leader_id=leader['id'],
+            email_type='nomination_reminder',
+            to_email=leader['email'],
+            success=success,
+            message=message
+        )
+        if success:
+            db.mark_nomination_reminder_sent(leader['id'])
+    
+    return success, message
+
+
+def send_bulk_portal_invitations(leaders, base_url, db):
+    """
+    Send portal invitation emails to multiple leaders.
+    
+    Args:
+        leaders: List of leader dicts
+        base_url: Base URL for the app
+        db: Database instance
+    
+    Returns:
+        (sent_count, failed_count, results)
+    """
+    sent = 0
+    failed = 0
+    results = []
+    
+    for leader in leaders:
+        if leader.get('email'):
+            success, message = send_portal_invitation(leader, base_url, db)
+            results.append({
+                'leader': leader['name'],
+                'success': success,
+                'message': message
+            })
+            if success:
+                sent += 1
+            else:
+                failed += 1
+    
+    return sent, failed, results
