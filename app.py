@@ -28,6 +28,7 @@ from database import Database
 from feedback_form import render_feedback_form
 from admin_dashboard import render_admin_dashboard
 from report_generator import generate_all_reports
+from leader_portal import render_leader_portal
 
 # Page config
 st.set_page_config(
@@ -310,6 +311,10 @@ def get_route():
     if 'token' in params:
         return 'feedback', params['token']
     
+    # Check for leader portal
+    if 'portal' in params:
+        return 'portal', params['portal']
+    
     # Check for admin access
     if 'admin' in params:
         return 'admin', None
@@ -364,6 +369,14 @@ def main():
                 render_feedback_form(db, rater_info)
         else:
             st.error("Invalid or expired feedback link. Please contact your programme coordinator.")
+    
+    elif route == 'portal':
+        # Validate portal token and show leader portal
+        leader_info = db.get_leader_by_portal_token(param)
+        if leader_info:
+            render_leader_portal(db, leader_info)
+        else:
+            st.error("Invalid or expired portal link. Please contact your programme coordinator.")
     
     elif route == 'admin':
         render_admin_dashboard(db)
