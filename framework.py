@@ -140,26 +140,29 @@ GROUP_DISPLAY = {
 }
 
 # ============================================
-# COLOURS
+# COLOURS - Bentley Brand Palette
 # ============================================
 
 COLOURS = {
-    'primary_green': '#024731',
-    'primary_blue': '#1B365D',
-    'orange': '#D35400',
-    'green': '#27AE60',
-    'purple': '#8E44AD',
-    'gold': '#C5A028',
+    'bentley_green': '#024731',      # Primary Bentley green
+    'bentley_gold': '#B8860B',       # Bentley gold
+    'bentley_cream': '#F5F5DC',      # Bentley cream
+    'bentley_charcoal': '#2C2C2C',   # Bentley charcoal
+    'forest_green': '#035D40',       # Lighter green
+    'deep_teal': '#0A5E55',          # Teal accent
+    'burgundy': '#722F37',           # Burgundy accent
+    'slate': '#4A5568',              # Slate grey
     'light_grey': '#F5F5F5',
     'dark_grey': '#333333',
 }
 
+# Group colours for bar charts - Bentley-appropriate palette
 GROUP_COLOURS = {
-    'Self': COLOURS['primary_blue'],
-    'Boss': COLOURS['orange'],
-    'Peers': COLOURS['green'],
-    'DRs': COLOURS['purple'],
-    'Others': COLOURS['gold'],
+    'Self': COLOURS['bentley_green'],    # Deep green for Self
+    'Boss': COLOURS['burgundy'],          # Burgundy for Boss
+    'Peers': COLOURS['deep_teal'],        # Teal for Peers
+    'DRs': COLOURS['bentley_gold'],       # Gold for Direct Reports
+    'Others': COLOURS['slate'],           # Slate for Others
 }
 
 # ============================================
