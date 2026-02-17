@@ -137,6 +137,22 @@ class Database:
             )
         """)
         
+        # Migration: Add portal columns if they don't exist (for existing databases)
+        try:
+            cursor.execute("ALTER TABLE leaders ADD COLUMN portal_token TEXT UNIQUE")
+        except:
+            pass  # Column already exists
+        
+        try:
+            cursor.execute("ALTER TABLE leaders ADD COLUMN portal_email_sent_at TIMESTAMP")
+        except:
+            pass  # Column already exists
+        
+        try:
+            cursor.execute("ALTER TABLE leaders ADD COLUMN nomination_reminder_sent_at TIMESTAMP")
+        except:
+            pass  # Column already exists
+        
         # Raters table (people providing feedback)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS raters (
