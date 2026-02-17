@@ -130,7 +130,10 @@ class Database:
                 cohort TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 assessment_year INTEGER DEFAULT 1,
-                status TEXT DEFAULT 'active'
+                status TEXT DEFAULT 'active',
+                portal_token TEXT UNIQUE,
+                portal_email_sent_at TIMESTAMP,
+                nomination_reminder_sent_at TIMESTAMP
             )
         """)
         
@@ -274,7 +277,8 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        valid_fields = ['name', 'email', 'dealership', 'cohort', 'assessment_year', 'status']
+        valid_fields = ['name', 'email', 'dealership', 'cohort', 'assessment_year', 'status', 
+                       'portal_token', 'portal_email_sent_at', 'nomination_reminder_sent_at']
         updates = {k: v for k, v in kwargs.items() if k in valid_fields}
         
         if updates:
@@ -301,6 +305,83 @@ class Database:
             WHERE l.status = 'active' AND l.cohort = ?
             ORDER BY l.name
         """, (cohort_name,))
+    
+    def generate_portal_token(self, leader_id):
+        """Generate a unique portal token for a leader."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        token = secrets.token_urlsafe(8)  # Generates 11 characters
+        
+        cursor.execute("""
+            UPDATE leaders SET portal_token = ? WHERE id = ?
+        """, (token, leader_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return token
+    
+    def get_leader_by_portal_token(self, token):
+        """Get leader information by their portal token."""
+        return self._fetchone("""
+            SELECT 
+                l.*,
+                (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id) as total_raters,
+                (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.completed_at IS NOT NULL) as completed_raters,
+                (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.relationship = 'Self' AND r.completed_at IS NOT NULL) as self_completed
+            FROM leaders l
+            WHERE l.portal_token = ? AND l.status = 'active'
+        """, (token,))
+    
+    def mark_portal_email_sent(self, leader_id):
+        """Mark that the portal invitation email has been sent."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE leaders SET portal_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?
+        """, (leader_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    def mark_nomination_reminder_sent(self, leader_id):
+        """Mark that a nomination reminder has been sent."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE leaders SET nomination_reminder_sent_at = CURRENT_TIMESTAMP WHERE id = ?
+        """, (leader_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_leaders_needing_portal_email(self):
+        """Get leaders who have completed self-assessment but haven't received portal email."""
+        return self._fetchall("""
+            SELECT l.*
+            FROM leaders l
+            JOIN raters r ON l.id = r.leader_id
+            WHERE l.status = 'active'
+              AND l.portal_email_sent_at IS NULL
+              AND r.relationship = 'Self'
+              AND r.completed_at IS NOT NULL
+        """)
+    
+    def get_leaders_needing_nomination_reminder(self, days_since_portal_email=7):
+        """Get leaders who received portal email but haven't nominated minimum raters."""
+        return self._fetchall("""
+            SELECT l.*,
+                   (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.relationship != 'Self') as nominated_count
+            FROM leaders l
+            WHERE l.status = 'active'
+              AND l.portal_email_sent_at IS NOT NULL
+              AND (l.nomination_reminder_sent_at IS NULL 
+                   OR julianday('now') - julianday(l.nomination_reminder_sent_at) > ?)
+              AND (SELECT COUNT(*) FROM raters r WHERE r.leader_id = l.id AND r.relationship != 'Self') < 5
+        """, (days_since_portal_email,))
     
     # ==========================================
     # RATER MANAGEMENT
