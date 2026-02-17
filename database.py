@@ -211,6 +211,22 @@ class Database:
             )
         """)
         
+        # Email log table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS email_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rater_id INTEGER,
+                leader_id INTEGER,
+                email_type TEXT NOT NULL,
+                to_email TEXT NOT NULL,
+                success BOOLEAN NOT NULL,
+                message TEXT,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (rater_id) REFERENCES raters(id),
+                FOREIGN KEY (leader_id) REFERENCES leaders(id)
+            )
+        """)
+        
         conn.commit()
         conn.close()
     
@@ -325,6 +341,18 @@ class Database:
             WHERE r.token = ?
         """, (token,))
     
+    def get_rater(self, rater_id):
+        """Get a specific rater by ID."""
+        return self._fetchone("""
+            SELECT 
+                r.*,
+                l.name as leader_name,
+                CASE WHEN r.completed_at IS NOT NULL THEN 1 ELSE 0 END as completed
+            FROM raters r
+            JOIN leaders l ON r.leader_id = l.id
+            WHERE r.id = ?
+        """, (rater_id,))
+    
     def get_raters_for_leader(self, leader_id):
         """Get all raters for a specific leader."""
         return self._fetchall("""
@@ -341,6 +369,35 @@ class Database:
                     ELSE 5 
                 END
         """, (leader_id,))
+    
+    def update_rater(self, rater_id, **kwargs):
+        """Update rater details (name, email)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        valid_fields = ['name', 'email']
+        updates = {k: v for k, v in kwargs.items() if k in valid_fields}
+        
+        if updates:
+            set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+            values = tuple(list(updates.values()) + [rater_id])
+            
+            cursor.execute(f"UPDATE raters SET {set_clause} WHERE id = ?", values)
+            conn.commit()
+        
+        conn.close()
+    
+    def update_rater_reminder_sent(self, rater_id):
+        """Update the reminder_sent_at timestamp for a rater."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE raters SET reminder_sent_at = CURRENT_TIMESTAMP WHERE id = ?
+        """, (rater_id,))
+        
+        conn.commit()
+        conn.close()
     
     def mark_rater_complete(self, rater_id):
         """Mark a rater as having completed their feedback."""
@@ -421,6 +478,68 @@ class Database:
         self.submit_ratings(rater_id, ratings)
         self.submit_comments(rater_id, comments)
         self.mark_rater_complete(rater_id)
+    
+    # ==========================================
+    # EMAIL LOGGING
+    # ==========================================
+    
+    def log_email(self, email_type, to_email, success, message=None, rater_id=None, leader_id=None):
+        """
+        Log an email send attempt.
+        
+        Args:
+            email_type: 'invitation', 'reminder', or 'leader_notification'
+            to_email: Recipient email address
+            success: Boolean indicating if send was successful
+            message: Optional status message
+            rater_id: Optional rater ID (for rater emails)
+            leader_id: Optional leader ID (for leader notifications)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO email_log (rater_id, leader_id, email_type, to_email, success, message)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (rater_id, leader_id, email_type, to_email, success, message))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_email_log_for_leader(self, leader_id, limit=50):
+        """Get email log entries for a leader's raters."""
+        return self._fetchall("""
+            SELECT 
+                el.*,
+                r.name as rater_name,
+                r.relationship
+            FROM email_log el
+            LEFT JOIN raters r ON el.rater_id = r.id
+            WHERE el.leader_id = ? OR r.leader_id = ?
+            ORDER BY el.sent_at DESC
+            LIMIT ?
+        """, (leader_id, leader_id, limit))
+    
+    def get_last_email_for_rater(self, rater_id):
+        """Get the most recent email sent to a rater."""
+        return self._fetchone("""
+            SELECT * FROM email_log
+            WHERE rater_id = ?
+            ORDER BY sent_at DESC
+            LIMIT 1
+        """, (rater_id,))
+    
+    def get_email_stats_for_leader(self, leader_id):
+        """Get email statistics for a leader's assessment."""
+        return self._fetchone("""
+            SELECT 
+                COUNT(DISTINCT CASE WHEN el.email_type = 'invitation' AND el.success = 1 THEN el.rater_id END) as invitations_sent,
+                COUNT(DISTINCT CASE WHEN el.email_type = 'reminder' AND el.success = 1 THEN el.rater_id END) as reminders_sent,
+                (SELECT COUNT(*) FROM raters WHERE leader_id = ? AND email IS NOT NULL) as raters_with_email
+            FROM email_log el
+            JOIN raters r ON el.rater_id = r.id
+            WHERE r.leader_id = ?
+        """, (leader_id, leader_id))
     
     # ==========================================
     # DATA RETRIEVAL FOR REPORTS
