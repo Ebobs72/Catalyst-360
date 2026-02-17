@@ -645,83 +645,7 @@ def render_links_tab(db):
     
     raters = db.get_raters_for_leader(selected_leader_id)
     
-    if not raters:
-        st.info("No raters added yet for this leader.")
-        return
-    
-    # Email action buttons (if email is configured)
-    if email_configured:
-        st.markdown("**📧 Email Actions**")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        # Count raters with emails
-        raters_with_email = [r for r in raters if r.get('email')]
-        incomplete_with_email = [r for r in raters_with_email if not r.get('completed')]
-        
-        with col1:
-            if st.button(f"📤 Send All Invitations ({len(raters_with_email)})", 
-                        disabled=len(raters_with_email) == 0,
-                        help="Send invitation emails to all raters with email addresses"):
-                with st.spinner("Sending invitations..."):
-                    sent, failed, results = send_bulk_invitations(
-                        raters_with_email, 
-                        selected_leader['name'], 
-                        base_url, 
-                        db
-                    )
-                    if sent > 0:
-                        st.success(f"✅ Sent {sent} invitation(s)")
-                    if failed > 0:
-                        st.warning(f"⚠️ {failed} failed to send")
-                        for r in results:
-                            if not r['success']:
-                                st.caption(f"  • {r['rater']}: {r['message']}")
-        
-        with col2:
-            if st.button(f"🔔 Send Reminders ({len(incomplete_with_email)})", 
-                        disabled=len(incomplete_with_email) == 0,
-                        help="Send reminders to incomplete raters with email addresses"):
-                with st.spinner("Sending reminders..."):
-                    sent, failed, results = send_bulk_reminders(
-                        incomplete_with_email, 
-                        selected_leader['name'], 
-                        base_url, 
-                        db
-                    )
-                    if sent > 0:
-                        st.success(f"✅ Sent {sent} reminder(s)")
-                    if failed > 0:
-                        st.warning(f"⚠️ {failed} failed to send")
-        
-        with col3:
-            # Show email log
-            if st.button("📋 View Email Log"):
-                st.session_state[f'show_email_log_{selected_leader_id}'] = True
-        
-        # Email log display
-        if st.session_state.get(f'show_email_log_{selected_leader_id}'):
-            email_log = db.get_email_log_for_leader(selected_leader_id, limit=20)
-            if email_log:
-                st.markdown("**Recent Emails**")
-                log_df = pd.DataFrame([{
-                    'Time': e['sent_at'][:16] if e.get('sent_at') else '',
-                    'Type': e['email_type'],
-                    'To': e['to_email'],
-                    'Status': '✓' if e['success'] else '✗',
-                    'Rater': e.get('rater_name') or '-'
-                } for e in email_log])
-                st.dataframe(log_df, use_container_width=True, hide_index=True)
-                
-                if st.button("Hide Log"):
-                    st.session_state[f'show_email_log_{selected_leader_id}'] = False
-                    st.rerun()
-            else:
-                st.info("No emails sent yet for this leader.")
-        
-        st.markdown("---")
-    
-    # Group raters by relationship
+    # Group raters by relationship (needed for both display and export)
     raters_by_group = {}
     for rater in raters:
         rel = rater['relationship']
@@ -729,113 +653,282 @@ def render_links_tab(db):
             raters_by_group[rel] = []
         raters_by_group[rel].append(rater)
     
-    # Display raters table
-    for rel in ['Self', 'Boss', 'Peers', 'DRs', 'Others']:
-        if rel not in raters_by_group:
-            continue
-        
-        st.markdown(f"**{GROUP_DISPLAY.get(rel, rel)}** ({len(raters_by_group[rel])})")
-        
-        for i, rater in enumerate(raters_by_group[rel], 1):
-            link = f"{base_url}?t={rater['token']}"
+    if not raters:
+        st.info("No raters added yet for this leader. Use the forms above or bulk import below.")
+    else:
+        # Email action buttons (if email is configured)
+        if email_configured:
+            st.markdown("**📧 Email Actions**")
             
-            # Determine status
-            if rater['completed']:
-                status_icon = "✅"
-                status_text = "Complete"
-            else:
-                status_icon = "⏳"
-                status_text = "Pending"
+            col1, col2, col3 = st.columns(3)
             
-            # Get last email info
-            has_email = bool(rater.get('email'))
-            
-            # Layout: Name | Email | Status | Actions
-            col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 2, 0.5])
+            # Count raters with emails
+            raters_with_email = [r for r in raters if r.get('email')]
+            incomplete_with_email = [r for r in raters_with_email if not r.get('completed')]
             
             with col1:
-                display_name = rater.get('name') or f"{GROUP_DISPLAY.get(rel, rel)} {i}"
-                st.write(f"{status_icon} {display_name}")
+                if st.button(f"📤 Send All Invitations ({len(raters_with_email)})", 
+                            disabled=len(raters_with_email) == 0,
+                            help="Send invitation emails to all raters with email addresses"):
+                    with st.spinner("Sending invitations..."):
+                        sent, failed, results = send_bulk_invitations(
+                            raters_with_email, 
+                            selected_leader['name'], 
+                            base_url, 
+                            db
+                        )
+                        if sent > 0:
+                            st.success(f"✅ Sent {sent} invitation(s)")
+                        if failed > 0:
+                            st.warning(f"⚠️ {failed} failed to send")
+                            for r in results:
+                                if not r['success']:
+                                    st.caption(f"  • {r['rater']}: {r['message']}")
             
             with col2:
-                if has_email:
-                    st.caption(f"📧 {rater['email']}")
-                else:
-                    # Allow adding email
-                    if st.session_state.get(f'edit_email_{rater["id"]}'):
-                        new_email = st.text_input(
-                            "Email", 
-                            key=f"email_input_{rater['id']}", 
-                            label_visibility="collapsed",
-                            placeholder="Enter email"
+                if st.button(f"🔔 Send Reminders ({len(incomplete_with_email)})", 
+                            disabled=len(incomplete_with_email) == 0,
+                            help="Send reminders to incomplete raters with email addresses"):
+                    with st.spinner("Sending reminders..."):
+                        sent, failed, results = send_bulk_reminders(
+                            incomplete_with_email, 
+                            selected_leader['name'], 
+                            base_url, 
+                            db
                         )
-                        if st.button("Save", key=f"save_email_{rater['id']}"):
-                            if new_email:
-                                db.update_rater(rater['id'], email=new_email)
-                                st.session_state[f'edit_email_{rater["id"]}'] = False
-                                st.rerun()
-                    else:
-                        if st.button("+ Add email", key=f"add_email_{rater['id']}", 
-                                    type="secondary", use_container_width=True):
-                            st.session_state[f'edit_email_{rater["id"]}'] = True
-                            st.rerun()
+                        if sent > 0:
+                            st.success(f"✅ Sent {sent} reminder(s)")
+                        if failed > 0:
+                            st.warning(f"⚠️ {failed} failed to send")
             
             with col3:
-                if rater['completed']:
-                    st.markdown(f"<span style='color: green;'>Complete</span>", unsafe_allow_html=True)
+                # Show email log
+                if st.button("📋 View Email Log"):
+                    st.session_state[f'show_email_log_{selected_leader_id}'] = True
+            
+            # Email log display
+            if st.session_state.get(f'show_email_log_{selected_leader_id}'):
+                email_log = db.get_email_log_for_leader(selected_leader_id, limit=20)
+                if email_log:
+                    st.markdown("**Recent Emails**")
+                    log_df = pd.DataFrame([{
+                        'Time': e['sent_at'][:16] if e.get('sent_at') else '',
+                        'Type': e['email_type'],
+                        'To': e['to_email'],
+                        'Status': '✓' if e['success'] else '✗',
+                        'Rater': e.get('rater_name') or '-'
+                    } for e in email_log])
+                    st.dataframe(log_df, use_container_width=True, hide_index=True)
+                    
+                    if st.button("Hide Log"):
+                        st.session_state[f'show_email_log_{selected_leader_id}'] = False
+                        st.rerun()
                 else:
-                    st.markdown(f"<span style='color: orange;'>Pending</span>", unsafe_allow_html=True)
+                    st.info("No emails sent yet for this leader.")
             
-            with col4:
-                if email_configured and has_email and not rater['completed']:
-                    btn_col1, btn_col2 = st.columns(2)
-                    with btn_col1:
-                        if st.button("📤", key=f"send_inv_{rater['id']}", help="Send invitation"):
-                            success, msg = send_rater_invitation(rater, selected_leader['name'], base_url, db)
-                            if success:
-                                st.toast(f"✅ Sent to {rater['email']}")
-                            else:
-                                st.toast(f"❌ Failed: {msg}")
-                    with btn_col2:
-                        if st.button("🔔", key=f"send_rem_{rater['id']}", help="Send reminder"):
-                            success, msg = send_rater_reminder(rater, selected_leader['name'], base_url, db)
-                            if success:
-                                st.toast(f"✅ Reminder sent")
-                            else:
-                                st.toast(f"❌ Failed: {msg}")
-            
-            with col5:
-                if st.button("🗑️", key=f"del_rater_{rater['id']}", help="Delete rater"):
-                    db.delete_rater(rater['id'])
-                    st.rerun()
-            
-            # Show link
-            st.code(link, language=None)
+            st.markdown("---")
         
-        st.markdown("---")
-    
-    # Export links
-    if st.button("📋 Export All Links as CSV"):
-        link_data = []
+        # Display raters table
         for rel in ['Self', 'Boss', 'Peers', 'DRs', 'Others']:
-            if rel in raters_by_group:
-                for i, rater in enumerate(raters_by_group[rel], 1):
-                    link_data.append({
-                        'Group': GROUP_DISPLAY.get(rel, rel),
-                        'Name': rater.get('name') or f"{GROUP_DISPLAY.get(rel, rel)} {i}",
-                        'Email': rater.get('email') or '',
-                        'Status': 'Complete' if rater['completed'] else 'Pending',
-                        'Link': f"{base_url}?t={rater['token']}"
-                    })
+            if rel not in raters_by_group:
+                continue
+            
+            st.markdown(f"**{GROUP_DISPLAY.get(rel, rel)}** ({len(raters_by_group[rel])})")
+            
+            for i, rater in enumerate(raters_by_group[rel], 1):
+                link = f"{base_url}?t={rater['token']}"
+                
+                # Determine status
+                if rater['completed']:
+                    status_icon = "✅"
+                    status_text = "Complete"
+                else:
+                    status_icon = "⏳"
+                    status_text = "Pending"
+                
+                # Get last email info
+                has_email = bool(rater.get('email'))
+                
+                # Layout: Name | Email | Status | Actions
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 2, 0.5])
+                
+                with col1:
+                    display_name = rater.get('name') or f"{GROUP_DISPLAY.get(rel, rel)} {i}"
+                    st.write(f"{status_icon} {display_name}")
+                
+                with col2:
+                    if has_email:
+                        st.caption(f"📧 {rater['email']}")
+                    else:
+                        # Allow adding email
+                        if st.session_state.get(f'edit_email_{rater["id"]}'):
+                            new_email = st.text_input(
+                                "Email", 
+                                key=f"email_input_{rater['id']}", 
+                                label_visibility="collapsed",
+                                placeholder="Enter email"
+                            )
+                            if st.button("Save", key=f"save_email_{rater['id']}"):
+                                if new_email:
+                                    db.update_rater(rater['id'], email=new_email)
+                                    st.session_state[f'edit_email_{rater["id"]}'] = False
+                                    st.rerun()
+                        else:
+                            if st.button("+ Add email", key=f"add_email_{rater['id']}", 
+                                        type="secondary", use_container_width=True):
+                                st.session_state[f'edit_email_{rater["id"]}'] = True
+                                st.rerun()
+                
+                with col3:
+                    if rater['completed']:
+                        st.markdown(f"<span style='color: green;'>Complete</span>", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"<span style='color: orange;'>Pending</span>", unsafe_allow_html=True)
+                
+                with col4:
+                    if email_configured and has_email and not rater['completed']:
+                        btn_col1, btn_col2 = st.columns(2)
+                        with btn_col1:
+                            if st.button("📤", key=f"send_inv_{rater['id']}", help="Send invitation"):
+                                success, msg = send_rater_invitation(rater, selected_leader['name'], base_url, db)
+                                if success:
+                                    st.toast(f"✅ Sent to {rater['email']}")
+                                else:
+                                    st.toast(f"❌ Failed: {msg}")
+                        with btn_col2:
+                            if st.button("🔔", key=f"send_rem_{rater['id']}", help="Send reminder"):
+                                success, msg = send_rater_reminder(rater, selected_leader['name'], base_url, db)
+                                if success:
+                                    st.toast(f"✅ Reminder sent")
+                                else:
+                                    st.toast(f"❌ Failed: {msg}")
+                
+                with col5:
+                    if st.button("🗑️", key=f"del_rater_{rater['id']}", help="Delete rater"):
+                        db.delete_rater(rater['id'])
+                        st.rerun()
+                
+                # Show link
+                st.code(link, language=None)
+            
+            st.markdown("---")
+    
+    # Export/Import section
+    st.subheader("📥 Export / Import Raters")
+    
+    export_col, import_col = st.columns(2)
+    
+    with export_col:
+        st.markdown("**Export Current Raters**")
+        st.caption("Download all raters with their links for mail merge or records")
         
-        df = pd.DataFrame(link_data)
-        csv = df.to_csv(index=False)
+        if raters:
+            # Build export data
+            link_data = []
+            for rel in ['Self', 'Boss', 'Peers', 'DRs', 'Others']:
+                if rel in raters_by_group:
+                    for i, rater in enumerate(raters_by_group[rel], 1):
+                        link_data.append({
+                            'Name': rater.get('name') or '',
+                            'Email': rater.get('email') or '',
+                            'Relationship': rel,
+                            'Status': 'Complete' if rater['completed'] else 'Pending',
+                            'Link': f"{base_url}?t={rater['token']}"
+                        })
+            
+            df = pd.DataFrame(link_data)
+            csv = df.to_csv(index=False)
+            st.download_button(
+                "📋 Download Raters CSV",
+                csv,
+                f"raters_{selected_leader['name'].replace(' ', '_')}.csv",
+                "text/csv",
+                use_container_width=True
+            )
+        else:
+            st.info("No raters to export")
+    
+    with import_col:
+        st.markdown("**Bulk Import Raters**")
+        st.caption("Upload a CSV to add multiple raters at once")
+        
+        # Show template download
+        template_data = {
+            'name': ['John Smith', 'Sarah Jones', 'Mike Brown'],
+            'email': ['john@example.com', 'sarah@example.com', 'mike@example.com'],
+            'relationship': ['Peers', 'Peers', 'DRs']
+        }
+        template_df = pd.DataFrame(template_data)
+        template_csv = template_df.to_csv(index=False)
+        
         st.download_button(
-            "Download CSV",
-            csv,
-            f"feedback_links_{selected_leader['name'].replace(' ', '_')}.csv",
-            "text/csv"
+            "📄 Download Template",
+            template_csv,
+            "rater_import_template.csv",
+            "text/csv",
+            use_container_width=True,
+            help="Download a sample CSV showing the required format"
         )
+        
+        uploaded_raters = st.file_uploader(
+            "Upload Raters CSV",
+            type="csv",
+            key=f"rater_upload_{selected_leader_id}",
+            help="CSV with columns: name, email, relationship (Self/Boss/Peers/DRs/Others)"
+        )
+        
+        if uploaded_raters is not None:
+            try:
+                import_df = pd.read_csv(uploaded_raters)
+                
+                # Validate columns
+                required_cols = ['relationship']
+                missing_cols = [c for c in required_cols if c not in import_df.columns]
+                
+                if missing_cols:
+                    st.error(f"Missing required columns: {', '.join(missing_cols)}")
+                else:
+                    # Validate relationship values
+                    valid_relationships = ['Self', 'Boss', 'Peers', 'DRs', 'Others']
+                    import_df['relationship'] = import_df['relationship'].str.strip()
+                    invalid_rels = import_df[~import_df['relationship'].isin(valid_relationships)]['relationship'].unique()
+                    
+                    if len(invalid_rels) > 0:
+                        st.error(f"Invalid relationship values: {', '.join(invalid_rels)}")
+                        st.caption(f"Must be one of: {', '.join(valid_relationships)}")
+                    else:
+                        st.success(f"✓ Found {len(import_df)} raters to import")
+                        st.dataframe(import_df.head(10), use_container_width=True)
+                        
+                        if len(import_df) > 10:
+                            st.caption(f"...and {len(import_df) - 10} more")
+                        
+                        if st.button("✅ Import All Raters", type="primary", use_container_width=True):
+                            imported = 0
+                            errors = []
+                            
+                            for _, row in import_df.iterrows():
+                                try:
+                                    name = row.get('name') if pd.notna(row.get('name')) else None
+                                    email = row.get('email') if pd.notna(row.get('email')) else None
+                                    relationship = row['relationship'].strip()
+                                    
+                                    db.add_rater(selected_leader_id, relationship, name, email)
+                                    imported += 1
+                                except Exception as e:
+                                    errors.append(f"Row {_ + 1}: {str(e)}")
+                            
+                            if imported > 0:
+                                st.success(f"✅ Imported {imported} raters!")
+                            if errors:
+                                st.warning(f"⚠️ {len(errors)} errors:")
+                                for err in errors[:5]:
+                                    st.caption(err)
+                            
+                            st.rerun()
+                            
+            except Exception as e:
+                st.error(f"Error reading CSV: {str(e)}")
 
 
 def render_reports_tab(db):
