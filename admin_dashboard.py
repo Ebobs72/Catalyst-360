@@ -16,7 +16,10 @@ try:
         send_rater_reminder,
         send_bulk_invitations,
         send_bulk_reminders,
-        send_leader_notification
+        send_leader_notification,
+        send_portal_invitation,
+        send_leader_nomination_reminder,
+        send_bulk_portal_invitations
     )
     EMAIL_AVAILABLE = True
 except ImportError:
@@ -31,7 +34,14 @@ def render_admin_dashboard(db):
     st.markdown('<p class="subtitle">Administrator Dashboard</p>', unsafe_allow_html=True)
     
     # Navigation tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "👥 Leaders", "📧 Links & Tracking", "📄 Reports", "⚙️ Settings"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Overview", 
+        "👥 Leaders", 
+        "🚀 Leader Portals",
+        "📧 Links & Tracking", 
+        "📄 Reports", 
+        "⚙️ Settings"
+    ])
     
     with tab1:
         render_overview_tab(db)
@@ -40,12 +50,15 @@ def render_admin_dashboard(db):
         render_leaders_tab(db)
     
     with tab3:
-        render_links_tab(db)
+        render_portal_management_tab(db)
     
     with tab4:
-        render_reports_tab(db)
+        render_links_tab(db)
     
     with tab5:
+        render_reports_tab(db)
+    
+    with tab6:
         render_settings_tab(db)
 
 
@@ -546,6 +559,227 @@ def render_leaders_tab(db):
                     count += 1
             st.success(f"Imported {count} leaders!")
             st.rerun()
+
+
+def render_portal_management_tab(db):
+    """Render the leader portal management tab."""
+    
+    st.subheader("Leader Portal Management")
+    
+    st.markdown("""
+    This tab manages the **leader self-service portals** where leaders nominate their own raters.
+    
+    **Workflow:**
+    1. Leaders complete self-assessment (via Links & Tracking)
+    2. After Module 1, send them their portal link
+    3. Leaders add their raters through the portal
+    4. Raters automatically receive invitation emails
+    """)
+    
+    # Check email configuration
+    email_configured = EMAIL_AVAILABLE and is_email_configured()
+    if not email_configured:
+        st.warning("⚠️ Email not configured. Go to Settings → Email to set up.")
+    
+    # Get base URL
+    base_url = st.text_input(
+        "Base URL for portal links",
+        value="https://catalyst-360-arbncruhflmazjemep8uzh.streamlit.app",
+        help="Your deployed app URL"
+    )
+    
+    st.markdown("---")
+    
+    # Get all leaders with their status
+    leaders = db.get_all_leaders()
+    
+    if not leaders:
+        st.info("No leaders added yet. Go to Leaders tab to add them.")
+        return
+    
+    # Categorise leaders by their stage in the process
+    no_self_assessment = []
+    ready_for_portal = []  # Self done, no portal email sent
+    portal_sent_no_raters = []  # Portal email sent, but no/few raters nominated
+    portal_sent_with_raters = []  # Portal sent and raters nominated
+    
+    for leader in leaders:
+        raters = db.get_raters_for_leader(leader['id'])
+        self_rater = next((r for r in raters if r['relationship'] == 'Self'), None)
+        self_complete = self_rater and self_rater.get('completed')
+        other_raters = [r for r in raters if r['relationship'] != 'Self']
+        
+        leader['self_complete'] = self_complete
+        leader['other_rater_count'] = len(other_raters)
+        leader['other_raters'] = other_raters
+        
+        if not self_complete:
+            no_self_assessment.append(leader)
+        elif not leader.get('portal_email_sent_at'):
+            ready_for_portal.append(leader)
+        elif len(other_raters) < 5:
+            portal_sent_no_raters.append(leader)
+        else:
+            portal_sent_with_raters.append(leader)
+    
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Awaiting Self-Assessment", len(no_self_assessment))
+    with col2:
+        st.metric("Ready for Portal Email", len(ready_for_portal))
+    with col3:
+        st.metric("Need to Nominate Raters", len(portal_sent_no_raters))
+    with col4:
+        st.metric("Raters Nominated", len(portal_sent_with_raters))
+    
+    st.markdown("---")
+    
+    # Section 1: Ready for Portal Email
+    st.subheader("📤 Send Portal Invitations")
+    
+    if ready_for_portal:
+        st.success(f"{len(ready_for_portal)} leader(s) have completed self-assessment and are ready for portal email")
+        
+        # Show list
+        for leader in ready_for_portal:
+            col1, col2, col3 = st.columns([3, 2, 1])
+            with col1:
+                st.write(f"**{leader['name']}**")
+                st.caption(f"{leader.get('dealership', '')} · {leader.get('cohort', '')}")
+            with col2:
+                st.write(f"📧 {leader.get('email', 'No email')}")
+            with col3:
+                if email_configured and leader.get('email'):
+                    if st.button("Send Portal", key=f"send_portal_{leader['id']}"):
+                        success, msg = send_portal_invitation(leader, base_url, db)
+                        if success:
+                            st.success(f"✅ Sent to {leader['name']}")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed: {msg}")
+        
+        # Bulk send button
+        st.markdown("---")
+        leaders_with_email = [l for l in ready_for_portal if l.get('email')]
+        if email_configured and leaders_with_email:
+            if st.button(f"📤 Send Portal Email to All ({len(leaders_with_email)})", type="primary"):
+                with st.spinner("Sending portal invitations..."):
+                    sent, failed, results = send_bulk_portal_invitations(leaders_with_email, base_url, db)
+                    if sent > 0:
+                        st.success(f"✅ Sent {sent} portal invitation(s)")
+                    if failed > 0:
+                        st.warning(f"⚠️ {failed} failed")
+                    st.rerun()
+    else:
+        st.info("No leaders ready for portal email. They need to complete their self-assessment first.")
+    
+    st.markdown("---")
+    
+    # Section 2: Need to Nominate Raters
+    st.subheader("⚠️ Leaders Who Need to Nominate Raters")
+    
+    if portal_sent_no_raters:
+        st.warning(f"{len(portal_sent_no_raters)} leader(s) have received their portal but haven't nominated enough raters")
+        
+        for leader in portal_sent_no_raters:
+            col1, col2, col3, col4 = st.columns([2.5, 1.5, 1.5, 1])
+            with col1:
+                st.write(f"**{leader['name']}**")
+                st.caption(f"{leader.get('dealership', '')}")
+            with col2:
+                st.write(f"Raters: {leader['other_rater_count']}")
+            with col3:
+                portal_sent = leader.get('portal_email_sent_at', '')
+                if portal_sent:
+                    st.caption(f"Portal sent: {str(portal_sent)[:10]}")
+            with col4:
+                if email_configured and leader.get('email') and leader.get('portal_token'):
+                    if st.button("🔔 Remind", key=f"remind_nom_{leader['id']}"):
+                        leader['nominated_count'] = leader['other_rater_count']
+                        success, msg = send_leader_nomination_reminder(leader, base_url, db)
+                        if success:
+                            st.toast(f"Reminder sent to {leader['name']}")
+                        else:
+                            st.toast(f"Failed: {msg}")
+        
+        # Bulk remind
+        st.markdown("---")
+        leaders_to_remind = [l for l in portal_sent_no_raters if l.get('email') and l.get('portal_token')]
+        if email_configured and leaders_to_remind:
+            if st.button(f"🔔 Send Reminder to All ({len(leaders_to_remind)})"):
+                sent = 0
+                for leader in leaders_to_remind:
+                    leader['nominated_count'] = leader['other_rater_count']
+                    success, _ = send_leader_nomination_reminder(leader, base_url, db)
+                    if success:
+                        sent += 1
+                st.success(f"Sent {sent} reminder(s)")
+    else:
+        st.info("All leaders who have received portal invitations have nominated raters.")
+    
+    st.markdown("---")
+    
+    # Section 3: Leaders with Raters Nominated (overview)
+    st.subheader("✅ Leaders with Raters Nominated")
+    
+    if portal_sent_with_raters:
+        for leader in portal_sent_with_raters:
+            # Calculate response stats
+            completed = sum(1 for r in leader['other_raters'] if r.get('completed'))
+            total = leader['other_rater_count']
+            
+            col1, col2, col3 = st.columns([3, 2, 1])
+            with col1:
+                st.write(f"**{leader['name']}**")
+                st.caption(f"{leader.get('dealership', '')}")
+            with col2:
+                if completed == total:
+                    st.success(f"✓ {completed}/{total} responses")
+                else:
+                    st.warning(f"⏳ {completed}/{total} responses")
+            with col3:
+                # Link to view portal
+                if leader.get('portal_token'):
+                    portal_url = f"{base_url}?portal={leader['portal_token']}"
+                    st.markdown(f"[View Portal]({portal_url})")
+    else:
+        st.info("No leaders have nominated raters yet.")
+    
+    st.markdown("---")
+    
+    # Section 4: Awaiting Self-Assessment
+    with st.expander(f"📋 Awaiting Self-Assessment ({len(no_self_assessment)})"):
+        if no_self_assessment:
+            for leader in no_self_assessment:
+                st.write(f"• {leader['name']} ({leader.get('dealership', 'No dealership')})")
+        else:
+            st.info("All leaders have completed their self-assessment.")
+    
+    st.markdown("---")
+    
+    # Section 5: All Portal Links (for reference)
+    st.subheader("🔗 All Portal Links")
+    
+    with st.expander("View/Generate Portal Links"):
+        st.caption("Generate portal tokens for leaders who don't have one yet, or view existing links.")
+        
+        for leader in leaders:
+            col1, col2, col3 = st.columns([2, 3, 1])
+            with col1:
+                st.write(f"**{leader['name']}**")
+            with col2:
+                if leader.get('portal_token'):
+                    portal_url = f"{base_url}?portal={leader['portal_token']}"
+                    st.code(portal_url, language=None)
+                else:
+                    st.caption("No token generated")
+            with col3:
+                if not leader.get('portal_token'):
+                    if st.button("Generate", key=f"gen_token_{leader['id']}"):
+                        token = db.generate_portal_token(leader['id'])
+                        st.success(f"Generated token")
+                        st.rerun()
 
 
 def render_links_tab(db):
