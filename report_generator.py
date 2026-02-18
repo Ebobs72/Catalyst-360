@@ -41,6 +41,14 @@ def set_cell_shading(cell, color):
     cell._tc.get_or_add_tcPr().append(shading)
 
 
+def add_section_heading(doc, text, font_size=18):
+    """Add a major section heading with larger font."""
+    heading = doc.add_heading(text, level=1)
+    for run in heading.runs:
+        run.font.size = Pt(font_size)
+    return heading
+
+
 def make_table_borderless(table):
     """Remove all borders from a table."""
     tbl = table._tbl
@@ -326,17 +334,23 @@ def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=Non
 
 def add_response_summary(doc, data):
     """Add response summary table."""
-    doc.add_heading("Response Summary", level=2)
+    add_section_heading(doc, "Response Summary", font_size=16)
     
     response_counts = data.get('response_counts', {})
     hidden_groups = data.get('hidden_groups', [])
     
     table = doc.add_table(rows=1, cols=2)
     table.style = 'Table Grid'
+    table.autofit = False
+    
+    # Set consistent widths (total ~6.1 inches to match PAPU-NANU tables)
+    widths = [Inches(5.0), Inches(1.1)]
     
     hdr_cells = table.rows[0].cells
     hdr_cells[0].text = "Respondent Group"
+    hdr_cells[0].width = widths[0]
     hdr_cells[1].text = "Responses"
+    hdr_cells[1].width = widths[1]
     
     for cell in hdr_cells:
         set_cell_shading(cell, '024731')
@@ -347,18 +361,22 @@ def add_response_summary(doc, data):
         if group in response_counts and response_counts[group] > 0:
             row = table.add_row().cells
             row[0].text = GROUP_DISPLAY[group]
+            row[0].width = widths[0]
             row[1].text = str(response_counts[group])
+            row[1].width = widths[1]
+            row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     total = sum(response_counts.values())
     row = table.add_row().cells
     row[0].text = "Total"
+    row[0].width = widths[0]
     row[0].paragraphs[0].runs[0].bold = True
     row[1].text = str(total)
+    row[1].width = widths[1]
     row[1].paragraphs[0].runs[0].bold = True
+    row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    doc.add_paragraph()
-    
-    # Add anonymity note if groups were hidden
+    # Add anonymity note if groups were hidden (no extra spacing)
     if hidden_groups:
         from framework import ANONYMITY_THRESHOLD
         note = doc.add_paragraph()
@@ -371,17 +389,22 @@ def add_response_summary(doc, data):
         run.font.size = Pt(9)
         run.font.italic = True
         run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-    
-    doc.add_paragraph()
 
 
 def add_executive_summary(doc, data):
     """Add executive summary with dimension table and radar chart."""
-    doc.add_heading("Executive Summary", level=1)
+    add_section_heading(doc, "Executive Summary", font_size=16)
     
-    # Dimension table
+    # Dimension table with proper column widths
     table = doc.add_table(rows=1, cols=4)
     table.style = 'Table Grid'
+    table.autofit = False
+    
+    # Set column widths to match other tables (total ~6.1 inches)
+    widths = [Inches(3.9), Inches(0.7), Inches(1.0), Inches(0.5)]
+    for row in table.rows:
+        for i, cell in enumerate(row.cells):
+            cell.width = widths[i]
     
     hdr = table.rows[0].cells
     hdr[0].text = "Dimension"
@@ -393,24 +416,35 @@ def add_executive_summary(doc, data):
         set_cell_shading(cell, '024731')
         cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
         cell.paragraphs[0].runs[0].bold = True
+        cell.paragraphs[0].runs[0].font.size = Pt(10)
     
     for dim_name in DIMENSIONS.keys():
         dim_data = data['by_dimension'].get(dim_name, {})
         row = table.add_row().cells
+        
+        # Set widths for each new row
+        for i, cell in enumerate(row):
+            cell.width = widths[i]
+        
         row[0].text = dim_name
-        row[1].text = f"{dim_data.get('Self', 0):.2f}" if dim_data.get('Self') else "-"
-        row[2].text = f"{dim_data.get('Combined', 0):.2f}" if dim_data.get('Combined') else "-"
+        row[1].text = f"{dim_data.get('Self', 0):.1f}" if dim_data.get('Self') else "-"
+        row[2].text = f"{dim_data.get('Combined', 0):.1f}" if dim_data.get('Combined') else "-"
+        
+        # Centre-align the score columns
+        for i in [1, 2, 3]:
+            row[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
         gap = dim_data.get('Gap')
         if gap is not None:
-            row[3].text = f"{gap:+.2f}"
+            row[3].text = f"{gap:+.1f}"
             if gap > SIGNIFICANT_GAP:
-                set_cell_shading(row[3], 'FFF2CC')
+                set_cell_shading(row[3], 'FFF2CC')  # Yellow for over-rating
             elif gap < -SIGNIFICANT_GAP:
-                set_cell_shading(row[3], 'C6EFCE')
+                set_cell_shading(row[3], 'C6EFCE')  # Green for under-rating
+        else:
+            row[3].text = "-"
     
-    doc.add_paragraph()
-    
-    # Radar chart - larger and centred
+    # Radar chart - sized to fit on same page as tables above
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
         self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
         combined_scores = {dim: data['by_dimension'].get(dim, {}).get('Combined') for dim in DIMENSIONS}
@@ -420,7 +454,7 @@ def add_executive_summary(doc, data):
         para = doc.add_paragraph()
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = para.add_run()
-        run.add_picture(tmp.name, width=Inches(6))
+        run.add_picture(tmp.name, width=Inches(5.0))
         os.unlink(tmp.name)
     
     doc.add_page_break()
@@ -428,117 +462,129 @@ def add_executive_summary(doc, data):
 
 def add_papu_nanu_section(doc, data):
     """Add strengths and development areas analysis."""
-    doc.add_heading("Strengths & Development Analysis", level=1)
+    add_section_heading(doc, "Strengths & Development Analysis", font_size=16)
     
     categories = categorize_papu_nanu(data)
     
-    # Agreed Strengths
-    if categories['agreed_strengths']:
-        doc.add_heading("Agreed Strengths", level=2)
-        doc.add_paragraph("Areas where you and others both rate highly (Combined ≥ 4.0, aligned perception).")
-        
-        table = doc.add_table(rows=1, cols=3)
-        table.style = 'Table Grid'
-        hdr = table.rows[0].cells
-        hdr[0].text = "Item"
-        hdr[1].text = "Self"
-        hdr[2].text = "Combined"
-        for cell in hdr:
-            set_cell_shading(cell, '375623')
-            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-        
-        for item in categories['agreed_strengths'][:8]:
-            row = table.add_row().cells
-            row[0].text = item['text'][:80] + "..." if len(item['text']) > 80 else item['text']
-            row[1].text = f"{item['self']:.1f}"
-            row[2].text = f"{item['combined']:.1f}"
-        
-        doc.add_paragraph()
+    # Helper function to create consistent PAPU-NANU tables
+    def keep_table_together(table):
+        """Prevent table rows from splitting across pages."""
+        for row in table.rows:
+            # Set "keep with next" for all rows except the last
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    para.paragraph_format.keep_with_next = True
+        # Last row doesn't need keep_with_next
+        if table.rows:
+            last_row = table.rows[-1]
+            for cell in last_row.cells:
+                for para in cell.paragraphs:
+                    para.paragraph_format.keep_with_next = False
     
-    # Good News
-    if categories['good_news']:
-        doc.add_heading("Good News", level=2)
-        doc.add_paragraph("Areas where others rate you higher than you rate yourself.")
-        
-        table = doc.add_table(rows=1, cols=4)
-        table.style = 'Table Grid'
-        hdr = table.rows[0].cells
-        hdr[0].text = "Item"
-        hdr[1].text = "Self"
-        hdr[2].text = "Combined"
-        hdr[3].text = "Gap"
-        for cell in hdr:
-            set_cell_shading(cell, '2F5496')
-            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-        
-        for item in categories['good_news']:
-            row = table.add_row().cells
-            row[0].text = item['text'][:80] + "..." if len(item['text']) > 80 else item['text']
-            row[1].text = f"{item['self']:.1f}"
-            row[2].text = f"{item['combined']:.1f}"
-            row[3].text = f"{item['gap']:+.1f}"
-        
-        doc.add_paragraph()
-    
-    # Development Areas
-    if categories['development_areas']:
-        doc.add_heading("Development Areas", level=2)
-        doc.add_paragraph("Areas where combined ratings are below 4.0 - opportunities for growth.")
-        
-        table = doc.add_table(rows=1, cols=4)
-        table.style = 'Table Grid'
-        hdr = table.rows[0].cells
-        hdr[0].text = "Item"
-        hdr[1].text = "Self"
-        hdr[2].text = "Combined"
-        hdr[3].text = "Gap"
-        for cell in hdr:
-            set_cell_shading(cell, 'C65911')
-            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-        
-        for item in categories['development_areas'][:8]:
-            row = table.add_row().cells
-            row[0].text = item['text'][:80] + "..." if len(item['text']) > 80 else item['text']
-            row[1].text = f"{item['self']:.1f}"
-            row[2].text = f"{item['combined']:.1f}"
-            row[3].text = f"{item['gap']:+.1f}" if item['gap'] else "-"
-        
-        doc.add_paragraph()
-    
-    # Hidden Talents
-    if categories['hidden_talents']:
-        doc.add_heading("Hidden Talents", level=2)
-        doc.add_paragraph("Areas where you rate yourself higher than others do - potential blind spots or visibility issues.")
-        
+    def create_papu_table(doc, items, header_color):
+        """Create a PAPU-NANU table with consistent formatting."""
         table = doc.add_table(rows=1, cols=5)
         table.style = 'Table Grid'
+        table.autofit = False
+        
+        # Column widths: # | Behaviour | Self | Others | Gap
+        # Total width ~6.1 inches to match other tables
+        widths = [Inches(0.4), Inches(3.9), Inches(0.6), Inches(0.6), Inches(0.6)]
+        
         hdr = table.rows[0].cells
-        hdr[0].text = "Item"
-        hdr[1].text = "Self"
-        hdr[2].text = "Combined"
-        hdr[3].text = "Gap"
-        hdr[4].text = "Not Seen"
-        for cell in hdr:
-            set_cell_shading(cell, '7030A0')
+        hdr[0].text = "#"
+        hdr[1].text = "Behaviour"
+        hdr[2].text = "Self"
+        hdr[3].text = "Others"
+        hdr[4].text = "Gap"
+        
+        for i, cell in enumerate(hdr):
+            cell.width = widths[i]
+            set_cell_shading(cell, header_color)
             cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+            cell.paragraphs[0].runs[0].bold = True
+            cell.paragraphs[0].runs[0].font.size = Pt(9)
+            if i != 1:  # Centre all except Behaviour
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        for item in categories['hidden_talents']:
+        for item in items:
             row = table.add_row().cells
-            row[0].text = item['text'][:70] + "..." if len(item['text']) > 70 else item['text']
-            row[1].text = f"{item['self']:.1f}"
-            row[2].text = f"{item['combined']:.1f}"
-            row[3].text = f"{item['gap']:+.1f}"
-            row[4].text = str(item['no_opp_count']) if item['no_opp_count'] else "-"
+            for i, cell in enumerate(row):
+                cell.width = widths[i]
+                # Add vertical padding by setting paragraph spacing
+                for para in cell.paragraphs:
+                    para.paragraph_format.space_before = Pt(2)
+                    para.paragraph_format.space_after = Pt(2)
+            
+            row[0].text = str(item['item_num'])
+            row[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            row[0].paragraphs[0].runs[0].font.size = Pt(9)
+            
+            row[1].text = item['text']
+            row[1].paragraphs[0].runs[0].font.size = Pt(9)
+            
+            row[2].text = f"{item['self']:.1f}"
+            row[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            row[2].paragraphs[0].runs[0].font.size = Pt(9)
+            
+            row[3].text = f"{item['combined']:.1f}"
+            row[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            row[3].paragraphs[0].runs[0].font.size = Pt(9)
+            
+            gap = item['gap']
+            row[4].text = f"{gap:+.1f}" if gap is not None else "-"
+            row[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            row[4].paragraphs[0].runs[0].font.size = Pt(9)
         
+        # Keep table together on one page
+        keep_table_together(table)
+        
+        return table
+    
+    # Agreed Strengths (green header)
+    if categories['agreed_strengths']:
+        heading = doc.add_heading("Agreed Strengths", level=2)
+        heading.paragraph_format.keep_with_next = True
+        desc = doc.add_paragraph("You and others agree these are strengths - keep doing these.")
+        desc.paragraph_format.keep_with_next = True
+        create_papu_table(doc, categories['agreed_strengths'][:8], '375623')
+        doc.add_paragraph()
+    
+    # Good News (blue header) - others rate higher than self
+    if categories['good_news']:
+        heading = doc.add_heading("Good News", level=2)
+        heading.paragraph_format.keep_with_next = True
+        desc = doc.add_paragraph("Others rate you higher than you rate yourself - you may be underselling yourself.")
+        desc.paragraph_format.keep_with_next = True
+        create_papu_table(doc, categories['good_news'], '2F5496')
+        doc.add_paragraph()
+    
+    # Development Areas (orange header)
+    if categories['development_areas']:
+        heading = doc.add_heading("Development Areas", level=2)
+        heading.paragraph_format.keep_with_next = True
+        desc = doc.add_paragraph("Both you and others see room for growth - priority focus for development.")
+        desc.paragraph_format.keep_with_next = True
+        create_papu_table(doc, categories['development_areas'][:8], 'C65911')
+        doc.add_paragraph()
+    
+    # Potential Blind Spots / Hidden Talents (purple header)
+    if categories['hidden_talents']:
+        heading = doc.add_heading("Potential Blind Spots", level=2)
+        heading.paragraph_format.keep_with_next = True
+        desc = doc.add_paragraph("You rate yourself higher than others do - worth exploring with your coach.")
+        desc.paragraph_format.keep_with_next = True
+        create_papu_table(doc, categories['hidden_talents'], '7030A0')
         doc.add_paragraph()
     
     doc.add_page_break()
 
 
 def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
-    """Add a dimension section with items and charts."""
+    """Add a dimension section with items displayed side-by-side with bar charts."""
     doc.add_heading(dim_name, level=2)
     
+    # Dimension description
     desc = doc.add_paragraph()
     run = desc.add_run(DIMENSION_DESCRIPTIONS[dim_name])
     run.font.italic = True
@@ -548,19 +594,29 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
     
     start, end = DIMENSIONS[dim_name]
     
+    # Each item: side-by-side borderless table (text left, bar chart right)
     for item_num in range(start, end + 1):
         item_scores = data['by_item'].get(item_num, {})
         item_text = item_scores.get('text', ITEMS.get(item_num, ''))
         
+        # Create 2-column borderless table for side-by-side layout
         layout_table = doc.add_table(rows=1, cols=2)
         make_table_borderless(layout_table)
+        layout_table.autofit = False
         
+        # Left cell: Question text (~3 inches)
         text_cell = layout_table.rows[0].cells[0]
-        text_cell.width = Inches(3.5)
+        text_cell.width = Inches(3.0)
         text_para = text_cell.paragraphs[0]
-        text_para.add_run(f"{item_num}. ").bold = True
+        text_para.add_run(f"Q{item_num}. ").bold = True
         text_para.add_run(item_text)
+        text_para.runs[0].font.size = Pt(10)
+        if len(text_para.runs) > 1:
+            text_para.runs[1].font.size = Pt(10)
+        # Keep statement with its chart
+        text_para.paragraph_format.keep_with_next = True
         
+        # Right cell: Bar chart (~3 inches)
         chart_cell = layout_table.rows[0].cells[1]
         chart_cell.width = Inches(3.0)
         
@@ -572,24 +628,31 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
             
             chart_para = chart_cell.paragraphs[0]
             chart_para.add_run().add_picture(tmp.name, width=Inches(2.8))
+            # Keep chart paragraph together
+            chart_para.paragraph_format.keep_together = True
             os.unlink(tmp.name)
         
         doc.add_paragraph()
     
+    # Section comments
     section_comments = comments.get('by_section', {}).get(dim_name, [])
     if section_comments:
-        doc.add_paragraph()
         comment_heading = doc.add_paragraph()
         run = comment_heading.add_run(f"Comments on {dim_name}")
         run.bold = True
         run.font.size = Pt(11)
         
-        # Create comments table
+        # Create comments table with proper widths
         table = doc.add_table(rows=1, cols=2)
         table.style = 'Table Grid'
+        table.autofit = False
+        
         hdr = table.rows[0].cells
         hdr[0].text = "Source"
+        hdr[0].width = Inches(1.2)
         hdr[1].text = "Comment"
+        hdr[1].width = Inches(5.0)
+        
         for cell in hdr:
             set_cell_shading(cell, '024731')
             cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
@@ -598,28 +661,58 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
         for comment in section_comments:
             row = table.add_row().cells
             row[0].text = GROUP_DISPLAY.get(comment["group"], comment["group"])
+            row[0].width = Inches(1.2)
             row[1].text = comment["text"]
+            row[1].width = Inches(5.0)
     
     doc.add_page_break()
 
 
 def add_overall_effectiveness(doc, data, is_self_only=False):
     """Add Overall Effectiveness section (Q46-47)."""
-    doc.add_heading("Overall Effectiveness", level=1)
+    add_section_heading(doc, "Overall Effectiveness", font_size=16)
+    
+    desc = doc.add_paragraph()
+    run = desc.add_run("These two items provide a global assessment of leadership effectiveness.")
+    run.font.italic = True
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+    
+    doc.add_paragraph()
     
     for item_num in OVERALL_ITEMS:
         item_scores = data['by_item'].get(item_num, {})
         item_text = item_scores.get('text', ITEMS.get(item_num, ''))
         
-        para = doc.add_paragraph()
-        para.add_run(f"{item_num}. {item_text}").bold = True
+        # Create 2-column borderless table for side-by-side layout (same as dimensions)
+        layout_table = doc.add_table(rows=1, cols=2)
+        make_table_borderless(layout_table)
+        layout_table.autofit = False
+        
+        # Left cell: Question text (~3 inches)
+        text_cell = layout_table.rows[0].cells[0]
+        text_cell.width = Inches(3.0)
+        text_para = text_cell.paragraphs[0]
+        text_para.add_run(f"Q{item_num}. ").bold = True
+        text_para.add_run(item_text)
+        text_para.runs[0].font.size = Pt(10)
+        if len(text_para.runs) > 1:
+            text_para.runs[1].font.size = Pt(10)
+        # Keep statement with its chart
+        text_para.paragraph_format.keep_with_next = True
+        
+        # Right cell: Bar chart (~3 inches)
+        chart_cell = layout_table.rows[0].cells[1]
+        chart_cell.width = Inches(3.0)
         
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             if is_self_only:
                 create_self_only_bar(item_scores.get('Self'), tmp.name)
             else:
                 create_item_bar_chart(item_scores, tmp.name)
-            doc.add_picture(tmp.name, width=Inches(4))
+            
+            chart_para = chart_cell.paragraphs[0]
+            chart_para.add_run().add_picture(tmp.name, width=Inches(2.8))
+            chart_para.paragraph_format.keep_together = True
             os.unlink(tmp.name)
         
         doc.add_paragraph()
@@ -629,7 +722,7 @@ def add_overall_effectiveness(doc, data, is_self_only=False):
 
 def add_overall_comments(doc, comments):
     """Add overall qualitative feedback section."""
-    doc.add_heading("Overall Qualitative Feedback", level=1)
+    add_section_heading(doc, "Overall Qualitative Feedback", font_size=16)
     
     if comments.get('strengths'):
         doc.add_heading("Greatest Strengths", level=2)
@@ -730,7 +823,7 @@ def add_what_happens_next(doc):
 
 def add_next_steps(doc):
     """Add next steps section for full 360 reports."""
-    doc.add_heading("Next Steps", level=1)
+    add_section_heading(doc, "Next Steps", font_size=16)
     
     doc.add_paragraph(
         "This feedback provides a foundation for your ongoing leadership development. "
@@ -844,8 +937,8 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         add_executive_summary(doc, data)
         add_papu_nanu_section(doc, data)
         
-        doc.add_heading("Detailed Feedback by Dimension", level=1)
-        doc.add_page_break()
+        # Detailed Feedback section - heading flows into first dimension
+        add_section_heading(doc, "Detailed Feedback by Dimension", font_size=18)
         
         for dim_name in DIMENSIONS.keys():
             add_dimension_section(doc, dim_name, data, comments, is_self_only=False)
