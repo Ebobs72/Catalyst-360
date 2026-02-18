@@ -84,10 +84,8 @@ class Database:
         conn, cursor = self._execute(query, params)
         
         if USING_TURSO and self.turso_url and self.turso_token:
-            # libsql returns rows differently
             rows = cursor.fetchall()
             if rows and len(rows) > 0:
-                # Get column names from cursor description
                 columns = [desc[0] for desc in cursor.description]
                 result = [dict(zip(columns, row)) for row in rows]
             else:
@@ -124,7 +122,6 @@ class Database:
             conn.commit()
             conn.close()
         except Exception:
-            # Column likely already exists
             pass
     
     def init_database(self):
@@ -152,8 +149,7 @@ class Database:
         conn.commit()
         conn.close()
         
-        # Migration: Add portal columns if they don't exist (for existing databases)
-        # Run each in separate connection to ensure proper commit
+        # Migration: Add columns if they don't exist (for existing databases)
         self._safe_add_column("leaders", "portal_token", "TEXT")
         self._safe_add_column("leaders", "portal_email_sent_at", "TIMESTAMP")
         self._safe_add_column("leaders", "nomination_reminder_sent_at", "TIMESTAMP")
@@ -174,6 +170,9 @@ class Database:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 completed_at TIMESTAMP,
                 reminder_sent_at TIMESTAMP,
+                draft_ratings TEXT,
+                draft_comments TEXT,
+                draft_saved_at TIMESTAMP,
                 FOREIGN KEY (leader_id) REFERENCES leaders(id)
             )
         """)
@@ -257,6 +256,11 @@ class Database:
         
         conn.commit()
         conn.close()
+        
+        # Migration: Add draft columns to raters table for existing databases
+        self._safe_add_column("raters", "draft_ratings", "TEXT")
+        self._safe_add_column("raters", "draft_comments", "TEXT")
+        self._safe_add_column("raters", "draft_saved_at", "TIMESTAMP")
     
     # ==========================================
     # LEADER MANAGEMENT
@@ -336,7 +340,7 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        token = secrets.token_urlsafe(8)  # Generates 11 characters
+        token = secrets.token_urlsafe(8)
         
         try:
             cursor.execute("""
@@ -419,7 +423,7 @@ class Database:
     
     def generate_token(self):
         """Generate a unique, URL-safe token."""
-        return secrets.token_urlsafe(6)  # Generates 8 characters
+        return secrets.token_urlsafe(6)
     
     def add_rater(self, leader_id, relationship, name=None, email=None):
         """Add a rater for a leader and generate their unique link."""
@@ -468,7 +472,8 @@ class Database:
         """Get all raters for a specific leader."""
         return self._fetchall("""
             SELECT *,
-                CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END as completed
+                CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END as completed,
+                CASE WHEN draft_saved_at IS NOT NULL AND completed_at IS NULL THEN 1 ELSE 0 END as has_draft
             FROM raters
             WHERE leader_id = ?
             ORDER BY 
@@ -511,12 +516,17 @@ class Database:
         conn.close()
     
     def mark_rater_complete(self, rater_id):
-        """Mark a rater as having completed their feedback."""
+        """Mark a rater as having completed their feedback and clear draft."""
         conn = self.get_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
-            UPDATE raters SET completed_at = CURRENT_TIMESTAMP WHERE id = ?
+            UPDATE raters 
+            SET completed_at = CURRENT_TIMESTAMP,
+                draft_ratings = NULL,
+                draft_comments = NULL,
+                draft_saved_at = NULL
+            WHERE id = ?
         """, (rater_id,))
         
         conn.commit()
@@ -530,6 +540,76 @@ class Database:
         cursor.execute("DELETE FROM ratings WHERE rater_id = ?", (rater_id,))
         cursor.execute("DELETE FROM comments WHERE rater_id = ?", (rater_id,))
         cursor.execute("DELETE FROM raters WHERE id = ?", (rater_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    # ==========================================
+    # DRAFT SAVE & RESUME
+    # ==========================================
+    
+    def save_draft(self, rater_id, ratings, comments):
+        """
+        Save partial feedback as a draft for later resumption.
+        
+        Args:
+            rater_id: The rater's ID
+            ratings: Dict of {item_number: rating_value} (only answered items)
+            comments: Dict of {section: comment_text}
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Convert int keys to strings for JSON serialisation
+        ratings_json = json.dumps({str(k): v for k, v in ratings.items() if v})
+        comments_json = json.dumps({k: v for k, v in comments.items() if v and v.strip()})
+        
+        cursor.execute("""
+            UPDATE raters 
+            SET draft_ratings = ?,
+                draft_comments = ?,
+                draft_saved_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (ratings_json, comments_json, rater_id))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_draft(self, rater_id):
+        """
+        Retrieve a saved draft for a rater.
+        
+        Returns:
+            Tuple of (ratings_dict, comments_dict, saved_at) or (None, None, None)
+        """
+        row = self._fetchone("""
+            SELECT draft_ratings, draft_comments, draft_saved_at
+            FROM raters
+            WHERE id = ? AND draft_saved_at IS NOT NULL AND completed_at IS NULL
+        """, (rater_id,))
+        
+        if row and row.get('draft_ratings'):
+            ratings = json.loads(row['draft_ratings'])
+            # Convert string keys back to ints
+            ratings = {int(k): v for k, v in ratings.items()}
+            
+            comments = json.loads(row['draft_comments']) if row.get('draft_comments') else {}
+            saved_at = row['draft_saved_at']
+            
+            return ratings, comments, saved_at
+        
+        return None, None, None
+    
+    def clear_draft(self, rater_id):
+        """Clear a saved draft (e.g., after successful submission)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE raters 
+            SET draft_ratings = NULL, draft_comments = NULL, draft_saved_at = NULL
+            WHERE id = ?
+        """, (rater_id,))
         
         conn.commit()
         conn.close()
@@ -554,7 +634,6 @@ class Database:
             not_applicable = score == 'NA'
             actual_score = None if (no_opp or not_applicable) else int(score)
             
-            # Use INSERT OR REPLACE for SQLite compatibility
             cursor.execute("""
                 INSERT OR REPLACE INTO ratings (rater_id, item_number, score, no_opportunity, not_applicable)
                 VALUES (?, ?, ?, ?, ?)
@@ -595,17 +674,7 @@ class Database:
     # ==========================================
     
     def log_email(self, email_type, to_email, success, message=None, rater_id=None, leader_id=None):
-        """
-        Log an email send attempt.
-        
-        Args:
-            email_type: 'invitation', 'reminder', or 'leader_notification'
-            to_email: Recipient email address
-            success: Boolean indicating if send was successful
-            message: Optional status message
-            rater_id: Optional rater ID (for rater emails)
-            leader_id: Optional leader ID (for leader notifications)
-        """
+        """Log an email send attempt."""
         conn = self.get_connection()
         cursor = conn.cursor()
         
