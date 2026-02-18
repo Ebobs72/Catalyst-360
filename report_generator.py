@@ -11,8 +11,8 @@ import numpy as np
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
+from docx.oxml.ns import qn, nsdecls
+from docx.oxml import OxmlElement, parse_xml
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
@@ -32,6 +32,15 @@ REPORTS_DIR.mkdir(exist_ok=True)
 
 # Overall effectiveness questions (now 46 and 47)
 OVERALL_ITEMS = [46, 47]
+
+# Colour map for comment source labels (RGB tuples for python-docx)
+COMMENT_SOURCE_COLOURS = {
+    'Line Manager': RGBColor(0x72, 0x2F, 0x37),   # Burgundy
+    'Peers':        RGBColor(0x0A, 0x5E, 0x55),   # Deep Teal
+    'Direct Reports': RGBColor(0xB8, 0x86, 0x0B),  # Bentley Gold
+    'Others':       RGBColor(0x4A, 0x55, 0x68),    # Slate Grey
+    'Self':         RGBColor(0x02, 0x47, 0x31),    # Bentley Green
+}
 
 
 def set_cell_shading(cell, color):
@@ -63,6 +72,71 @@ def make_table_borderless(table):
         tblBorders.append(border)
     tblPr.append(tblBorders)
 
+
+# ============================================
+# CLEAN COMMENT FORMATTING
+# ============================================
+
+def _add_thin_rule(doc, colour='CCCCCC'):
+    """Add a thin horizontal rule (bottom border on an empty paragraph)."""
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(2)
+    p.paragraph_format.space_after = Pt(2)
+    pPr = p._element.get_or_add_pPr()
+    pBdr = parse_xml(
+        f'<w:pBdr {nsdecls("w")}>'
+        f'  <w:bottom w:val="single" w:sz="4" w:space="1" w:color="{colour}"/>'
+        f'</w:pBdr>'
+    )
+    pPr.append(pBdr)
+
+
+def _add_comment_block(doc, group_name, comment_text):
+    """
+    Add a single comment in the clean style:
+    - Source label (bold, coloured) on its own line
+    - Comment text below in normal body text
+    """
+    # Resolve display name
+    display_name = GROUP_DISPLAY.get(group_name, group_name)
+
+    # Source label
+    source_para = doc.add_paragraph()
+    source_para.paragraph_format.space_before = Pt(8)
+    source_para.paragraph_format.space_after = Pt(2)
+    run = source_para.add_run(display_name)
+    run.bold = True
+    run.font.size = Pt(9)
+    run.font.color.rgb = COMMENT_SOURCE_COLOURS.get(
+        display_name, RGBColor(0x4A, 0x55, 0x68)
+    )
+
+    # Comment text
+    comment_para = doc.add_paragraph()
+    comment_para.paragraph_format.space_before = Pt(0)
+    comment_para.paragraph_format.space_after = Pt(6)
+    run = comment_para.add_run(comment_text)
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x2D, 0x2D, 0x2D)
+
+
+def add_clean_comments(doc, comments_list):
+    """
+    Add a set of comments in the clean rule-separated style.
+    comments_list: list of dicts with 'group' and 'text' keys.
+    """
+    if not comments_list:
+        return
+
+    _add_thin_rule(doc)
+    for comment in comments_list:
+        _add_comment_block(doc, comment['group'], comment['text'])
+        _add_thin_rule(doc)
+
+
+# ============================================
+# PAPU-NANU CATEGORISATION
+# ============================================
 
 def categorize_papu_nanu(data):
     """Categorise items into PAPU-NANU quadrants."""
@@ -118,6 +192,10 @@ def categorize_papu_nanu(data):
     
     return categories
 
+
+# ============================================
+# CHARTS
+# ============================================
 
 def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     """Create radar chart for dimension overview - professional style."""
@@ -270,6 +348,10 @@ def create_self_only_bar(score, output_path):
     plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
 
+
+# ============================================
+# REPORT SECTIONS
+# ============================================
 
 def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=None):
     """Create the cover page."""
@@ -470,11 +552,9 @@ def add_papu_nanu_section(doc, data):
     def keep_table_together(table):
         """Prevent table rows from splitting across pages."""
         for row in table.rows:
-            # Set "keep with next" for all rows except the last
             for cell in row.cells:
                 for para in cell.paragraphs:
                     para.paragraph_format.keep_with_next = True
-        # Last row doesn't need keep_with_next
         if table.rows:
             last_row = table.rows[-1]
             for cell in last_row.cells:
@@ -488,7 +568,6 @@ def add_papu_nanu_section(doc, data):
         table.autofit = False
         
         # Column widths: # | Behaviour | Self | Others | Gap
-        # Total width ~6.1 inches to match other tables
         widths = [Inches(0.4), Inches(3.9), Inches(0.6), Inches(0.6), Inches(0.6)]
         
         hdr = table.rows[0].cells
@@ -504,14 +583,13 @@ def add_papu_nanu_section(doc, data):
             cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
             cell.paragraphs[0].runs[0].bold = True
             cell.paragraphs[0].runs[0].font.size = Pt(9)
-            if i != 1:  # Centre all except Behaviour
+            if i != 1:
                 cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         for item in items:
             row = table.add_row().cells
             for i, cell in enumerate(row):
                 cell.width = widths[i]
-                # Add vertical padding by setting paragraph spacing
                 for para in cell.paragraphs:
                     para.paragraph_format.space_before = Pt(2)
                     para.paragraph_format.space_after = Pt(2)
@@ -536,9 +614,7 @@ def add_papu_nanu_section(doc, data):
             row[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             row[4].paragraphs[0].runs[0].font.size = Pt(9)
         
-        # Keep table together on one page
         keep_table_together(table)
-        
         return table
     
     # Agreed Strengths (green header)
@@ -550,7 +626,7 @@ def add_papu_nanu_section(doc, data):
         create_papu_table(doc, categories['agreed_strengths'][:8], '375623')
         doc.add_paragraph()
     
-    # Good News (blue header) - others rate higher than self
+    # Good News (blue header)
     if categories['good_news']:
         heading = doc.add_heading("Good News", level=2)
         heading.paragraph_format.keep_with_next = True
@@ -599,12 +675,10 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
         item_scores = data['by_item'].get(item_num, {})
         item_text = item_scores.get('text', ITEMS.get(item_num, ''))
         
-        # Create 2-column borderless table for side-by-side layout
         layout_table = doc.add_table(rows=1, cols=2)
         make_table_borderless(layout_table)
         layout_table.autofit = False
         
-        # Left cell: Question text (~3 inches)
         text_cell = layout_table.rows[0].cells[0]
         text_cell.width = Inches(3.0)
         text_para = text_cell.paragraphs[0]
@@ -613,10 +687,8 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
         text_para.runs[0].font.size = Pt(10)
         if len(text_para.runs) > 1:
             text_para.runs[1].font.size = Pt(10)
-        # Keep statement with its chart
         text_para.paragraph_format.keep_with_next = True
         
-        # Right cell: Bar chart (~3 inches)
         chart_cell = layout_table.rows[0].cells[1]
         chart_cell.width = Inches(3.0)
         
@@ -628,42 +700,21 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
             
             chart_para = chart_cell.paragraphs[0]
             chart_para.add_run().add_picture(tmp.name, width=Inches(2.8))
-            # Keep chart paragraph together
             chart_para.paragraph_format.keep_together = True
             os.unlink(tmp.name)
         
         doc.add_paragraph()
     
-    # Section comments
+    # --- CLEAN COMMENTS (replaces old table style) ---
     section_comments = comments.get('by_section', {}).get(dim_name, [])
     if section_comments:
         comment_heading = doc.add_paragraph()
         run = comment_heading.add_run(f"Comments on {dim_name}")
         run.bold = True
         run.font.size = Pt(11)
-        
-        # Create comments table with proper widths
-        table = doc.add_table(rows=1, cols=2)
-        table.style = 'Table Grid'
-        table.autofit = False
-        
-        hdr = table.rows[0].cells
-        hdr[0].text = "Source"
-        hdr[0].width = Inches(1.2)
-        hdr[1].text = "Comment"
-        hdr[1].width = Inches(5.0)
-        
-        for cell in hdr:
-            set_cell_shading(cell, '024731')
-            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-            cell.paragraphs[0].runs[0].bold = True
-        
-        for comment in section_comments:
-            row = table.add_row().cells
-            row[0].text = GROUP_DISPLAY.get(comment["group"], comment["group"])
-            row[0].width = Inches(1.2)
-            row[1].text = comment["text"]
-            row[1].width = Inches(5.0)
+        run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+
+        add_clean_comments(doc, section_comments)
     
     doc.add_page_break()
 
@@ -683,12 +734,10 @@ def add_overall_effectiveness(doc, data, is_self_only=False):
         item_scores = data['by_item'].get(item_num, {})
         item_text = item_scores.get('text', ITEMS.get(item_num, ''))
         
-        # Create 2-column borderless table for side-by-side layout (same as dimensions)
         layout_table = doc.add_table(rows=1, cols=2)
         make_table_borderless(layout_table)
         layout_table.autofit = False
         
-        # Left cell: Question text (~3 inches)
         text_cell = layout_table.rows[0].cells[0]
         text_cell.width = Inches(3.0)
         text_para = text_cell.paragraphs[0]
@@ -697,10 +746,8 @@ def add_overall_effectiveness(doc, data, is_self_only=False):
         text_para.runs[0].font.size = Pt(10)
         if len(text_para.runs) > 1:
             text_para.runs[1].font.size = Pt(10)
-        # Keep statement with its chart
         text_para.paragraph_format.keep_with_next = True
         
-        # Right cell: Bar chart (~3 inches)
         chart_cell = layout_table.rows[0].cells[1]
         chart_cell.width = Inches(3.0)
         
@@ -721,46 +768,26 @@ def add_overall_effectiveness(doc, data, is_self_only=False):
 
 
 def add_overall_comments(doc, comments):
-    """Add overall qualitative feedback section."""
+    """Add overall qualitative feedback section — clean style."""
     add_section_heading(doc, "Overall Qualitative Feedback", font_size=16)
     
+    # --- STRENGTHS ---
     if comments.get('strengths'):
-        doc.add_heading("Greatest Strengths", level=2)
-        
-        table = doc.add_table(rows=1, cols=2)
-        table.style = 'Table Grid'
-        hdr = table.rows[0].cells
-        hdr[0].text = "Source"
-        hdr[1].text = "Comment"
-        for cell in hdr:
-            set_cell_shading(cell, '375623')
-            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-            cell.paragraphs[0].runs[0].bold = True
-        
-        for comment in comments['strengths']:
-            row = table.add_row().cells
-            row[0].text = GROUP_DISPLAY.get(comment["group"], comment["group"])
-            row[1].text = comment["text"]
+        heading = doc.add_heading("Greatest Strengths", level=2)
+        for run in heading.runs:
+            run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+
+        add_clean_comments(doc, comments['strengths'])
     
     doc.add_paragraph()
     
+    # --- DEVELOPMENT ---
     if comments.get('development'):
-        doc.add_heading("Development Suggestions", level=2)
-        
-        table = doc.add_table(rows=1, cols=2)
-        table.style = 'Table Grid'
-        hdr = table.rows[0].cells
-        hdr[0].text = "Source"
-        hdr[1].text = "Comment"
-        for cell in hdr:
-            set_cell_shading(cell, 'C65911')
-            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-            cell.paragraphs[0].runs[0].bold = True
-        
-        for comment in comments['development']:
-            row = table.add_row().cells
-            row[0].text = GROUP_DISPLAY.get(comment["group"], comment["group"])
-            row[1].text = comment["text"]
+        heading = doc.add_heading("Development Suggestions", level=2)
+        for run in heading.runs:
+            run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+
+        add_clean_comments(doc, comments['development'])
     
     doc.add_page_break()
 
@@ -787,7 +814,7 @@ def add_reflection_questions(doc):
         para = doc.add_paragraph()
         para.add_run(f"{i}. ").bold = True
         para.add_run(question)
-        doc.add_paragraph()  # Space for notes
+        doc.add_paragraph()
     
     doc.add_page_break()
 
@@ -848,6 +875,10 @@ def add_next_steps(doc):
     )
 
 
+# ============================================
+# MAIN GENERATION
+# ============================================
+
 def generate_report(leader_name, report_type, data, comments, dealership=None, cohort=None):
     """
     Main entry point for report generation.
@@ -900,7 +931,6 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
             create_radar_chart(DIMENSIONS, self_scores, None, tmp.name)
             
-            # Add picture and centre it
             para = doc.add_paragraph()
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = para.add_run()
@@ -937,7 +967,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         add_executive_summary(doc, data)
         add_papu_nanu_section(doc, data)
         
-        # Detailed Feedback section - heading flows into first dimension
+        # Detailed Feedback section
         add_section_heading(doc, "Detailed Feedback by Dimension", font_size=18)
         
         for dim_name in DIMENSIONS.keys():
