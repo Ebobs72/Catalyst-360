@@ -1040,34 +1040,70 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
     if report_type == 'Self-Assessment':
         create_cover_page(doc, leader_name, "Self-Assessment Report", dealership, cohort)
         
-        doc.add_heading("About This Report", level=1)
+        # About This Report — styled heading, its own page
+        about_heading = add_section_heading(doc, "About This Report", font_size=18)
         doc.add_paragraph(
             "This self-assessment report captures your own view of your leadership effectiveness "
             "across the nine dimensions of the Compass framework. It forms the starting point for "
             "your 360-degree feedback process."
         )
-        doc.add_page_break()
+        doc.add_paragraph()
+        doc.add_paragraph(
+            "The report is structured as follows:"
+        )
+        sections_list = [
+            "Your Self-Assessment Overview — your dimension scores at a glance with a radar chart",
+            "Detailed Self-Assessment by Dimension — item-level scores with bar charts for each of the nine dimensions",
+            "Overall Effectiveness — two global leadership effectiveness items",
+            "Reflection Questions — prompts to help you prepare for your coaching session",
+            "What Happens Next — the next steps in the 360 feedback process",
+        ]
+        for item in sections_list:
+            para = doc.add_paragraph(item, style='List Bullet')
         
-        # Overview table
-        doc.add_heading("Your Self-Assessment Overview", level=1)
+        # Contents page
+        add_table_of_contents(doc)
+        
+        # Overview — dimension table + radar on one page
+        heading = add_section_heading(doc, "Your Self-Assessment Overview", font_size=16)
+        heading.paragraph_format.page_break_before = True
+        
         table = doc.add_table(rows=1, cols=2)
         table.style = 'Table Grid'
+        table.autofit = False
+        
+        widths = [Inches(4.6), Inches(1.5)]
+        
         hdr = table.rows[0].cells
         hdr[0].text = "Dimension"
         hdr[1].text = "Your Score"
-        for cell in hdr:
+        for i, cell in enumerate(hdr):
+            cell.width = widths[i]
             set_cell_shading(cell, '024731')
             cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+            cell.paragraphs[0].runs[0].bold = True
+            cell.paragraphs[0].runs[0].font.size = Pt(10)
+        if len(hdr) > 1:
+            hdr[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         for dim_name in DIMENSIONS.keys():
             row = table.add_row().cells
+            for i, cell in enumerate(row):
+                cell.width = widths[i]
             row[0].text = dim_name
             self_score = data['by_dimension'].get(dim_name, {}).get('Self')
-            row[1].text = f"{self_score:.2f}" if self_score else "-"
+            row[1].text = f"{self_score:.1f}" if self_score else "-"
+            row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        doc.add_paragraph()
+        # Keep table with radar
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    para.paragraph_format.keep_with_next = True
         
-        # Radar - larger and centred
+        # Horizontal rule + radar chart
+        _add_thin_rule(doc)
+        
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
             create_radar_chart(DIMENSIONS, self_scores, None, tmp.name)
@@ -1075,14 +1111,17 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             para = doc.add_paragraph()
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = para.add_run()
-            run.add_picture(tmp.name, width=Inches(6))
+            run.add_picture(tmp.name, width=Inches(3.74))  # 9.5cm
             os.unlink(tmp.name)
         
-        doc.add_page_break()
+        # Detailed sections — with parent heading that flows into first dimension
+        detail_heading = add_section_heading(doc, "Detailed Self-Assessment by Dimension", font_size=18)
+        detail_heading.paragraph_format.page_break_before = True
+        detail_heading.paragraph_format.keep_with_next = True
         
-        # Detailed sections
-        for dim_name in DIMENSIONS.keys():
-            add_dimension_section(doc, dim_name, data, comments, is_self_only=True)
+        for i, dim_name in enumerate(DIMENSIONS.keys()):
+            add_dimension_section(doc, dim_name, data, comments, is_self_only=True,
+                                  is_first_dimension=(i == 0))
         
         # Overall Effectiveness
         add_overall_effectiveness(doc, data, is_self_only=True)
