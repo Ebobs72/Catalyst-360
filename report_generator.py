@@ -1038,7 +1038,9 @@ def synthesise_feedback_themes(leader_name, comments, data):
         if combined:
             scores_context.append(f"{dim_name}: Self={self_score}, Others={combined}, Gap={gap:+.1f}" if gap else f"{dim_name}: Combined={combined}")
     
-    prompt = f"""You are analysing 360-degree feedback for a leader called {leader_name} as part of a leadership development programme.
+    prompt = f"""You are writing a section of a 360-degree feedback report for {leader_name}. This section synthesises the key themes from their verbatim feedback. The leader will read this directly, so write in the second person — use "you", "your", "your feedback suggests" etc. Never refer to them as "the leader" or "this leader".
+
+The tone should be warm, constructive, and developmental — as if a skilled coach were talking them through their feedback. Be direct but supportive.
 
 Below are all the verbatim comments from their feedback, organised by dimension and source group, followed by their dimension scores.
 
@@ -1050,9 +1052,7 @@ DIMENSION SCORES:
 
 Please identify 4-6 key themes that emerge from this feedback. For each theme:
 1. Give it a clear, concise title (e.g., "Building Trust Through Authenticity" or "Balancing Operational Focus with Strategic Thinking")
-2. Write a 2-3 sentence narrative that synthesises the evidence — reference what multiple respondents said without quoting them verbatim, and connect to the quantitative scores where relevant.
-
-Be constructive and developmental in tone. This will be read by the leader in a coaching context.
+2. Write a 2-3 sentence narrative that synthesises the evidence — reference what respondents said without quoting them verbatim, connect to the quantitative scores where relevant, and speak directly to {leader_name} using "you" and "your".
 
 Respond ONLY with a JSON array of objects, each with "title" and "narrative" keys. No preamble, no markdown formatting, just the JSON array."""
 
