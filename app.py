@@ -218,6 +218,24 @@ st.markdown("""
         color: white !important;
     }
     
+    /* Download buttons — dark text on light background */
+    .stDownloadButton > button,
+    .stDownloadButton > button p,
+    .stDownloadButton > button span,
+    [data-testid="stBaseButton-secondary"].stDownloadButton > button {
+        background: white !important;
+        color: #333 !important;
+        border: 1px solid #DDD !important;
+    }
+    
+    .stDownloadButton > button:hover {
+        background: #F5F5F5 !important;
+        border-color: #024731 !important;
+        color: #024731 !important;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    
     /* Thank you page */
     .thank-you-container {
         text-align: center;
