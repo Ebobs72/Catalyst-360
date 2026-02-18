@@ -188,7 +188,7 @@ st.markdown("""
     /* Button styling */
     .stButton > button {
         background: linear-gradient(135deg, #024731 0%, #035D40 100%);
-        color: white;
+        color: white !important;
         border: none;
         padding: 0.6rem 2rem;
         font-family: 'Source Sans Pro', sans-serif;
@@ -200,6 +200,22 @@ st.markdown("""
     .stButton > button:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(2, 71, 49, 0.3);
+        color: white !important;
+    }
+    
+    /* Ensure ALL button variants have white text */
+    .stButton > button p,
+    .stButton > button span,
+    .stFormSubmitButton > button,
+    .stFormSubmitButton > button p,
+    .stFormSubmitButton > button span,
+    [data-testid="stBaseButton-primary"],
+    [data-testid="stBaseButton-primary"] p,
+    [data-testid="stBaseButton-primary"] span,
+    [data-testid="stBaseButton-secondary"],
+    [data-testid="stBaseButton-secondary"] p,
+    [data-testid="stBaseButton-secondary"] span {
+        color: white !important;
     }
     
     /* Thank you page */
