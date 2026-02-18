@@ -353,6 +353,76 @@ def create_self_only_bar(score, output_path):
 # REPORT SECTIONS
 # ============================================
 
+def _add_page_number_footer(section):
+    """Add 'Page X of Y' footer to a document section, centre-aligned."""
+    footer = section.footer
+    footer.is_linked_to_previous = False
+    para = footer.paragraphs[0]
+    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # "Page "
+    run = para.add_run("Page ")
+    run.font.size = Pt(8)
+    run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+    # Current page number field
+    fldChar1 = OxmlElement('w:fldChar')
+    fldChar1.set(qn('w:fldCharType'), 'begin')
+    run1 = para.add_run()
+    run1._r.append(fldChar1)
+
+    instrText1 = OxmlElement('w:instrText')
+    instrText1.set(qn('xml:space'), 'preserve')
+    instrText1.text = ' PAGE '
+    run2 = para.add_run()
+    run2._r.append(instrText1)
+
+    fldChar2 = OxmlElement('w:fldChar')
+    fldChar2.set(qn('w:fldCharType'), 'separate')
+    run3 = para.add_run()
+    run3._r.append(fldChar2)
+
+    run4 = para.add_run("1")
+    run4.font.size = Pt(8)
+    run4.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+    fldChar3 = OxmlElement('w:fldChar')
+    fldChar3.set(qn('w:fldCharType'), 'end')
+    run5 = para.add_run()
+    run5._r.append(fldChar3)
+
+    # " of "
+    run6 = para.add_run(" of ")
+    run6.font.size = Pt(8)
+    run6.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+    # Total pages field
+    fldChar4 = OxmlElement('w:fldChar')
+    fldChar4.set(qn('w:fldCharType'), 'begin')
+    run7 = para.add_run()
+    run7._r.append(fldChar4)
+
+    instrText2 = OxmlElement('w:instrText')
+    instrText2.set(qn('xml:space'), 'preserve')
+    instrText2.text = ' NUMPAGES '
+    run8 = para.add_run()
+    run8._r.append(instrText2)
+
+    fldChar5 = OxmlElement('w:fldChar')
+    fldChar5.set(qn('w:fldCharType'), 'separate')
+    run9 = para.add_run()
+    run9._r.append(fldChar5)
+
+    run10 = para.add_run("1")
+    run10.font.size = Pt(8)
+    run10.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+    fldChar6 = OxmlElement('w:fldChar')
+    fldChar6.set(qn('w:fldCharType'), 'end')
+    run11 = para.add_run()
+    run11._r.append(fldChar6)
+
+
 def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=None):
     """Create the cover page."""
     for _ in range(6):
@@ -411,12 +481,69 @@ def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=Non
     run.font.italic = True
     run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
     
-    doc.add_page_break()
+    # Ensure cover page (first section) has NO footer
+    first_section = doc.sections[0]
+    first_section.different_first_page_header_footer = False
+    footer = first_section.footer
+    footer.is_linked_to_previous = False
+    # Clear any default footer content
+    for p in footer.paragraphs:
+        p.text = ""
+    
+    # Add a SECTION BREAK (new page) so the rest of the report is a new section
+    from docx.enum.section import WD_ORIENT
+    new_section = doc.add_section()
+    new_section.start_type = 2  # 2 = new page
+    # Copy page dimensions from first section
+    new_section.page_width = first_section.page_width
+    new_section.page_height = first_section.page_height
+    new_section.left_margin = first_section.left_margin
+    new_section.right_margin = first_section.right_margin
+    new_section.top_margin = first_section.top_margin
+    new_section.bottom_margin = first_section.bottom_margin
+    
+    # Add "Page X of Y" footer to the new section
+    _add_page_number_footer(new_section)
+
+
+def add_table_of_contents(doc):
+    """Add a Table of Contents page that auto-updates in Word."""
+    heading = add_section_heading(doc, "Contents", font_size=18)
+
+    # Add a TOC field — Word will populate page numbers when user presses F9
+    para = doc.add_paragraph()
+    run = para.add_run()
+    fldChar_begin = OxmlElement('w:fldChar')
+    fldChar_begin.set(qn('w:fldCharType'), 'begin')
+    run._r.append(fldChar_begin)
+
+    run2 = para.add_run()
+    instrText = OxmlElement('w:instrText')
+    instrText.set(qn('xml:space'), 'preserve')
+    instrText.text = ' TOC \\o "1-2" \\h \\z \\u '
+    run2._r.append(instrText)
+
+    run3 = para.add_run()
+    fldChar_separate = OxmlElement('w:fldChar')
+    fldChar_separate.set(qn('w:fldCharType'), 'separate')
+    run3._r.append(fldChar_separate)
+
+    # Placeholder text (shown before TOC is updated in Word)
+    run4 = para.add_run("Right-click and select 'Update Field' to populate contents.")
+    run4.font.size = Pt(10)
+    run4.font.italic = True
+    run4.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+    run5 = para.add_run()
+    fldChar_end = OxmlElement('w:fldChar')
+    fldChar_end.set(qn('w:fldCharType'), 'end')
+    run5._r.append(fldChar_end)
 
 
 def add_response_summary(doc, data):
     """Add response summary table."""
-    add_section_heading(doc, "Response Summary", font_size=16)
+    heading = add_section_heading(doc, "Response Summary", font_size=14)
+    heading.paragraph_format.page_break_before = True
     
     response_counts = data.get('response_counts', {})
     hidden_groups = data.get('hidden_groups', [])
@@ -526,25 +653,35 @@ def add_executive_summary(doc, data):
         else:
             row[3].text = "-"
     
-    # Radar chart - sized to fit on same page as tables above
+    # Radar chart - sized to fit on same page as table above
+    # First, keep the table together with the chart
+    for row in table.rows:
+        for cell in row.cells:
+            for para in cell.paragraphs:
+                para.paragraph_format.keep_with_next = True
+
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
         self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
         combined_scores = {dim: data['by_dimension'].get(dim, {}).get('Combined') for dim in DIMENSIONS}
         create_radar_chart(DIMENSIONS, self_scores, combined_scores, tmp.name)
         
-        # Add picture and centre it
+        # Horizontal rule to separate table from radar
+        _add_thin_rule(doc)
+
+        # Add picture and centre it — sized to fit on same page as table above
         para = doc.add_paragraph()
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = para.add_run()
-        run.add_picture(tmp.name, width=Inches(5.0))
+        run.add_picture(tmp.name, width=Inches(3.74))  # 9.5cm
         os.unlink(tmp.name)
     
-    doc.add_page_break()
+    # No explicit page break — next section uses page_break_before
 
 
 def add_papu_nanu_section(doc, data):
     """Add strengths and development areas analysis."""
-    add_section_heading(doc, "Strengths & Development Analysis", font_size=16)
+    heading = add_section_heading(doc, "Strengths & Development Analysis", font_size=16)
+    heading.paragraph_format.page_break_before = True
     
     categories = categorize_papu_nanu(data)
     
@@ -653,12 +790,15 @@ def add_papu_nanu_section(doc, data):
         create_papu_table(doc, categories['hidden_talents'], '7030A0')
         doc.add_paragraph()
     
-    doc.add_page_break()
+    # No explicit page break — next section uses page_break_before
 
 
-def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
+def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_first_dimension=False):
     """Add a dimension section with items displayed side-by-side with bar charts."""
-    doc.add_heading(dim_name, level=2)
+    heading = doc.add_heading(dim_name, level=2)
+    # First dimension flows after the "Detailed Feedback" heading; others start on new page
+    if not is_first_dimension:
+        heading.paragraph_format.page_break_before = True
     
     # Dimension description
     desc = doc.add_paragraph()
@@ -716,12 +856,13 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False):
 
         add_clean_comments(doc, section_comments)
     
-    doc.add_page_break()
+    # No explicit page break here — next section uses page_break_before
 
 
 def add_overall_effectiveness(doc, data, is_self_only=False):
     """Add Overall Effectiveness section (Q46-47)."""
-    add_section_heading(doc, "Overall Effectiveness", font_size=16)
+    heading = add_section_heading(doc, "Overall Effectiveness", font_size=16)
+    heading.paragraph_format.page_break_before = True
     
     desc = doc.add_paragraph()
     run = desc.add_run("These two items provide a global assessment of leadership effectiveness.")
@@ -764,12 +905,13 @@ def add_overall_effectiveness(doc, data, is_self_only=False):
         
         doc.add_paragraph()
     
-    doc.add_page_break()
+    # No explicit page break — next section uses page_break_before
 
 
 def add_overall_comments(doc, comments):
     """Add overall qualitative feedback section — clean style."""
-    add_section_heading(doc, "Overall Qualitative Feedback", font_size=16)
+    heading = add_section_heading(doc, "Overall Qualitative Feedback", font_size=16)
+    heading.paragraph_format.page_break_before = True
     
     # --- STRENGTHS ---
     if comments.get('strengths'):
@@ -788,13 +930,12 @@ def add_overall_comments(doc, comments):
             run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
 
         add_clean_comments(doc, comments['development'])
-    
-    doc.add_page_break()
 
 
 def add_reflection_questions(doc):
     """Add reflection questions for coaching preparation."""
-    doc.add_heading("Reflection Questions", level=1)
+    heading = doc.add_heading("Reflection Questions", level=1)
+    heading.paragraph_format.page_break_before = True
     
     doc.add_paragraph(
         "Before your coaching session, take some time to reflect on your self-assessment. "
@@ -815,13 +956,12 @@ def add_reflection_questions(doc):
         para.add_run(f"{i}. ").bold = True
         para.add_run(question)
         doc.add_paragraph()
-    
-    doc.add_page_break()
 
 
 def add_what_happens_next(doc):
     """Add What Happens Next section for self-assessment reports."""
-    doc.add_heading("What Happens Next", level=1)
+    heading = doc.add_heading("What Happens Next", level=1)
+    heading.paragraph_format.page_break_before = True
     
     steps = [
         ("Feedback Collection", 
@@ -850,7 +990,8 @@ def add_what_happens_next(doc):
 
 def add_next_steps(doc):
     """Add next steps section for full 360 reports."""
-    add_section_heading(doc, "Next Steps", font_size=16)
+    heading = add_section_heading(doc, "Next Steps", font_size=16)
+    heading.paragraph_format.page_break_before = True
     
     doc.add_paragraph(
         "This feedback provides a foundation for your ongoing leadership development. "
@@ -955,23 +1096,47 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
     elif report_type == 'Full 360':
         create_cover_page(doc, leader_name, "Feedback Report", dealership, cohort)
         
-        doc.add_heading("About This Report", level=1)
+        # About This Report — its own page (cover page already has a page break)
+        about_heading = add_section_heading(doc, "About This Report", font_size=18)
         doc.add_paragraph(
             "This 360-degree feedback report brings together perspectives from your line manager, "
             "peers, direct reports, and others, alongside your self-assessment. The comparison "
             "helps identify areas of alignment and potential blind spots."
         )
-        doc.add_page_break()
+        doc.add_paragraph()
+        doc.add_paragraph(
+            "The report is structured as follows:"
+        )
+        sections_list = [
+            "Response Summary & Executive Summary — who responded and your dimension scores at a glance",
+            "Strengths & Development Analysis — where you and others agree, and where perceptions differ",
+            "Detailed Feedback by Dimension — item-level scores with bar charts for each of the nine dimensions",
+            "Overall Effectiveness — two global leadership effectiveness items",
+            "Overall Qualitative Feedback — verbatim comments on your greatest strengths and development areas",
+            "Next Steps — guidance for making the most of your feedback",
+        ]
+        for item in sections_list:
+            para = doc.add_paragraph(item, style='List Bullet')
         
+        # Contents page
+        add_table_of_contents(doc)
+        
+        # Response Summary + Executive Summary + Radar — all on one page
         add_response_summary(doc, data)
         add_executive_summary(doc, data)
+        
         add_papu_nanu_section(doc, data)
         
-        # Detailed Feedback section
-        add_section_heading(doc, "Detailed Feedback by Dimension", font_size=18)
+        # Detailed Feedback by Dimension
+        # The section title is added before the first dimension only
+        detail_heading = add_section_heading(doc, "Detailed Feedback by Dimension", font_size=18)
+        detail_heading.paragraph_format.page_break_before = True
+        # keep_with_next ensures heading stays with first dimension
+        detail_heading.paragraph_format.keep_with_next = True
         
-        for dim_name in DIMENSIONS.keys():
-            add_dimension_section(doc, dim_name, data, comments, is_self_only=False)
+        for i, dim_name in enumerate(DIMENSIONS.keys()):
+            add_dimension_section(doc, dim_name, data, comments, is_self_only=False,
+                                  is_first_dimension=(i == 0))
         
         # Overall effectiveness (now Q46-47)
         add_overall_effectiveness(doc, data, is_self_only=False)
