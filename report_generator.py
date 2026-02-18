@@ -19,6 +19,7 @@ matplotlib.use('Agg')
 from datetime import datetime
 import tempfile
 import os
+import requests
 from pathlib import Path
 
 from framework import (
@@ -988,6 +989,178 @@ def add_what_happens_next(doc):
         doc.add_paragraph()
 
 
+def synthesise_feedback_themes(leader_name, comments, data):
+    """
+    Use the Claude API to synthesise key themes from all verbatim feedback.
+    
+    Returns a list of theme dicts: [{'title': str, 'narrative': str}, ...]
+    Returns None if API call fails or insufficient comments.
+    """
+    import json
+    
+    # Collect all comments into a structured prompt
+    all_comments = []
+    
+    # Dimension comments
+    for dim_name, dim_comments in comments.get('by_section', {}).items():
+        for c in dim_comments:
+            all_comments.append({
+                'dimension': dim_name,
+                'source': c['group'],
+                'text': c['text']
+            })
+    
+    # Overall strengths/development comments
+    for c in comments.get('strengths', []):
+        all_comments.append({
+            'dimension': 'Overall Strengths',
+            'source': c['group'],
+            'text': c['text']
+        })
+    for c in comments.get('development', []):
+        all_comments.append({
+            'dimension': 'Overall Development',
+            'source': c['group'],
+            'text': c['text']
+        })
+    
+    # Need enough comments to synthesise meaningfully
+    if len(all_comments) < 5:
+        return None
+    
+    # Build dimension scores context
+    scores_context = []
+    for dim_name in DIMENSIONS.keys():
+        dim_data = data.get('by_dimension', {}).get(dim_name, {})
+        self_score = dim_data.get('Self')
+        combined = dim_data.get('Combined')
+        gap = dim_data.get('Gap')
+        if combined:
+            scores_context.append(f"{dim_name}: Self={self_score}, Others={combined}, Gap={gap:+.1f}" if gap else f"{dim_name}: Combined={combined}")
+    
+    prompt = f"""You are analysing 360-degree feedback for a leader called {leader_name} as part of a leadership development programme.
+
+Below are all the verbatim comments from their feedback, organised by dimension and source group, followed by their dimension scores.
+
+VERBATIM COMMENTS:
+{json.dumps(all_comments, indent=2)}
+
+DIMENSION SCORES:
+{chr(10).join(scores_context)}
+
+Please identify 4-6 key themes that emerge from this feedback. For each theme:
+1. Give it a clear, concise title (e.g., "Building Trust Through Authenticity" or "Balancing Operational Focus with Strategic Thinking")
+2. Write a 2-3 sentence narrative that synthesises the evidence — reference what multiple respondents said without quoting them verbatim, and connect to the quantitative scores where relevant.
+
+Be constructive and developmental in tone. This will be read by the leader in a coaching context.
+
+Respond ONLY with a JSON array of objects, each with "title" and "narrative" keys. No preamble, no markdown formatting, just the JSON array."""
+
+    try:
+        import requests
+        
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": _get_api_key(),
+                "anthropic-version": "2023-06-01"
+            },
+            json={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 2000,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ]
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            text = result['content'][0]['text'].strip()
+            # Clean any markdown fencing
+            text = text.replace('```json', '').replace('```', '').strip()
+            themes = json.loads(text)
+            return themes
+        else:
+            print(f"API returned status {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        print(f"Theme synthesis failed: {e}")
+        return None
+
+
+def _get_api_key():
+    """Get the Anthropic API key from environment or Streamlit secrets."""
+    # Try Streamlit secrets first
+    try:
+        import streamlit as st
+        key = st.secrets.get("anthropic", {}).get("api_key")
+        if key:
+            return key
+    except Exception:
+        pass
+    
+    # Fall back to environment variable
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
+    
+    raise ValueError("No Anthropic API key found. Set ANTHROPIC_API_KEY or add to Streamlit secrets.")
+
+
+def add_theme_synthesis(doc, leader_name, comments, data):
+    """
+    Add the AI-generated theme synthesis section to the report.
+    
+    Falls back gracefully if the API is unavailable — the report still generates
+    without the synthesis section.
+    """
+    themes = synthesise_feedback_themes(leader_name, comments, data)
+    
+    if not themes:
+        return  # Silently skip if synthesis unavailable
+    
+    heading = add_section_heading(doc, "Key Themes in Your Feedback", font_size=16)
+    heading.paragraph_format.page_break_before = True
+    
+    intro = doc.add_paragraph(
+        "The following themes have been identified from the qualitative feedback provided by your "
+        "respondents. These represent the patterns and consistent messages that emerge when all "
+        "comments are considered together."
+    )
+    intro.paragraph_format.space_after = Pt(12)
+    
+    for i, theme in enumerate(themes):
+        # Theme title
+        title_para = doc.add_paragraph()
+        title_para.paragraph_format.space_before = Pt(12) if i > 0 else Pt(6)
+        title_para.paragraph_format.space_after = Pt(4)
+        run = title_para.add_run(f"{i + 1}. {theme['title']}")
+        run.bold = True
+        run.font.size = Pt(12)
+        run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)  # Bentley green
+        
+        # Theme narrative
+        narrative_para = doc.add_paragraph(theme['narrative'])
+        narrative_para.paragraph_format.space_after = Pt(8)
+        for run in narrative_para.runs:
+            run.font.size = Pt(10)
+    
+    # Closing note
+    _add_thin_rule(doc)
+    note = doc.add_paragraph()
+    run = note.add_run(
+        "Note: This synthesis has been generated to help identify patterns in your feedback. "
+        "It should be explored in your coaching session alongside the detailed verbatim comments above."
+    )
+    run.font.size = Pt(9)
+    run.font.italic = True
+    run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+
 def add_next_steps(doc):
     """Add next steps section for full 360 reports."""
     heading = add_section_heading(doc, "Next Steps", font_size=16)
@@ -1152,6 +1325,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             "Detailed Feedback by Dimension — item-level scores with bar charts for each of the nine dimensions",
             "Overall Effectiveness — two global leadership effectiveness items",
             "Overall Qualitative Feedback — verbatim comments on your greatest strengths and development areas",
+            "Key Themes in Your Feedback — patterns and consistent messages identified across all your feedback",
             "Next Steps — guidance for making the most of your feedback",
         ]
         for item in sections_list:
@@ -1181,6 +1355,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         add_overall_effectiveness(doc, data, is_self_only=False)
         
         add_overall_comments(doc, comments)
+        add_theme_synthesis(doc, leader_name, comments, data)
         add_next_steps(doc)
     
     else:  # Progress Report
