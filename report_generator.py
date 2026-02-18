@@ -1041,7 +1041,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         create_cover_page(doc, leader_name, "Self-Assessment Report", dealership, cohort)
         
         # About This Report — styled heading, its own page
-        about_heading = add_section_heading(doc, "About This Report", font_size=18)
+        about_heading = add_section_heading(doc, "About This Report", font_size=16)
         doc.add_paragraph(
             "This self-assessment report captures your own view of your leadership effectiveness "
             "across the nine dimensions of the Compass framework. It forms the starting point for "
@@ -1136,7 +1136,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         create_cover_page(doc, leader_name, "Feedback Report", dealership, cohort)
         
         # About This Report — its own page (cover page already has a page break)
-        about_heading = add_section_heading(doc, "About This Report", font_size=18)
+        about_heading = add_section_heading(doc, "About This Report", font_size=16)
         doc.add_paragraph(
             "This 360-degree feedback report brings together perspectives from your line manager, "
             "peers, direct reports, and others, alongside your self-assessment. The comparison "
