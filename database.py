@@ -14,7 +14,7 @@ import os
 
 # Try to import libsql for Turso, fall back to sqlite3 for local dev
 try:
-    import libsql_experimental as libsql
+    import libsql
     USING_TURSO = True
 except ImportError:
     import sqlite3
