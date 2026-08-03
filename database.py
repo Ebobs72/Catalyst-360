@@ -13,13 +13,13 @@ import json
 import os
 
 # Try to import libsql for Turso, fall back to sqlite3 for local dev
+import sqlite3
+
 try:
     import libsql
     USING_TURSO = True
 except ImportError:
-    import sqlite3
     USING_TURSO = False
-
 
 class Database:
     def __init__(self, db_path="compass_360.db"):
