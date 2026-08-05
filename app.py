@@ -41,7 +41,7 @@ st.set_page_config(
 # Custom CSS for Bentley-appropriate styling
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Source+Sans+Pro:wght@300;400;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@300;400;600;700&display=swap');
     
     :root {
         --bentley-green: #024731;
@@ -55,12 +55,12 @@ st.markdown("""
     }
     
     h1, h2, h3 {
-        font-family: 'Cormorant Garamond', serif !important;
+        font-family: 'Source Sans Pro', sans-serif !important;
         color: var(--bentley-green) !important;
     }
-    
+
     .main-title {
-        font-family: 'Cormorant Garamond', serif;
+        font-family: 'Source Sans Pro', sans-serif;
         font-size: 2.8rem;
         font-weight: 600;
         color: #024731;
@@ -96,7 +96,7 @@ st.markdown("""
     }
     
     .stat-number {
-        font-family: 'Cormorant Garamond', serif;
+        font-family: 'Source Sans Pro', sans-serif;
         font-size: 2.5rem;
         font-weight: 600;
         color: #024731;
@@ -145,7 +145,7 @@ st.markdown("""
         padding: 0.8rem 1.2rem;
         border-radius: 6px;
         margin: 1.5rem 0 1rem 0;
-        font-family: 'Cormorant Garamond', serif;
+        font-family: 'Source Sans Pro', sans-serif;
         font-size: 1.3rem;
     }
     
