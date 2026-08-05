@@ -5,10 +5,11 @@ Provides management interface for leaders, raters, and report generation.
 """
 import streamlit as st
 import pandas as pd
+import random
 from datetime import datetime
 from framework import (
     RELATIONSHIP_TYPES, GROUP_DISPLAY, MIN_RESPONSES_FOR_REPORT,
-    RELATIONSHIP_INPUT_HELP, normalise_relationship
+    RELATIONSHIP_INPUT_HELP, normalise_relationship, DIMENSIONS
 )
 
 # Try to import email functionality
@@ -841,6 +842,45 @@ def _has_self_rater(db, leader_id):
     return any(r['relationship'] == 'Self' for r in db.get_raters_for_leader(leader_id))
 
 
+_TEST_KEEP_COMMENTS = [
+    "Keep bringing the same energy and consistency to the team.",
+    "Keep making time for people even when things are busy.",
+    "Keep setting the standard on follow-through.",
+]
+
+_TEST_CHANGE_COMMENTS = [
+    "Delegate a little more to free up time for strategic thinking.",
+    "Bring the team into changes earlier, before decisions feel final.",
+    "Be a bit more explicit about the 'why' behind priorities.",
+]
+
+
+def _generate_test_feedback():
+    """
+    Fabricate a plausible ratings + comments payload for one rater, for testing
+    report generation without filling in every form by hand. Same shape
+    database.submit_feedback expects from a real submission.
+    """
+    ratings = {}
+    for item_num in range(1, 46):
+        # A small share of "no opportunity to observe" answers, same as a real
+        # rater population would produce.
+        if random.random() < 0.05:
+            ratings[item_num] = 0
+        else:
+            ratings[item_num] = random.choices([1, 2, 3, 4, 5], weights=[5, 10, 25, 35, 25])[0]
+
+    comments = {}
+    for dim_name in DIMENSIONS.keys():
+        if random.random() < 0.6:
+            comments[dim_name] = f"Genuinely strong around {dim_name.lower()}, worth calling out."
+
+    comments['keep'] = random.choice(_TEST_KEEP_COMMENTS)
+    comments['change'] = random.choice(_TEST_CHANGE_COMMENTS)
+
+    return ratings, comments
+
+
 def render_links_tab(db):
     """Render the links generation and tracking tab."""
     
@@ -1025,9 +1065,37 @@ def render_links_tab(db):
                         st.rerun()
                 else:
                     st.info("No emails sent yet for this leader.")
-            
+
             st.markdown("---")
-        
+
+        # Testing tool: fabricate ratings/comments for raters who haven't
+        # responded yet, so a report can be generated without filling in every
+        # form by hand. Runs through the exact same submit_feedback path a real
+        # rater uses (ratings, comments, mark complete, sever identity), so it is
+        # a genuine test of report generation, not a shortcut around it.
+        incomplete_raters = [r for r in raters if not r.get('completed')]
+        if incomplete_raters:
+            with st.expander(f"🧪 Testing: Simulate Responses ({len(incomplete_raters)} incomplete)"):
+                st.caption(
+                    "Fills in plausible ratings and comments for every rater who "
+                    "hasn't submitted yet and marks them complete, so you can "
+                    "generate a full report without waiting on real responses."
+                )
+                if st.button(
+                    f"Simulate {len(incomplete_raters)} response(s)",
+                    key=f"simulate_{selected_leader_id}"
+                ):
+                    for rater in incomplete_raters:
+                        ratings, comments = _generate_test_feedback()
+                        db.submit_feedback(rater['id'], ratings, comments)
+                    st.success(
+                        f"Simulated {len(incomplete_raters)} response(s). "
+                        f"A report can now be generated in the Reports tab."
+                    )
+                    st.rerun()
+
+            st.markdown("---")
+
         # Display raters table
         for rel in ['Self', 'Boss', 'Peers', 'DRs', 'Others']:
             if rel not in raters_by_group:
