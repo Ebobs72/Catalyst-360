@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Email module for the 360 Development Catalyst.
+Email module for Bentley Compass 360.
 
 Sends branded assessment invitations and reminders via SMTP.
 Works with Microsoft 365 / Outlook, Gmail, or any SMTP provider.
@@ -11,8 +11,36 @@ import smtplib
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+from datetime import datetime, timedelta
 import streamlit as st
+
+# Minimum time between reminder emails to the same rater
+REMINDER_THROTTLE_HOURS = 48
+
+# Last-resort fallback for building rater/portal links. This points at the LIVE
+# app, so any other deployment (e.g. the sandbox) MUST set `[app] base_url` in
+# its own secrets, or its invitation emails will send raters to the live system.
+# It also still carries the pre-white-label name, which is why configuring it
+# properly matters: the URL is visible to raters in the link and address bar.
+DEFAULT_BASE_URL = "https://catalyst-360-arbncruhflmazjemep8uzh.streamlit.app"
+
+
+def get_app_base_url():
+    """
+    Base URL for rater and portal links, read from Streamlit secrets so each
+    deployment points at itself.
+
+    Configure per environment as:
+        [app]
+        base_url = "https://bentley-compass-360-sandbox.streamlit.app"
+    """
+    try:
+        url = st.secrets.get("app", {}).get("base_url")
+        if url:
+            return str(url).rstrip('/')
+    except Exception:
+        pass
+    return DEFAULT_BASE_URL
 
 
 def get_smtp_config():
@@ -24,7 +52,7 @@ def get_smtp_config():
         username = email_config.get("username", "")
         password = email_config.get("password", "")
         sender_email = email_config.get("sender_email", username)
-        sender_name = email_config.get("sender_name", "The Development Catalyst")
+        sender_name = email_config.get("sender_name", "Bentley Compass 360")
         
         if smtp_server and username and password:
             return {
@@ -85,19 +113,19 @@ def _send_email(to_email, to_name, subject, html_content):
 def _get_rater_invitation_html(leader_name, relationship, assessment_url):
     """Generate HTML for rater invitation email."""
     
-    relationship_text = {
-        'Self': 'complete your self-assessment',
-        'Boss': 'provide feedback as their line manager',
-        'Peers': 'provide feedback as a peer',
-        'DRs': 'provide feedback as a direct report',
-        'Others': 'provide feedback'
-    }.get(relationship, 'provide feedback')
-    
+    relationship_clause = {
+        'Boss': 'in your capacity as their line manager',
+        'Peers': 'as a peer',
+        'DRs': 'as a direct report',
+        'Others': ''
+    }.get(relationship, '')
+
     if relationship == 'Self':
-        intro = f"As part of the Bentley Compass Leadership Programme, you are invited to complete your 360-degree self-assessment."
+        intro = f"As part of the Bentley Compass Leadership Programme, you are invited to complete your leadership self-assessment. Please complete it before Module 1, where you will talk your report through with your coach."
         cta_text = "Complete Self-Assessment"
     else:
-        intro = f"You have been invited to provide 360-degree feedback for <strong>{leader_name}</strong> as part of the Bentley Compass Leadership Programme."
+        suffix = f", {relationship_clause}" if relationship_clause else ""
+        intro = f"You have been invited to provide 360-degree feedback for <strong>{leader_name}</strong> as part of the Bentley Compass Leadership Programme{suffix}."
         cta_text = "Provide Feedback"
     
     return f"""
@@ -117,7 +145,7 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url):
                     <tr>
                         <td style="background: linear-gradient(135deg, #024731 0%, #035D40 100%); padding: 30px 40px; text-align: center;">
                             <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
-                                THE 360 DEVELOPMENT CATALYST
+                                BENTLEY COMPASS 360
                             </h1>
                             <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0 0; font-size: 14px;">
                                 Bentley Compass Leadership Programme
@@ -162,7 +190,7 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url):
                     <tr>
                         <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
                             <p style="color: #999; font-size: 12px; margin: 0;">
-                                This is an automated message from The Development Catalyst.<br>
+                                This is an automated message from Bentley Compass 360.<br>
                                 Please do not reply to this email.
                             </p>
                         </td>
@@ -181,7 +209,7 @@ def _get_reminder_html(leader_name, relationship, assessment_url):
     """Generate HTML for reminder email."""
     
     if relationship == 'Self':
-        intro = f"This is a friendly reminder to complete your 360-degree self-assessment for the Bentley Compass Leadership Programme."
+        intro = f"This is a friendly reminder to complete your leadership self-assessment for the Bentley Compass Leadership Programme, ahead of Module 1."
     else:
         intro = f"This is a friendly reminder to provide your 360-degree feedback for <strong>{leader_name}</strong>."
     
@@ -205,7 +233,7 @@ def _get_reminder_html(leader_name, relationship, assessment_url):
                                 FRIENDLY REMINDER
                             </h1>
                             <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px;">
-                                The 360 Development Catalyst
+                                Bentley Compass 360
                             </p>
                         </td>
                     </tr>
@@ -247,7 +275,7 @@ def _get_reminder_html(leader_name, relationship, assessment_url):
                     <tr>
                         <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
                             <p style="color: #999; font-size: 12px; margin: 0;">
-                                This is an automated message from The Development Catalyst.<br>
+                                This is an automated message from Bentley Compass 360.<br>
                                 Please do not reply to this email.
                             </p>
                         </td>
@@ -304,7 +332,7 @@ def _get_leader_notification_html(leader_name, report_url=None):
                                 YOUR FEEDBACK IS READY
                             </h1>
                             <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0 0; font-size: 14px;">
-                                The 360 Development Catalyst
+                                Bentley Compass 360
                             </p>
                         </td>
                     </tr>
@@ -332,7 +360,7 @@ def _get_leader_notification_html(leader_name, report_url=None):
                     <tr>
                         <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
                             <p style="color: #999; font-size: 12px; margin: 0;">
-                                This is an automated message from The Development Catalyst.<br>
+                                This is an automated message from Bentley Compass 360.<br>
                                 Please do not reply to this email.
                             </p>
                         </td>
@@ -370,7 +398,7 @@ def send_rater_invitation(rater, leader_name, base_url, db):
     assessment_url = f"{base_url}?t={rater['token']}"
     
     if rater['relationship'] == 'Self':
-        subject = "Complete Your 360 Self-Assessment — Bentley Compass"
+        subject = "Complete Your Leadership Self-Assessment — Bentley Compass"
     else:
         subject = f"360 Feedback Request for {leader_name} — Bentley Compass"
     
@@ -414,12 +442,21 @@ def send_rater_reminder(rater, leader_name, base_url, db):
     
     if rater.get('completed'):
         return False, "Already completed"
-    
+
+    last_sent = rater.get('reminder_sent_at')
+    if last_sent:
+        try:
+            last_sent_dt = datetime.fromisoformat(str(last_sent).replace('Z', '+00:00')).replace(tzinfo=None)
+            if datetime.now() - last_sent_dt < timedelta(hours=REMINDER_THROTTLE_HOURS):
+                return False, "Reminded recently"
+        except (ValueError, TypeError):
+            pass
+
     assessment_url = f"{base_url}?t={rater['token']}"
     
     subject = f"Reminder: 360 Feedback for {leader_name} — Bentley Compass"
     if rater['relationship'] == 'Self':
-        subject = "Reminder: Complete Your 360 Self-Assessment — Bentley Compass"
+        subject = "Reminder: Complete Your Leadership Self-Assessment — Bentley Compass"
     
     html = _get_reminder_html(leader_name, rater['relationship'], assessment_url)
     
@@ -633,11 +670,11 @@ def _get_portal_invitation_html(leader_name, portal_url):
                                     </tr>
                                     <tr>
                                         <td style="padding: 4px 0;"><strong>Others:</strong></td>
-                                        <td style="padding: 4px 0;">Optional (stakeholders, customers, etc.)</td>
+                                        <td style="padding: 4px 0;">Optional (stakeholders, customers, etc.) — if you add any, add at least 3</td>
                                     </tr>
                                 </table>
                                 <p style="color: #888; font-size: 13px; margin: 12px 0 0 0; font-style: italic;">
-                                    We require minimum 3 in Peers and Direct Reports to ensure anonymity of responses.
+                                    We require a minimum of 3 respondents in Peers, Direct Reports, and Others (if used) to ensure anonymity of responses.
                                 </p>
                             </div>
                             
@@ -658,7 +695,7 @@ def _get_portal_invitation_html(leader_name, portal_url):
                     <tr>
                         <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
                             <p style="color: #999; font-size: 12px; margin: 0;">
-                                This is an automated message from The Development Catalyst.<br>
+                                This is an automated message from Bentley Compass 360.<br>
                                 If you have any questions, please contact your programme coordinator.
                             </p>
                         </td>
@@ -745,7 +782,7 @@ def _get_leader_nomination_reminder_html(leader_name, portal_url, nominated_coun
                     <tr>
                         <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
                             <p style="color: #999; font-size: 12px; margin: 0;">
-                                This is an automated message from The Development Catalyst.<br>
+                                This is an automated message from Bentley Compass 360.<br>
                                 If you have any questions, please contact your programme coordinator.
                             </p>
                         </td>

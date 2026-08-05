@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Admin dashboard for the 360 Development Catalyst.
+Admin dashboard for Bentley Compass 360.
 Provides management interface for leaders, raters, and report generation.
 """
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from framework import RELATIONSHIP_TYPES, GROUP_DISPLAY, MIN_RESPONSES_FOR_REPORT
+from framework import (
+    RELATIONSHIP_TYPES, GROUP_DISPLAY, MIN_RESPONSES_FOR_REPORT,
+    RELATIONSHIP_INPUT_HELP, normalise_relationship
+)
 
 # Try to import email functionality
 try:
@@ -19,18 +22,23 @@ try:
         send_leader_notification,
         send_portal_invitation,
         send_leader_nomination_reminder,
-        send_bulk_portal_invitations
+        send_bulk_portal_invitations,
+        get_app_base_url
     )
     EMAIL_AVAILABLE = True
 except ImportError:
     EMAIL_AVAILABLE = False
+
+    def get_app_base_url():
+        """Fallback when email_sender is unavailable; links are display-only then."""
+        return ""
 
 
 def render_admin_dashboard(db):
     """Render the admin dashboard."""
     
     # Header
-    st.markdown('<p class="main-title">THE 360 DEVELOPMENT CATALYST</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">Administrator Dashboard</p>', unsafe_allow_html=True)
     
     # Navigation tabs
@@ -114,7 +122,7 @@ def render_email_settings(db):
             success, message = _send_email(
                 test_email,
                 "Test Recipient",
-                "Test Email — 360 Development Catalyst",
+                "Test Email — Bentley Compass 360",
                 html
             )
             
@@ -137,7 +145,7 @@ def render_email_settings(db):
         username = "your-email@domain.com"
         password = "your-app-password"
         sender_email = "your-email@domain.com"
-        sender_name = "The Development Catalyst"
+        sender_name = "Bentley Compass 360"
         ```
         
         **For Microsoft 365:**
@@ -584,8 +592,9 @@ def render_portal_management_tab(db):
     # Get base URL
     base_url = st.text_input(
         "Base URL for portal links",
-        value="https://catalyst-360-arbncruhflmazjemep8uzh.streamlit.app",
-        help="Your deployed app URL"
+        value=get_app_base_url(),
+        help="Your deployed app URL. Set [app] base_url in this deployment's secrets "
+             "so it defaults correctly and links never point at another environment."
     )
     
     st.markdown("---")
@@ -815,8 +824,9 @@ def render_links_tab(db):
     # Get base URL
     base_url = st.text_input(
         "Base URL for links",
-        value="https://catalyst-360-arbncruhflmazjemep8uzh.streamlit.app",
-        help="Change this to your deployed app URL"
+        value=get_app_base_url(),
+        help="Your deployed app URL. Set [app] base_url in this deployment's secrets "
+             "so it defaults correctly and links never point at another environment."
     )
     
     # Add raters section
@@ -1086,81 +1096,106 @@ def render_links_tab(db):
         st.markdown("**Bulk Import Raters**")
         st.caption("Upload a CSV to add multiple raters at once")
         
-        # Show template download
-        template_data = {
-            'name': ['John Smith', 'Sarah Jones', 'Mike Brown'],
-            'email': ['john@example.com', 'sarah@example.com', 'mike@example.com'],
-            'relationship': ['Peers', 'Peers', 'DRs']
-        }
-        template_df = pd.DataFrame(template_data)
-        template_csv = template_df.to_csv(index=False)
-        
+        # Template uses plain-English relationships, matching the leader portal.
+        # Both importers normalise through framework.normalise_relationship, so
+        # capitalisation and wording variants are accepted either side.
+        template_df = pd.DataFrame({
+            'name': ['John Smith', 'Sarah Jones', 'Mike Brown', 'Raj Patel'],
+            'email': ['john@example.com', 'sarah@example.com',
+                      'mike@example.com', 'raj@example.com'],
+            'relationship': ['Line Manager', 'Peer', 'Direct Report', 'Other'],
+        })
+
         st.download_button(
             "📄 Download Template",
-            template_csv,
+            template_df.to_csv(index=False),
             "rater_import_template.csv",
             "text/csv",
             use_container_width=True,
             help="Download a sample CSV showing the required format"
         )
-        
+        st.caption(
+            f"Columns: name, email, relationship. Relationship accepts "
+            f"{RELATIONSHIP_INPUT_HELP} — capitalisation doesn't matter."
+        )
+
         uploaded_raters = st.file_uploader(
             "Upload Raters CSV",
             type="csv",
             key=f"rater_upload_{selected_leader_id}",
-            help="CSV with columns: name, email, relationship (Self/Boss/Peers/DRs/Others)"
+            help=f"Columns: name, email, relationship. "
+                 f"Relationship accepts {RELATIONSHIP_INPUT_HELP}, in any case."
         )
-        
+
         if uploaded_raters is not None:
             try:
                 import_df = pd.read_csv(uploaded_raters)
-                
-                # Validate columns
-                required_cols = ['relationship']
-                missing_cols = [c for c in required_cols if c not in import_df.columns]
-                
-                if missing_cols:
-                    st.error(f"Missing required columns: {', '.join(missing_cols)}")
+
+                if 'relationship' not in import_df.columns:
+                    st.error("Your CSV needs a 'relationship' column.")
                 else:
-                    # Validate relationship values
-                    valid_relationships = ['Self', 'Boss', 'Peers', 'DRs', 'Others']
-                    import_df['relationship'] = import_df['relationship'].str.strip()
-                    invalid_rels = import_df[~import_df['relationship'].isin(valid_relationships)]['relationship'].unique()
-                    
-                    if len(invalid_rels) > 0:
-                        st.error(f"Invalid relationship values: {', '.join(invalid_rels)}")
-                        st.caption(f"Must be one of: {', '.join(valid_relationships)}")
-                    else:
-                        st.success(f"✓ Found {len(import_df)} raters to import")
-                        st.dataframe(import_df.head(10), use_container_width=True)
-                        
-                        if len(import_df) > 10:
-                            st.caption(f"...and {len(import_df) - 10} more")
-                        
+                    parsed = []
+                    problems = []
+                    for position, (_, row) in enumerate(import_df.iterrows(), start=2):
+                        raw_rel = row.get('relationship')
+                        relationship = normalise_relationship(raw_rel)
+                        name = str(row.get('name')).strip() if pd.notna(row.get('name')) else None
+                        email = str(row.get('email')).strip() if pd.notna(row.get('email')) else None
+
+                        if relationship is None:
+                            shown = str(raw_rel).strip() if pd.notna(raw_rel) else '(blank)'
+                            problems.append(
+                                f"Row {position}: '{shown}' isn't a recognised "
+                                f"relationship. Use {RELATIONSHIP_INPUT_HELP}."
+                            )
+                            continue
+
+                        parsed.append({'name': name, 'email': email,
+                                       'relationship': relationship})
+
+                    for problem in problems:
+                        st.error(problem)
+
+                    if parsed and not problems:
+                        preview = pd.DataFrame([
+                            {'name': p['name'], 'email': p['email'],
+                             'relationship': RELATIONSHIP_TYPES.get(
+                                 p['relationship'], p['relationship'])}
+                            for p in parsed
+                        ])
+                        st.success(f"✓ Found {len(parsed)} raters to import")
+                        st.dataframe(preview.head(10), use_container_width=True)
+                        if len(parsed) > 10:
+                            st.caption(f"...and {len(parsed) - 10} more")
+
                         if st.button("✅ Import All Raters", type="primary", use_container_width=True):
                             imported = 0
                             errors = []
-                            
-                            for _, row in import_df.iterrows():
+
+                            for p in parsed:
                                 try:
-                                    name = row.get('name') if pd.notna(row.get('name')) else None
-                                    email = row.get('email') if pd.notna(row.get('email')) else None
-                                    relationship = row['relationship'].strip()
-                                    
-                                    db.add_rater(selected_leader_id, relationship, name, email)
+                                    db.add_rater(selected_leader_id, p['relationship'],
+                                                 p['name'], p['email'])
+                                    # Keep the leader's own roster in step, or these
+                                    # nominees never appear in their portal
+                                    if p['relationship'] != 'Self' and (p['name'] or p['email']):
+                                        db.add_to_nomination_roster(
+                                            selected_leader_id, p['name'],
+                                            p['email'], p['relationship']
+                                        )
                                     imported += 1
                                 except Exception as e:
-                                    errors.append(f"Row {_ + 1}: {str(e)}")
-                            
+                                    errors.append(f"{p['name'] or p['email']}: {str(e)}")
+
                             if imported > 0:
                                 st.success(f"✅ Imported {imported} raters!")
                             if errors:
                                 st.warning(f"⚠️ {len(errors)} errors:")
                                 for err in errors[:5]:
                                     st.caption(err)
-                            
+
                             st.rerun()
-                            
+
             except Exception as e:
                 st.error(f"Error reading CSV: {str(e)}")
 
@@ -1224,7 +1259,7 @@ def render_reports_tab(db):
                             from report_generator import generate_report
                             
                             data, comments = db.get_leader_feedback_data(leader['id'])
-                            output_path = generate_report(
+                            output_path, theme_warning = generate_report(
                                 leader['name'],
                                 report_type,
                                 data,
@@ -1232,9 +1267,11 @@ def render_reports_tab(db):
                                 leader.get('dealership'),
                                 leader.get('cohort')
                             )
-                            
+
                             st.success(f"Report generated!")
-                            
+                            if theme_warning:
+                                st.warning(f"Key Themes section could not be generated: {theme_warning}")
+
                             with open(output_path, 'rb') as f:
                                 st.download_button(
                                     "📥 Download Report",
@@ -1266,7 +1303,7 @@ def render_reports_tab(db):
                             from report_generator import generate_report
                             
                             data, comments = db.get_leader_feedback_data(leader['id'])
-                            output_path = generate_report(
+                            output_path, _ = generate_report(
                                 leader['name'],
                                 'Self-Assessment',
                                 data,
@@ -1274,9 +1311,9 @@ def render_reports_tab(db):
                                 leader.get('dealership'),
                                 leader.get('cohort')
                             )
-                            
+
                             st.success(f"Report generated!")
-                            
+
                             with open(output_path, 'rb') as f:
                                 st.download_button(
                                     "📥 Download Report",
@@ -1312,7 +1349,7 @@ def render_reports_tab(db):
                     from report_generator import generate_report
                     
                     data, comments = db.get_leader_feedback_data(leader['id'])
-                    generate_report(
+                    _, theme_warning = generate_report(
                         leader['name'],
                         'Full 360',
                         data,
@@ -1320,6 +1357,8 @@ def render_reports_tab(db):
                         leader.get('dealership'),
                         leader.get('cohort')
                     )
+                    if theme_warning:
+                        st.warning(f"{leader['name']}: Key Themes section could not be generated ({theme_warning})")
                 except Exception as e:
                     st.error(f"Error for {leader['name']}: {str(e)}")
                 

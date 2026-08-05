@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Report generator for the 360 Development Catalyst.
+Report generator for Bentley Compass 360.
 Generates Word documents for Self-Assessment, Full 360, and Progress Reports.
 
-Updated for 9 dimensions (47 items total) with Performance Excellence dimension.
-Overall Effectiveness is now Q46-47.
+Updated for 9 dimensions (45 items total) with Performance Excellence dimension.
+The old scored Overall Effectiveness items (Q46-47) are replaced by two open
+text prompts ("keep" / "change"), folded into Overall Qualitative Feedback.
 """
 
 import numpy as np
@@ -19,20 +20,138 @@ matplotlib.use('Agg')
 from datetime import datetime
 import tempfile
 import os
+import sys
+import textwrap
 import requests
 from pathlib import Path
 
 from framework import (
-    DIMENSIONS, ITEMS, DIMENSION_DESCRIPTIONS,
+    DIMENSIONS, DIMENSION_DESCRIPTIONS,
     COLOURS, GROUP_COLOURS, GROUP_DISPLAY,
-    HIGH_SCORE_THRESHOLD, SIGNIFICANT_GAP
+    HIGH_SCORE_THRESHOLD, SIGNIFICANT_GAP,
+    REPORT_FONT, CHART_FONT_PREFERENCE,
+    get_item_text
 )
 
 REPORTS_DIR = Path("reports")
 REPORTS_DIR.mkdir(exist_ok=True)
 
-# Overall effectiveness questions (now 46 and 47)
-OVERALL_ITEMS = [46, 47]
+# ============================================
+# PAGE GEOMETRY
+# ============================================
+#
+# A4 with 1in (2.54cm) margins all round, set on the human's instruction
+# 2026-08-04. python-docx's default template is US LETTER, which would shift the
+# margins when UK readers print it, so `apply_page_geometry` overrides it.
+#
+# Derive everything from these constants rather than hard-coding inch values, so
+# a future page change does not silently leave tables the wrong width.
+PAGE_WIDTH_IN = 8.27      # A4 = 210mm
+PAGE_HEIGHT_IN = 11.69    # A4 = 297mm
+MARGIN_IN = 1.0
+
+CONTENT_WIDTH_IN = PAGE_WIDTH_IN - (2 * MARGIN_IN)    # 6.27in
+CONTENT_HEIGHT_IN = PAGE_HEIGHT_IN - (2 * MARGIN_IN)  # 9.69in
+
+# Bar chart inside a half-width item cell, with a little breathing room
+ITEM_CHART_WIDTH_IN = (CONTENT_WIDTH_IN / 2) - 0.2
+
+# Model used for the AI theme synthesis section.
+#
+# WAS `claude-sonnet-4-20250514`, which is DEPRECATED with a retirement date of
+# 2026-06-15 — already past. A retired model ID returns 404, and the synthesis
+# function swallows that into a silent skip, so the Key Themes section would have
+# quietly vanished from every report even with a valid API key configured.
+#
+# Two behaviours of the current model that the request body has to account for:
+#   - Thinking is ON BY DEFAULT, and max_tokens caps thinking plus response text
+#     together, so max_tokens needs real headroom (see the call site).
+#   - Sampling parameters (temperature/top_p/top_k) are rejected with a 400.
+#     Do not add them.
+# Swap to 'claude-sonnet-5' if the human decides the cost per report matters more
+# than synthesis quality.
+SYNTHESIS_MODEL = 'claude-opus-5'
+
+
+def content_columns(*relative_widths):
+    """
+    Column widths that fill the content width exactly, from relative proportions.
+
+    Using proportions rather than literal inches means the tables stay aligned
+    with each other and with the charts if the page size ever changes again.
+    """
+    total = sum(relative_widths)
+    return [Inches(CONTENT_WIDTH_IN * w / total) for w in relative_widths]
+
+
+def apply_page_geometry(doc):
+    """Set A4 page size and margins on every section of the document."""
+    for section in doc.sections:
+        section.page_width = Inches(PAGE_WIDTH_IN)
+        section.page_height = Inches(PAGE_HEIGHT_IN)
+        section.left_margin = Inches(MARGIN_IN)
+        section.right_margin = Inches(MARGIN_IN)
+        section.top_margin = Inches(MARGIN_IN)
+        section.bottom_margin = Inches(MARGIN_IN)
+
+
+# ============================================
+# TYPOGRAPHY
+# ============================================
+
+def resolve_chart_font():
+    """
+    Return the first font in CHART_FONT_PREFERENCE that is actually installed
+    here, or None to leave matplotlib on its default.
+
+    Charts are rasterised at generation time, so unlike the document text this
+    depends on the machine doing the generating. See REPORT_FONT in framework.py.
+    """
+    try:
+        from matplotlib import font_manager
+        available = {f.name for f in font_manager.fontManager.ttflist}
+    except Exception:
+        return None
+
+    for candidate in CHART_FONT_PREFERENCE:
+        if candidate in available:
+            return candidate
+    return None
+
+
+CHART_FONT = resolve_chart_font()
+if CHART_FONT:
+    plt.rcParams['font.family'] = CHART_FONT
+
+
+def apply_document_font(doc, font_name=REPORT_FONT):
+    """
+    Set the font on the document's base and heading styles.
+
+    Runs throughout this module set size and colour but not the typeface, so they
+    inherit from these styles. Word needs the East Asian attribute set as well,
+    otherwise it silently keeps its own default for some runs.
+    """
+    style_names = [
+        'Normal', 'Title',
+        'Heading 1', 'Heading 2', 'Heading 3',
+        'List Bullet', 'List Number',
+    ]
+
+    for style_name in style_names:
+        try:
+            style = doc.styles[style_name]
+        except KeyError:
+            continue
+
+        style.font.name = font_name
+        rpr = style.element.get_or_add_rPr()
+        rfonts = rpr.find(qn('w:rFonts'))
+        if rfonts is None:
+            rfonts = OxmlElement('w:rFonts')
+            rpr.append(rfonts)
+        for attr in ('w:ascii', 'w:hAnsi', 'w:cs', 'w:eastAsia'):
+            rfonts.set(qn(attr), font_name)
 
 # Colour map for comment source labels (RGB tuples for python-docx)
 COMMENT_SOURCE_COLOURS = {
@@ -92,6 +211,81 @@ def _add_thin_rule(doc, colour='CCCCCC'):
     pPr.append(pBdr)
 
 
+# ============================================
+# WRITING SPACE
+# These make the report a live working document rather than a read-only output:
+# the leader annotates it during and after their coaching conversation. Ruled
+# lines work whether the report is printed and handwritten on, or typed into.
+# ============================================
+
+def add_writing_lines(doc, count=3, indent=Inches(0.25)):
+    """Add blank ruled lines for the reader to write or type on."""
+    for _ in range(count):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(11)
+        p.paragraph_format.space_after = Pt(0)
+        p.paragraph_format.left_indent = indent
+        pPr = p._element.get_or_add_pPr()
+        pBdr = parse_xml(
+            f'<w:pBdr {nsdecls("w")}>'
+            f'  <w:bottom w:val="single" w:sz="4" w:space="1" w:color="CCCCCC"/>'
+            f'</w:pBdr>'
+        )
+        pPr.append(pBdr)
+
+
+def add_writing_prompt(doc, text):
+    """Add an italic instruction introducing a writing space."""
+    para = doc.add_paragraph()
+    para.paragraph_format.space_before = Pt(10)
+    para.paragraph_format.space_after = Pt(2)
+    para.paragraph_format.keep_with_next = True
+    run = para.add_run(text)
+    run.font.italic = True
+    run.font.size = Pt(9)
+    run.font.color.rgb = RGBColor(0x4A, 0x55, 0x68)
+    return para
+
+
+def add_priority_capture_table(doc, rows=3):
+    """
+    Add an empty Dimension / actions table for priorities the leader ADDS during
+    their coaching conversation.
+
+    Deliberately mirrors the layout of the stated priorities above it, so the
+    additions read as part of the same list rather than a separate exercise.
+    These are captured in the document, not in the database: the stored
+    priorities are the pre-feedback set, and preserving those unchanged is what
+    makes the comparison in the Full 360 report meaningful.
+    """
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.autofit = False
+
+    widths = content_columns(2.0, 4.0)
+
+    hdr = table.rows[0].cells
+    hdr[0].text = "Dimension"
+    hdr[1].text = "What I will do differently"
+    for i, cell in enumerate(hdr):
+        cell.width = widths[i]
+        set_cell_shading(cell, '024731')
+        cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+        cell.paragraphs[0].runs[0].bold = True
+        cell.paragraphs[0].runs[0].font.size = Pt(9)
+
+    for _ in range(rows):
+        row = table.add_row().cells
+        for i, cell in enumerate(row):
+            cell.width = widths[i]
+            # Give each empty row some height to write in
+            para = cell.paragraphs[0]
+            para.paragraph_format.space_before = Pt(9)
+            para.paragraph_format.space_after = Pt(9)
+
+    return table
+
+
 def _add_comment_block(doc, group_name, comment_text):
     """
     Add a single comment in the clean style:
@@ -149,10 +343,6 @@ def categorize_papu_nanu(data):
     }
     
     for item_num, item_scores in data['by_item'].items():
-        # Skip overall effectiveness items
-        if item_num in OVERALL_ITEMS:
-            continue
-        
         self_score = item_scores.get('Self')
         combined = item_scores.get('Combined')
         gap = item_scores.get('Gap')
@@ -165,7 +355,7 @@ def categorize_papu_nanu(data):
         
         item_info = {
             'item_num': item_num,
-            'text': item_scores.get('text', ITEMS.get(item_num, '')),
+            'text': item_scores.get('text', get_item_text(item_num, 'Others')),
             'self': self_score,
             'combined': combined,
             'gap': gap,
@@ -251,22 +441,42 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     ax.set_ylim(0, 5)
     ax.set_yticks([1, 2, 3, 4, 5])
     ax.set_yticklabels(['1', '2', '3', '4', '5'], size=14, color='#333333', fontweight='bold')
-    ax.set_rlabel_position(30)
-    
-    # Set the labels directly using matplotlib's built-in method
+    # Sit the 1-5 scale in the gap between the first two spokes rather than on
+    # top of a dimension label. With theta offset pi/2 and clockwise direction,
+    # a data angle of d appears at screen angle (90 - d), so 20 lands midway
+    # between the first spoke (top) and the second.
+    ax.set_rlabel_position(20)
+
+    # Wrap long dimension names. Without this, a label like "Building
+    # High-Performing Teams" is centred on its spoke and its horizontal extent
+    # runs back across the plot area.
+    wrapped = ['\n'.join(textwrap.wrap(label, width=16)) for label in labels]
+
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, size=14, fontweight='bold', color='#333333')
-    
-    # Adjust label padding - increase to push labels further from chart
-    ax.tick_params(axis='x', pad=35)
-    
+    ax.set_xticklabels(wrapped, size=13, fontweight='bold', color='#333333')
+    ax.tick_params(axis='x', pad=18)
+
+    # Anchor each label on the side facing away from the chart, so text grows
+    # outwards instead of inwards. Labels on the right half are left-aligned,
+    # the left half right-aligned, and the top and bottom stay centred.
+    for label, angle in zip(ax.get_xticklabels(), angles[:-1]):
+        screen_deg = (90 - np.degrees(angle)) % 360
+        if np.isclose(screen_deg, 90) or np.isclose(screen_deg, 270):
+            label.set_horizontalalignment('center')
+        elif screen_deg < 90 or screen_deg > 270:
+            label.set_horizontalalignment('left')
+        else:
+            label.set_horizontalalignment('right')
+
     # Add legend
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
-        ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.15), 
+        ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.13),
                   ncol=2, fontsize=14, frameon=False)
-    
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white', pad_inches=0.3)
+
+    # Leave room around the plot for the labels. tight_layout fights with polar
+    # axes that have long outward labels, so set the margins explicitly.
+    fig.subplots_adjust(left=0.18, right=0.82, top=0.86, bottom=0.14)
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white', pad_inches=0.35)
     plt.close()
 
 
@@ -431,7 +641,7 @@ def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=Non
     
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("THE 360 DEVELOPMENT CATALYST")
+    run = title.add_run("BENTLEY COMPASS 360")
     run.bold = True
     run.font.size = Pt(28)
     run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
@@ -554,7 +764,7 @@ def add_response_summary(doc, data):
     table.autofit = False
     
     # Set consistent widths (total ~6.1 inches to match PAPU-NANU tables)
-    widths = [Inches(5.0), Inches(1.1)]
+    widths = content_columns(4.9, 1.1)
     
     hdr_cells = table.rows[0].cells
     hdr_cells[0].text = "Respondent Group"
@@ -586,16 +796,35 @@ def add_response_summary(doc, data):
     row[1].paragraphs[0].runs[0].bold = True
     row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # Add anonymity note if groups were hidden (no extra spacing)
+    # Anonymity notes. Two different things can happen and they are not the same,
+    # so they get separate sentences rather than one vague catch-all.
+    from framework import ANONYMITY_THRESHOLD
+
+    notes = []
     if hidden_groups:
-        from framework import ANONYMITY_THRESHOLD
-        note = doc.add_paragraph()
-        note_text = (
-            f"Note: To protect anonymity, respondent groups with fewer than {ANONYMITY_THRESHOLD} "
-            f"responses have been combined into 'Others'. "
-            f"Groups combined: {', '.join(GROUP_DISPLAY.get(g, g) for g in hidden_groups)}."
+        notes.append(
+            f"To protect anonymity, respondent groups with fewer than "
+            f"{ANONYMITY_THRESHOLD} responses have been combined into 'Others'. "
+            f"Groups combined: "
+            f"{', '.join(GROUP_DISPLAY.get(g, g) for g in hidden_groups)}."
         )
-        run = note.add_run(note_text)
+
+    suppressed_groups = data.get('suppressed_groups') or []
+    suppressed_count = data.get('suppressed_count', 0)
+    if suppressed_groups:
+        people = "one response" if suppressed_count == 1 else f"{suppressed_count} responses"
+        notes.append(
+            f"{people.capitalize()} could not be reported without identifying the "
+            f"individuals concerned, because too few people responded in that group "
+            f"and there was no larger group to combine them with. That feedback has "
+            f"therefore been left out of the scores and comments in this report. "
+            f"Groups affected: "
+            f"{', '.join(GROUP_DISPLAY.get(g, g) for g in suppressed_groups)}."
+        )
+
+    for note_text in notes:
+        note = doc.add_paragraph()
+        run = note.add_run(f"Note: {note_text}" if len(notes) == 1 else note_text)
         run.font.size = Pt(9)
         run.font.italic = True
         run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
@@ -611,7 +840,7 @@ def add_executive_summary(doc, data):
     table.autofit = False
     
     # Set column widths to match other tables (total ~6.1 inches)
-    widths = [Inches(3.9), Inches(0.7), Inches(1.0), Inches(0.5)]
+    widths = content_columns(3.8, 0.7, 1.0, 0.5)
     for row in table.rows:
         for i, cell in enumerate(row.cells):
             cell.width = widths[i]
@@ -654,28 +883,31 @@ def add_executive_summary(doc, data):
         else:
             row[3].text = "-"
     
-    # Radar chart - sized to fit on same page as table above
-    # First, keep the table together with the chart
-    for row in table.rows:
-        for cell in row.cells:
-            for para in cell.paragraphs:
-                para.paragraph_format.keep_with_next = True
-
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
         self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
         combined_scores = {dim: data['by_dimension'].get(dim, {}).get('Combined') for dim in DIMENSIONS}
         create_radar_chart(DIMENSIONS, self_scores, combined_scores, tmp.name)
-        
-        # Horizontal rule to separate table from radar
-        _add_thin_rule(doc)
 
-        # Add picture and centre it — sized to fit on same page as table above
+        # Full-width radar on its own page. At CONTENT_WIDTH_IN the chart is
+        # roughly 5in tall, and this page already carries the Response Summary and
+        # the Executive Summary table, so it cannot share. Breaking deliberately
+        # avoids Word leaving a ragged half-page gap and reads better anyway:
+        # the numbers first, then the picture.
+        chart_heading = doc.add_paragraph()
+        chart_heading.paragraph_format.page_break_before = True
+        chart_heading.paragraph_format.space_after = Pt(6)
+        chart_heading.paragraph_format.keep_with_next = True
+        run = chart_heading.add_run("Your Profile at a Glance")
+        run.bold = True
+        run.font.size = Pt(13)
+        run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+
         para = doc.add_paragraph()
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = para.add_run()
-        run.add_picture(tmp.name, width=Inches(3.74))  # 9.5cm
+        run.add_picture(tmp.name, width=Inches(CONTENT_WIDTH_IN))
         os.unlink(tmp.name)
-    
+
     # No explicit page break — next section uses page_break_before
 
 
@@ -706,7 +938,7 @@ def add_papu_nanu_section(doc, data):
         table.autofit = False
         
         # Column widths: # | Behaviour | Self | Others | Gap
-        widths = [Inches(0.4), Inches(3.9), Inches(0.6), Inches(0.6), Inches(0.6)]
+        widths = content_columns(0.4, 3.8, 0.6, 0.6, 0.6)
         
         hdr = table.rows[0].cells
         hdr[0].text = "#"
@@ -814,14 +1046,23 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
     # Each item: side-by-side borderless table (text left, bar chart right)
     for item_num in range(start, end + 1):
         item_scores = data['by_item'].get(item_num, {})
-        item_text = item_scores.get('text', ITEMS.get(item_num, ''))
-        
+
+        # Serve the wording the reader actually answered. In the Self-Assessment
+        # report the only rater was the leader, so the I-form is correct; in the
+        # Full 360 the same item was put to others as the They-form, so showing
+        # the I-form there would misrepresent what a peer or direct report was
+        # asked. NB: do NOT fall back to item_scores['text'] here, because
+        # get_leader_feedback_data bakes the They-form into it unconditionally.
+        item_text = get_item_text(item_num, 'Self' if is_self_only else 'Others')
+
         layout_table = doc.add_table(rows=1, cols=2)
         make_table_borderless(layout_table)
         layout_table.autofit = False
-        
+
+        item_col_widths = content_columns(1, 1)
+
         text_cell = layout_table.rows[0].cells[0]
-        text_cell.width = Inches(3.0)
+        text_cell.width = item_col_widths[0]
         text_para = text_cell.paragraphs[0]
         text_para.add_run(f"Q{item_num}. ").bold = True
         text_para.add_run(item_text)
@@ -829,23 +1070,35 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
         if len(text_para.runs) > 1:
             text_para.runs[1].font.size = Pt(10)
         text_para.paragraph_format.keep_with_next = True
-        
+
+        # Whole-item coverage — never per-group (see anonymity design principle)
+        if not is_self_only:
+            total_respondents = sum(data.get('raw_response_counts', {}).values())
+            no_opp_count = data.get('no_opportunity', {}).get(item_num, {}).get('count', 0)
+            rated = total_respondents - no_opp_count
+            coverage_para = text_cell.add_paragraph()
+            coverage_run = coverage_para.add_run(f"Rated by {rated} of {total_respondents} respondents")
+            coverage_run.font.size = Pt(8)
+            coverage_run.font.italic = True
+            coverage_run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+            coverage_para.paragraph_format.keep_with_next = True
+
         chart_cell = layout_table.rows[0].cells[1]
-        chart_cell.width = Inches(3.0)
-        
+        chart_cell.width = item_col_widths[1]
+
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             if is_self_only:
                 create_self_only_bar(item_scores.get('Self'), tmp.name)
             else:
                 create_item_bar_chart(item_scores, tmp.name)
-            
+
             chart_para = chart_cell.paragraphs[0]
-            chart_para.add_run().add_picture(tmp.name, width=Inches(2.8))
+            chart_para.add_run().add_picture(tmp.name, width=Inches(ITEM_CHART_WIDTH_IN))
             chart_para.paragraph_format.keep_together = True
             os.unlink(tmp.name)
-        
+
         doc.add_paragraph()
-    
+
     # --- CLEAN COMMENTS (replaces old table style) ---
     section_comments = comments.get('by_section', {}).get(dim_name, [])
     if section_comments:
@@ -856,134 +1109,241 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
         run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
 
         add_clean_comments(doc, section_comments)
-    
+
     # No explicit page break here — next section uses page_break_before
-
-
-def add_overall_effectiveness(doc, data, is_self_only=False):
-    """Add Overall Effectiveness section (Q46-47)."""
-    heading = add_section_heading(doc, "Overall Effectiveness", font_size=16)
-    heading.paragraph_format.page_break_before = True
-    
-    desc = doc.add_paragraph()
-    run = desc.add_run("These two items provide a global assessment of leadership effectiveness.")
-    run.font.italic = True
-    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-    
-    doc.add_paragraph()
-    
-    for item_num in OVERALL_ITEMS:
-        item_scores = data['by_item'].get(item_num, {})
-        item_text = item_scores.get('text', ITEMS.get(item_num, ''))
-        
-        layout_table = doc.add_table(rows=1, cols=2)
-        make_table_borderless(layout_table)
-        layout_table.autofit = False
-        
-        text_cell = layout_table.rows[0].cells[0]
-        text_cell.width = Inches(3.0)
-        text_para = text_cell.paragraphs[0]
-        text_para.add_run(f"Q{item_num}. ").bold = True
-        text_para.add_run(item_text)
-        text_para.runs[0].font.size = Pt(10)
-        if len(text_para.runs) > 1:
-            text_para.runs[1].font.size = Pt(10)
-        text_para.paragraph_format.keep_with_next = True
-        
-        chart_cell = layout_table.rows[0].cells[1]
-        chart_cell.width = Inches(3.0)
-        
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            if is_self_only:
-                create_self_only_bar(item_scores.get('Self'), tmp.name)
-            else:
-                create_item_bar_chart(item_scores, tmp.name)
-            
-            chart_para = chart_cell.paragraphs[0]
-            chart_para.add_run().add_picture(tmp.name, width=Inches(2.8))
-            chart_para.paragraph_format.keep_together = True
-            os.unlink(tmp.name)
-        
-        doc.add_paragraph()
-    
-    # No explicit page break — next section uses page_break_before
 
 
 def add_overall_comments(doc, comments):
     """Add overall qualitative feedback section — clean style."""
     heading = add_section_heading(doc, "Overall Qualitative Feedback", font_size=16)
     heading.paragraph_format.page_break_before = True
-    
-    # --- STRENGTHS ---
-    if comments.get('strengths'):
-        heading = doc.add_heading("Greatest Strengths", level=2)
+
+    # --- KEEP DOING ---
+    if comments.get('keep'):
+        heading = doc.add_heading("What to Keep Doing", level=2)
         for run in heading.runs:
             run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
 
-        add_clean_comments(doc, comments['strengths'])
-    
+        add_clean_comments(doc, comments['keep'])
+
     doc.add_paragraph()
-    
-    # --- DEVELOPMENT ---
-    if comments.get('development'):
-        heading = doc.add_heading("Development Suggestions", level=2)
+
+    # --- CHANGE ---
+    if comments.get('change'):
+        heading = doc.add_heading("The One Change That Would Make the Biggest Difference", level=2)
         for run in heading.runs:
             run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
 
-        add_clean_comments(doc, comments['development'])
+        add_clean_comments(doc, comments['change'])
+
+
+def add_development_priorities(doc, priorities, data, is_self_only=False):
+    """
+    Add the leader's self-identified development priorities.
+
+    Captured at self-assessment, before any feedback arrived. In the Full 360
+    the stated priority is shown alongside how that dimension actually scored,
+    which is the point: it shows where the leader's own intent and the feedback
+    agree, and where they diverge.
+
+    The section renders even when nothing was stored (a leader who submitted
+    before at least one priority became compulsory), because the capture space
+    for coaching additions is worth having either way.
+    """
+    stated = [p for p in priorities if p.get('dimension')]
+
+    heading = add_section_heading(doc, "Your Development Priorities", font_size=16)
+    heading.paragraph_format.page_break_before = True
+
+    if not stated:
+        intro_text = (
+            "You did not record development priorities with your self-assessment. "
+            "Use the space below to set them out with your coach."
+        )
+    elif is_self_only:
+        intro_text = (
+            "You named these priorities when you completed your self-assessment, "
+            "before receiving any feedback."
+        )
+    else:
+        intro_text = (
+            "You named these priorities when you completed your self-assessment, "
+            "before receiving any feedback. The scores alongside each one show how "
+            "that dimension was actually rated, so you can see where your own view "
+            "and your feedback point the same way."
+        )
+
+    intro = doc.add_paragraph()
+    run = intro.add_run(intro_text)
+    run.font.italic = True
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    doc.add_paragraph()
+
+    for priority in stated:
+        dimension = priority['dimension']
+
+        # Priority heading with rank
+        title_para = doc.add_paragraph()
+        title_para.paragraph_format.space_before = Pt(10)
+        title_para.paragraph_format.space_after = Pt(2)
+        title_para.paragraph_format.keep_with_next = True
+        run = title_para.add_run(f"Priority {priority.get('rank', '')}: {dimension}")
+        run.bold = True
+        run.font.size = Pt(12)
+        run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+
+        # How that dimension actually scored
+        dim_data = data.get('by_dimension', {}).get(dimension, {})
+        self_score = dim_data.get('Self')
+        combined = dim_data.get('Combined')
+        gap = dim_data.get('Gap')
+
+        score_bits = []
+        if self_score is not None:
+            score_bits.append(f"Your rating: {self_score:.1f}")
+        if not is_self_only and combined is not None:
+            score_bits.append(f"Others: {combined:.1f}")
+            if gap is not None:
+                score_bits.append(f"Gap: {gap:+.1f}")
+
+        if score_bits:
+            score_para = doc.add_paragraph()
+            score_para.paragraph_format.space_before = Pt(0)
+            score_para.paragraph_format.space_after = Pt(4)
+            score_para.paragraph_format.keep_with_next = True
+            run = score_para.add_run("   ·   ".join(score_bits))
+            run.font.size = Pt(9)
+            run.font.color.rgb = RGBColor(0x4A, 0x55, 0x68)
+
+        # What the leader said they would work on
+        actions = priority.get('actions')
+        if actions:
+            action_para = doc.add_paragraph()
+            action_para.paragraph_format.space_before = Pt(0)
+            action_para.paragraph_format.space_after = Pt(8)
+            run = action_para.add_run(actions)
+            run.font.size = Pt(10)
+            run.font.color.rgb = RGBColor(0x2D, 0x2D, 0x2D)
+
+        _add_thin_rule(doc)
+
+    # --- Space to ADD priorities during the coaching conversation ---
+    # Additive by design: the coaching conversation builds on what the leader
+    # named rather than replacing it, and the stored set stays as the
+    # pre-feedback baseline the Full 360 report compares against.
+    doc.add_paragraph()
+
+    add_heading = doc.add_paragraph()
+    add_heading.paragraph_format.space_before = Pt(10)
+    add_heading.paragraph_format.space_after = Pt(2)
+    add_heading.paragraph_format.keep_with_next = True
+    run = add_heading.add_run(
+        "Your Priorities" if not stated else "Adding to Your Priorities"
+    )
+    run.bold = True
+    run.font.size = Pt(12)
+    run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+
+    if not stated:
+        prompt_text = (
+            "Use this space in your coaching conversation to set out the areas you "
+            "want to work on and what you will do differently."
+        )
+    elif is_self_only:
+        prompt_text = (
+            "Use this space in your coaching conversation to add anything further you "
+            "want to work on. These add to the priorities above rather than replacing "
+            "them, so the record of what you set out to change stays intact."
+        )
+    else:
+        prompt_text = (
+            "Use this space to add anything your feedback has surfaced that you now "
+            "want to work on. These add to the priorities above rather than replacing "
+            "them, so you keep sight of what you set out to change before the feedback "
+            "arrived."
+        )
+
+    add_writing_prompt(doc, prompt_text)
+    add_priority_capture_table(doc, rows=3)
 
 
 def add_reflection_questions(doc):
-    """Add reflection questions for coaching preparation."""
+    """
+    Add reflection questions with space to answer them.
+
+    Each question gets ruled lines: a prompt with nowhere to write is a wasted
+    prompt, and this report is meant to be worked on rather than filed.
+    """
     heading = doc.add_heading("Reflection Questions", level=1)
     heading.paragraph_format.page_break_before = True
-    
+
     doc.add_paragraph(
-        "Before your coaching session, take some time to reflect on your self-assessment. "
-        "Consider the following questions:"
+        "Use these to prepare for your coaching conversation, and to capture what comes out of it. "
+        "Write straight onto this document."
     )
-    
+
     questions = [
         "Which dimensions did you rate yourself highest on? What evidence supports these ratings?",
         "Which dimensions did you rate yourself lowest on? What makes these areas challenging?",
         "Were there any items where you found it difficult to decide on a rating? What made them difficult?",
-        "Which 2-3 areas would you most like to develop? Why are these important to you?",
+        "Looking at the priorities you named, why do those matter most to you right now?",
         "What support or resources might help you develop in these areas?",
-        "What would success look like for you in your leadership development journey?",
+        "Where do you expect others' views of your leadership to differ from your own?",
     ]
-    
+
     for i, question in enumerate(questions, 1):
         para = doc.add_paragraph()
+        para.paragraph_format.space_before = Pt(10)
+        para.paragraph_format.space_after = Pt(0)
+        para.paragraph_format.keep_with_next = True
         para.add_run(f"{i}. ").bold = True
         para.add_run(question)
-        doc.add_paragraph()
+        add_writing_lines(doc, count=3)
 
 
 def add_what_happens_next(doc):
-    """Add What Happens Next section for self-assessment reports."""
+    """
+    Add What Happens Next section for self-assessment reports.
+
+    The sequence matters and must match the real programme timeline: the leader
+    reads this at Module 1, having just received the report and BEFORE they have
+    nominated anyone. An earlier version described feedback collection as already
+    under way and placed coaching after the full report, which would have told
+    the reader they had missed a step.
+    """
     heading = doc.add_heading("What Happens Next", level=1)
     heading.paragraph_format.page_break_before = True
-    
+
+    doc.add_paragraph(
+        "This self-assessment is the first of two stages. Here is how the rest "
+        "of the process runs:"
+    )
+
     steps = [
-        ("Feedback Collection", 
-         "Your nominated respondents will receive a link to provide their feedback on your leadership. "
-         "This includes your line manager, peers, direct reports, and any others you've nominated."),
-        ("Feedback Report", 
-         "Once sufficient responses have been received (minimum 5 respondents), your full 360 feedback "
-         "report will be generated. This will show how others' perceptions compare with your self-assessment."),
-        ("Coaching Session", 
-         "You will meet with your coach to explore your feedback in depth. This is an opportunity to "
-         "understand the data, identify patterns, and begin planning your development."),
-        ("Development Planning", 
-         "Working with your coach, you will create a focused development plan targeting 2-3 key areas "
-         "for growth over the coming months."),
-        ("Ongoing Support", 
-         "Your development continues with support from your coach, your line manager, and the resources "
-         "available through the Compass programme."),
+        ("Your Coaching Conversation (Module 1)",
+         "You will talk this report through with your coach. The aim is to understand your own view "
+         "of your leadership first, before any other perspectives are introduced, and to sharpen the "
+         "development priorities you have named."),
+        ("Nominating Your Respondents (between Modules 1 and 2)",
+         "You will be invited to nominate the people who will give you feedback: your line manager, "
+         "peers, direct reports, and any others who see you lead regularly. Your coaching conversation "
+         "will help you think about who will give you the most useful view."),
+        ("Feedback Collection",
+         "Those you nominate receive their own confidential link. You will be able to see overall "
+         "progress in your portal, though not who has or has not responded."),
+        ("Your Full Feedback Report (Module 2)",
+         "Once enough responses are in, your full 360 report is produced. It sets others' perceptions "
+         "alongside the self-assessment in this document, which is where the areas of agreement and "
+         "the blind spots become visible."),
+        ("Development Planning",
+         "Working with your coach, you will build a focused plan from what the feedback shows, adding "
+         "to the priorities you have already set rather than starting again."),
     ]
-    
+
     for i, (title, description) in enumerate(steps, 1):
         para = doc.add_paragraph()
+        para.paragraph_format.space_after = Pt(4)
         para.add_run(f"{i}. {title}: ").bold = True
         para.add_run(description)
         doc.add_paragraph()
@@ -992,9 +1352,12 @@ def add_what_happens_next(doc):
 def synthesise_feedback_themes(leader_name, comments, data):
     """
     Use the Claude API to synthesise key themes from all verbatim feedback.
-    
-    Returns a list of theme dicts: [{'title': str, 'narrative': str}, ...]
-    Returns None if API call fails or insufficient comments.
+
+    Returns (themes, warning):
+      themes: list of theme dicts [{'title': str, 'narrative': str}, ...], or None.
+      warning: None on success or on the benign "too few comments" skip; a
+        human-readable string when synthesis was attempted but failed, so the
+        admin UI can surface it instead of the section silently vanishing.
     """
     import json
     
@@ -1010,23 +1373,24 @@ def synthesise_feedback_themes(leader_name, comments, data):
                 'text': c['text']
             })
     
-    # Overall strengths/development comments
-    for c in comments.get('strengths', []):
+    # Overall keep/change comments
+    for c in comments.get('keep', []):
         all_comments.append({
-            'dimension': 'Overall Strengths',
+            'dimension': 'What to Keep Doing',
             'source': c['group'],
             'text': c['text']
         })
-    for c in comments.get('development', []):
+    for c in comments.get('change', []):
         all_comments.append({
-            'dimension': 'Overall Development',
+            'dimension': 'The One Change',
             'source': c['group'],
             'text': c['text']
         })
     
-    # Need enough comments to synthesise meaningfully
+    # Need enough comments to synthesise meaningfully. Not a failure, just not
+    # enough material yet, so no warning.
     if len(all_comments) < 5:
-        return None
+        return None, None
     
     # Build dimension scores context
     scores_context = []
@@ -1052,13 +1416,9 @@ DIMENSION SCORES:
 
 Please identify 4-6 key themes that emerge from this feedback. For each theme:
 1. Give it a clear, concise title (e.g., "Building Trust Through Authenticity" or "Balancing Operational Focus with Strategic Thinking")
-2. Write a 2-3 sentence narrative that synthesises the evidence — reference what respondents said without quoting them verbatim, connect to the quantitative scores where relevant, and speak directly to {leader_name} using "you" and "your".
-
-Respond ONLY with a JSON array of objects, each with "title" and "narrative" keys. No preamble, no markdown formatting, just the JSON array."""
+2. Write a 2-3 sentence narrative that synthesises the evidence — reference what respondents said without quoting them verbatim, connect to the quantitative scores where relevant, and speak directly to {leader_name} using "you" and "your"."""
 
     try:
-        import requests
-        
         response = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -1067,29 +1427,70 @@ Respond ONLY with a JSON array of objects, each with "title" and "narrative" key
                 "anthropic-version": "2023-06-01"
             },
             json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 2000,
+                "model": SYNTHESIS_MODEL,
+                # Thinking is ON BY DEFAULT on this model, and max_tokens caps
+                # thinking PLUS response text together. 2000 was enough when the
+                # old model did no thinking; it would now truncate the JSON.
+                "max_tokens": 8000,
+                # Structured outputs guarantee valid JSON, which removes the need
+                # to strip markdown fences off the response and hope it parses.
+                "output_config": {
+                    "format": {
+                        "type": "json_schema",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "themes": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "title": {"type": "string"},
+                                            "narrative": {"type": "string"},
+                                        },
+                                        "required": ["title", "narrative"],
+                                        "additionalProperties": False,
+                                    },
+                                }
+                            },
+                            "required": ["themes"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
                 "messages": [
                     {"role": "user", "content": prompt}
                 ]
             },
-            timeout=30
+            timeout=120
         )
-        
+
         if response.status_code == 200:
             result = response.json()
+
+            # A refusal returns HTTP 200 with no usable content, so check before
+            # reading content[0]
+            if result.get('stop_reason') == 'refusal':
+                warning = "the request was declined by the Anthropic API's safety classifiers"
+                print(f"SYNTHESIS SKIPPED: {warning}. The rest of the report is unaffected.",
+                      file=sys.stderr)
+                return None, warning
+
             text = result['content'][0]['text'].strip()
-            # Clean any markdown fencing
-            text = text.replace('```json', '').replace('```', '').strip()
-            themes = json.loads(text)
-            return themes
+            return json.loads(text)['themes'], None
         else:
-            print(f"API returned status {response.status_code}: {response.text}")
-            return None
-            
+            # Loud, specific, and on stderr so it reaches the Streamlit logs, and
+            # returned as a warning so the admin UI can surface it too. A silent
+            # skip here means a leader's report quietly loses a whole section,
+            # which is worse than a visible failure.
+            warning = f"the Anthropic API returned HTTP {response.status_code}"
+            print(f"SYNTHESIS FAILED: {warning}. The Key Themes section will be "
+                  f"missing from this report. Response: {response.text[:500]}", file=sys.stderr)
+            return None, warning
+
     except Exception as e:
         print(f"Theme synthesis failed: {e}")
-        return None
+        return None, f"theme synthesis raised an exception: {e}"
 
 
 def _get_api_key():
@@ -1114,14 +1515,17 @@ def _get_api_key():
 def add_theme_synthesis(doc, leader_name, comments, data):
     """
     Add the AI-generated theme synthesis section to the report.
-    
+
     Falls back gracefully if the API is unavailable — the report still generates
-    without the synthesis section.
+    without the synthesis section. Returns a warning string when the section was
+    skipped due to a genuine failure (as opposed to too few comments to
+    synthesise), so the caller can surface it instead of the section silently
+    vanishing.
     """
-    themes = synthesise_feedback_themes(leader_name, comments, data)
-    
+    themes, warning = synthesise_feedback_themes(leader_name, comments, data)
+
     if not themes:
-        return  # Silently skip if synthesis unavailable
+        return warning
     
     heading = add_section_heading(doc, "Key Themes in Your Feedback", font_size=16)
     heading.paragraph_format.page_break_before = True
@@ -1160,6 +1564,8 @@ def add_theme_synthesis(doc, leader_name, comments, data):
     run.font.italic = True
     run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
 
+    return None
+
 
 def add_next_steps(doc):
     """Add next steps section for full 360 reports."""
@@ -1181,12 +1587,20 @@ def add_next_steps(doc):
     
     for step in steps:
         para = doc.add_paragraph(step, style='List Bullet')
-    
+
     doc.add_paragraph()
     doc.add_paragraph(
         "Remember: this feedback represents perceptions at a point in time. "
         "Use it as data to inform your development, not as a definitive judgement."
     )
+
+    # Space to work in, so this report is a live document rather than a read-only output
+    add_writing_prompt(
+        doc,
+        "What stands out most from this feedback, and what will you do about it? "
+        "Write your thinking here before your coaching conversation."
+    )
+    add_writing_lines(doc, count=8)
 
 
 # ============================================
@@ -1206,19 +1620,29 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         cohort: Optional cohort name
     
     Returns:
-        Path to generated report file
+        (output_path, theme_warning) — theme_warning is None unless the Key
+        Themes section (Full 360 only) was skipped due to a genuine failure.
     """
     doc = Document()
-    
+    apply_page_geometry(doc)
+    apply_document_font(doc)
+    theme_warning = None
+
     if report_type == 'Self-Assessment':
         create_cover_page(doc, leader_name, "Self-Assessment Report", dealership, cohort)
         
         # About This Report — styled heading, its own page
         about_heading = add_section_heading(doc, "About This Report", font_size=16)
         doc.add_paragraph(
-            "This self-assessment report captures your own view of your leadership effectiveness "
-            "across the nine dimensions of the Compass framework. It forms the starting point for "
-            "your 360-degree feedback process."
+            "This report captures your own view of your leadership effectiveness across the nine "
+            "dimensions of the Compass framework. It is the first of two stages: this "
+            "self-assessment, which you talk through with your coach at Module 1, and your full "
+            "360 feedback report at Module 2, once the people you nominate have given their view."
+        )
+        doc.add_paragraph()
+        doc.add_paragraph(
+            "Write on this document. There is space throughout to capture what comes out of your "
+            "coaching conversation, and it is yours to keep working on."
         )
         doc.add_paragraph()
         doc.add_paragraph(
@@ -1227,9 +1651,9 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         sections_list = [
             "Your Self-Assessment Overview — your dimension scores at a glance with a radar chart",
             "Detailed Self-Assessment by Dimension — item-level scores with bar charts for each of the nine dimensions",
-            "Overall Effectiveness — two global leadership effectiveness items",
-            "Reflection Questions — prompts to help you prepare for your coaching session",
-            "What Happens Next — the next steps in the 360 feedback process",
+            "Your Development Priorities — the areas you named, and space to add more with your coach",
+            "Reflection Questions — prompts to prepare for your coaching conversation, with space to answer them",
+            "What Happens Next — the two stages of the process and where you are in it",
         ]
         for item in sections_list:
             para = doc.add_paragraph(item, style='List Bullet')
@@ -1245,7 +1669,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         table.style = 'Table Grid'
         table.autofit = False
         
-        widths = [Inches(4.6), Inches(1.5)]
+        widths = content_columns(4.5, 1.5)
         
         hdr = table.rows[0].cells
         hdr[0].text = "Dimension"
@@ -1268,23 +1692,24 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             row[1].text = f"{self_score:.1f}" if self_score else "-"
             row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Keep table with radar
+        # Keep table with radar. This page carries only the heading and a ten-row
+        # table, so a full-width radar (about 5in tall) still fits beneath it.
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
                     para.paragraph_format.keep_with_next = True
-        
+
         # Horizontal rule + radar chart
         _add_thin_rule(doc)
-        
+
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
             create_radar_chart(DIMENSIONS, self_scores, None, tmp.name)
-            
+
             para = doc.add_paragraph()
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = para.add_run()
-            run.add_picture(tmp.name, width=Inches(3.74))  # 9.5cm
+            run.add_picture(tmp.name, width=Inches(CONTENT_WIDTH_IN))
             os.unlink(tmp.name)
         
         # Detailed sections — with parent heading that flows into first dimension
@@ -1295,10 +1720,12 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         for i, dim_name in enumerate(DIMENSIONS.keys()):
             add_dimension_section(doc, dim_name, data, comments, is_self_only=True,
                                   is_first_dimension=(i == 0))
-        
-        # Overall Effectiveness
-        add_overall_effectiveness(doc, data, is_self_only=True)
-        
+
+        # Self-identified development priorities
+        add_development_priorities(
+            doc, data.get('development_priorities', []), data, is_self_only=True
+        )
+
         # Reflection Questions
         add_reflection_questions(doc)
         
@@ -1323,9 +1750,9 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             "Response Summary & Executive Summary — who responded and your dimension scores at a glance",
             "Strengths & Development Analysis — where you and others agree, and where perceptions differ",
             "Detailed Feedback by Dimension — item-level scores with bar charts for each of the nine dimensions",
-            "Overall Effectiveness — two global leadership effectiveness items",
-            "Overall Qualitative Feedback — verbatim comments on your greatest strengths and development areas",
+            "Overall Qualitative Feedback — what to keep doing, and the one change that would make the biggest difference",
             "Key Themes in Your Feedback — patterns and consistent messages identified across all your feedback",
+            "Your Development Priorities — the areas you named at self-assessment, how they were actually rated, and space to add more",
             "Next Steps — guidance for making the most of your feedback",
         ]
         for item in sections_list:
@@ -1350,12 +1777,12 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         for i, dim_name in enumerate(DIMENSIONS.keys()):
             add_dimension_section(doc, dim_name, data, comments, is_self_only=False,
                                   is_first_dimension=(i == 0))
-        
-        # Overall effectiveness (now Q46-47)
-        add_overall_effectiveness(doc, data, is_self_only=False)
-        
+
         add_overall_comments(doc, comments)
-        add_theme_synthesis(doc, leader_name, comments, data)
+        theme_warning = add_theme_synthesis(doc, leader_name, comments, data)
+        add_development_priorities(
+            doc, data.get('development_priorities', []), data, is_self_only=False
+        )
         add_next_steps(doc)
     
     else:  # Progress Report
@@ -1366,8 +1793,8 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
     filename = f"{leader_name.replace(' ', '_')}_{report_type.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.docx"
     output_path = REPORTS_DIR / filename
     doc.save(output_path)
-    
-    return str(output_path)
+
+    return str(output_path), theme_warning
 
 
 def generate_all_reports(db, leader_ids=None):
@@ -1382,7 +1809,7 @@ def generate_all_reports(db, leader_ids=None):
         leader = db.get_leader(leader_id)
         data, comments = db.get_leader_feedback_data(leader_id)
         
-        output_path = generate_report(
+        output_path, theme_warning = generate_report(
             leader['name'],
             'Full 360',
             data,
@@ -1390,6 +1817,8 @@ def generate_all_reports(db, leader_ids=None):
             leader.get('dealership'),
             leader.get('cohort')
         )
+        if theme_warning:
+            print(f"Key Themes could not be generated for {leader['name']}: {theme_warning}", file=sys.stderr)
         generated.append(output_path)
     
     return generated

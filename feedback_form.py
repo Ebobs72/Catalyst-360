@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Feedback form for raters in the 360 Development Catalyst.
+Feedback form for raters in Bentley Compass 360.
 
 Provides a clean, branded experience for submitting 360 feedback.
 Supports save & resume — raters can close the browser and return later.
@@ -10,9 +10,16 @@ import streamlit as st
 import json
 from datetime import datetime
 from framework import (
-    DIMENSIONS, ITEMS, DIMENSION_DESCRIPTIONS, 
-    RELATIONSHIP_TYPES, GROUP_DISPLAY
+    DIMENSIONS, DIMENSION_DESCRIPTIONS,
+    RELATIONSHIP_TYPES, GROUP_DISPLAY,
+    SCALE_FREQUENCY, OPEN_PROMPTS,
+    DEVELOPMENT_PRIORITY_COUNT, DEVELOPMENT_PRIORITY_INTRO,
+    DEVELOPMENT_PRIORITY_PROMPT, DEVELOPMENT_PRIORITY_MINIMUM,
+    DEVELOPMENT_PRIORITY_ACTION_MIN_CHARS,
+    get_item_text, get_prompt_text
 )
+
+TOTAL_ITEMS = 45
 
 
 def _collect_current_answers():
@@ -20,8 +27,8 @@ def _collect_current_answers():
     ratings = {}
     comments = {}
 
-    # Ratings (Q1-Q47)
-    for item_num in range(1, 48):
+    # Ratings (Q1-Q45)
+    for item_num in range(1, TOTAL_ITEMS + 1):
         val = st.session_state.get(f"rating_{item_num}", "")
         if val and val != "":
             ratings[item_num] = val
@@ -32,13 +39,57 @@ def _collect_current_answers():
         if val and val.strip():
             comments[dim_name] = val
 
-    # Overall comments
-    for key in ['strengths', 'development']:
+    # Closing open prompts
+    for key in ['keep', 'change']:
         val = st.session_state.get(f"comment_{key}", "")
         if val and val.strip():
             comments[key] = val
 
     return ratings, comments
+
+
+def _collect_priorities():
+    """
+    Gather the self-assessment development priorities from session state.
+
+    Returns a list of {'rank', 'dimension', 'actions'}. Entries where no
+    dimension was chosen are returned too, so callers can distinguish an
+    untouched form from a partially filled one; save_development_priorities
+    drops them.
+    """
+    priorities = []
+    for rank in range(1, DEVELOPMENT_PRIORITY_COUNT + 1):
+        dimension = st.session_state.get(f"priority_dim_{rank}", "")
+        actions = st.session_state.get(f"priority_actions_{rank}", "")
+        priorities.append({
+            'rank': rank,
+            'dimension': dimension if dimension else None,
+            'actions': actions,
+        })
+    return priorities
+
+
+def _duplicate_priority_dimensions(priorities):
+    """Return the dimensions chosen more than once, if any."""
+    chosen = [p['dimension'] for p in priorities if p.get('dimension')]
+    return sorted({d for d in chosen if chosen.count(d) > 1})
+
+
+def _priorities_missing_actions(priorities):
+    """
+    Return the ranks of any priority that has a dimension chosen but no usable
+    actions text. Choosing a dimension commits the leader to saying what they
+    will do about it, otherwise the priority carries nothing into a coaching
+    conversation.
+    """
+    missing = []
+    for p in priorities:
+        if not p.get('dimension'):
+            continue
+        actions = (p.get('actions') or '').strip()
+        if len(actions) < DEVELOPMENT_PRIORITY_ACTION_MIN_CHARS:
+            missing.append(p['rank'])
+    return missing
 
 
 def _auto_save():
@@ -77,7 +128,7 @@ def render_feedback_form(db, rater_info):
     # Header
     st.markdown(f"""
     <div class="feedback-header">
-        <h1 style="font-size: 1.8rem; margin-bottom: 0.3rem;">THE 360 DEVELOPMENT CATALYST</h1>
+        <h1 style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
         <p style="font-size: 1.1rem; opacity: 0.9; margin: 0;">
             {'Self-Assessment' if is_self else f'Feedback for <strong>{leader_name}</strong>'}
         </p>
@@ -127,13 +178,10 @@ def render_feedback_form(db, rater_info):
                 Any comments you make will be anonymised to the group title you respond from – 
                 <strong>unless you are the direct line manager of the individual.</strong>
             </p>
-            <p style="margin: 1rem 0 0 0; color: #C00000; line-height: 1.6;">
-                <strong>If any of the individual statements are Not Applicable to your specific relationship 
-                with this individual, please choose the N/A option.</strong>
-            </p>
-            <p style="margin: 1rem 0 0 0; color: #C00000; line-height: 1.6;">
-                <strong>If any of the individual statements ARE applicable to your specific relationship, 
-                but you have not had an opportunity to witness them behaving in that way, choose No Opportunity.</strong>
+            <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
+                Rate how often you have observed each behaviour. If you have not had an opportunity to
+                observe someone behaving in that way, please choose <strong>"No opportunity to observe"</strong>
+                rather than guessing.
             </p>
             <p style="margin: 1rem 0 0 0; color: #024731; line-height: 1.6;">
                 <strong>💾 Your progress is saved automatically.</strong> You can close this window at any time 
@@ -142,18 +190,12 @@ def render_feedback_form(db, rater_info):
         </div>
         """, unsafe_allow_html=True)
     
-    # Rating options
-    rating_options = [""] + [str(i) for i in range(1, 6)] + ["N/A", "N/O"]
-    rating_labels = {
-        "": "Select...",
-        "1": "1 - Strongly Disagree",
-        "2": "2 - Disagree",
-        "3": "3 - Neither",
-        "4": "4 - Agree",
-        "5": "5 - Strongly Agree",
-        "N/A": "N/A - Not Applicable",
-        "N/O": "N/O - No Opportunity to Observe"
-    }
+    # Rating options — frequency scale (1-5) plus "no opportunity to observe" (0)
+    rating_options = [""] + [str(i) for i in range(1, 6)] + ["0"]
+    rating_labels = {"": "Select..."}
+    for i in range(1, 6):
+        rating_labels[str(i)] = f"{i} - {SCALE_FREQUENCY[i]}"
+    rating_labels["0"] = SCALE_FREQUENCY[0]
     
     # --- FORM (using st.form for clean submission, with draft pre-population) ---
     # Note: We use st.form for the actual widgets, but auto-save happens via
@@ -171,16 +213,8 @@ def render_feedback_form(db, rater_info):
             """, unsafe_allow_html=True)
             
             for item_num in range(start_item, end_item + 1):
-                item_text = ITEMS[item_num]
-                
-                if is_self:
-                    item_text = item_text.replace("their team", "my team")
-                    item_text = item_text.replace("their people", "my people")
-                    item_text = item_text.replace("their leadership", "my leadership")
-                    item_text = item_text.replace("their area", "my area")
-                    item_text = item_text.replace("their immediate", "my immediate")
-                    item_text = item_text.replace("this person", "myself")
-                
+                item_text = get_item_text(item_num, relationship)
+
                 col1, col2 = st.columns([3, 1])
                 
                 with col1:
@@ -230,85 +264,106 @@ def render_feedback_form(db, rater_info):
             
             st.markdown("<hr style='margin: 2rem 0; border: none; border-top: 1px solid #E0E0E0;'>", unsafe_allow_html=True)
         
-        # Overall Effectiveness (Q46 and Q47)
-        st.markdown('<div class="dimension-header">Overall Effectiveness</div>', unsafe_allow_html=True)
-        
-        for item_num in [46, 47]:
-            item_text = ITEMS[item_num]
-            if is_self:
-                item_text = item_text.replace("this person", "myself")
-            
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                st.markdown(f"""
-                <div class="item-container">
-                    <span style="color: #999; font-size: 0.85rem;">Q{item_num}.</span>
-                    <span class="item-text">{item_text}</span>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                default_idx = 0
-                if has_draft and draft_ratings and item_num in draft_ratings:
-                    draft_val = str(draft_ratings[item_num])
-                    if draft_val in rating_options:
-                        default_idx = rating_options.index(draft_val)
-                
-                st.selectbox(
-                    f"Rating for Q{item_num}",
-                    options=rating_options,
-                    index=default_idx,
-                    format_func=lambda x: rating_labels.get(x, x),
-                    key=f"rating_{item_num}",
-                    label_visibility="collapsed"
-                )
-        
-        st.markdown("<hr style='margin: 2rem 0; border: none; border-top: 1px solid #E0E0E0;'>", unsafe_allow_html=True)
-        
-        # Overall comments
+        # Overall comments — two open prompts (not scored)
         st.markdown('<div class="dimension-header">Overall Feedback</div>', unsafe_allow_html=True)
-        
+
         st.markdown(f"""
         <p style="margin-top: 1rem; margin-bottom: 0.5rem; color: #333;">
-            <strong>What are {leader_name + "'s" if not is_self else "your"} greatest strengths as a leader?</strong>
+            <strong>{get_prompt_text('keep', relationship)}</strong>
         </p>
         """, unsafe_allow_html=True)
-        
-        default_strengths = ""
-        if has_draft and draft_comments and 'strengths' in draft_comments:
-            default_strengths = draft_comments['strengths']
-        
+
+        default_keep = ""
+        if has_draft and draft_comments and 'keep' in draft_comments:
+            default_keep = draft_comments['keep']
+
         st.text_area(
-            "Strengths",
-            value=default_strengths,
-            key="comment_strengths",
+            "Keep doing",
+            value=default_keep,
+            key="comment_keep",
             height=100,
             label_visibility="collapsed",
             placeholder="Describe the leadership qualities and behaviours that are most effective..."
         )
-        
+
         st.markdown(f"""
         <p style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: #333;">
-            <strong>What should {leader_name if not is_self else "you"} focus on developing?</strong>
+            <strong>{get_prompt_text('change', relationship)}</strong>
         </p>
         """, unsafe_allow_html=True)
-        
-        default_development = ""
-        if has_draft and draft_comments and 'development' in draft_comments:
-            default_development = draft_comments['development']
-        
+
+        default_change = ""
+        if has_draft and draft_comments and 'change' in draft_comments:
+            default_change = draft_comments['change']
+
         st.text_area(
-            "Development",
-            value=default_development,
-            key="comment_development",
+            "One change",
+            value=default_change,
+            key="comment_change",
             height=100,
             label_visibility="collapsed",
-            placeholder="Suggest areas for growth and specific behaviours to work on..."
+            placeholder="Suggest the one change that would make the biggest difference..."
         )
-        
+
+        # --- Development priorities (self-assessment only) ---
+        # The leader ranks up to three dimensions and names the specific
+        # behaviours and actions they intend to work on within each. Raters
+        # never see this: it is the leader's own development intent.
+        if is_self:
+            st.markdown("<hr style='margin: 2rem 0; border: none; border-top: 1px solid #E0E0E0;'>", unsafe_allow_html=True)
+            st.markdown('<div class="dimension-header">Your Development Priorities</div>', unsafe_allow_html=True)
+
+            st.markdown(f"""
+            <p style="margin-top: 1rem; margin-bottom: 1rem; color: #333; line-height: 1.6;">
+                {DEVELOPMENT_PRIORITY_INTRO}
+            </p>
+            """, unsafe_allow_html=True)
+
+            existing_priorities = db.get_development_priorities(rater_info['leader_id'])
+            by_rank = {p['rank']: p for p in existing_priorities}
+
+            dimension_options = [""] + list(DIMENSIONS.keys())
+
+            for rank in range(1, DEVELOPMENT_PRIORITY_COUNT + 1):
+                saved = by_rank.get(rank, {})
+
+                required_label = (
+                    ' <span style="color: #C00000;">*</span>'
+                    if rank <= DEVELOPMENT_PRIORITY_MINIMUM
+                    else ' <span style="color: #999; font-weight: 400;">'
+                         '(optional, but if you choose a dimension please say '
+                         'what you\'ll do)</span>'
+                )
+                st.markdown(f"""
+                <p style="margin-top: 1.2rem; margin-bottom: 0.3rem; color: #024731; font-weight: 600;">
+                    Priority {rank}{required_label}
+                </p>
+                """, unsafe_allow_html=True)
+
+                default_idx = 0
+                if saved.get('dimension') in dimension_options:
+                    default_idx = dimension_options.index(saved['dimension'])
+
+                st.selectbox(
+                    f"Dimension for priority {rank}",
+                    options=dimension_options,
+                    index=default_idx,
+                    format_func=lambda x: x if x else "Select a dimension...",
+                    key=f"priority_dim_{rank}",
+                    label_visibility="collapsed"
+                )
+
+                st.text_area(
+                    f"Actions for priority {rank}",
+                    value=saved.get('actions', ''),
+                    key=f"priority_actions_{rank}",
+                    height=80,
+                    label_visibility="collapsed",
+                    placeholder="Be specific: which behaviours, and what will you do differently?"
+                )
+
         st.markdown("<br>", unsafe_allow_html=True)
-        
+
         # --- Two buttons: Save & Continue Later, and Submit ---
         col_save, col_submit = st.columns(2)
         
@@ -330,8 +385,14 @@ def render_feedback_form(db, rater_info):
             ratings, comments = _collect_current_answers()
             try:
                 db.save_draft(rater_id, ratings, comments)
+                # Priorities live on the leader row, not in the rater draft, so
+                # they are saved directly rather than through save_draft
+                if is_self:
+                    db.save_development_priorities(
+                        rater_info['leader_id'], _collect_priorities()
+                    )
                 answered = len(ratings)
-                total = 47
+                total = TOTAL_ITEMS
                 st.success(
                     f"✅ **Progress saved!** ({answered} of {total} items answered)\n\n"
                     f"You can safely close this window. When you're ready to continue, "
@@ -344,35 +405,92 @@ def render_feedback_form(db, rater_info):
         if submit_clicked:
             # Collect all answers
             ratings, comments = _collect_current_answers()
-            
+            priorities = _collect_priorities() if is_self else []
+
             # Validate - check that all items have been rated
             missing = []
-            for item_num in range(1, 48):
+            for item_num in range(1, TOTAL_ITEMS + 1):
                 if item_num not in ratings or ratings[item_num] == "":
                     missing.append(item_num)
-            
+
+            duplicate_dims = _duplicate_priority_dimensions(priorities)
+            chosen_priorities = [p for p in priorities if p.get('dimension')]
+            too_few_priorities = (
+                is_self and len(chosen_priorities) < DEVELOPMENT_PRIORITY_MINIMUM
+            )
+            priorities_without_actions = (
+                _priorities_missing_actions(priorities) if is_self else []
+            )
+
             if missing:
                 # Save what they have so far even though submission failed
                 try:
                     db.save_draft(rater_id, ratings, comments)
+                    if is_self:
+                        db.save_development_priorities(rater_info['leader_id'], priorities)
                 except Exception:
                     pass
-                
+
                 st.error(
                     f"Please provide a rating for all items before submitting. "
                     f"Missing: Q{', Q'.join(map(str, missing[:5]))}"
                     f"{'...' if len(missing) > 5 else ''}\n\n"
                     f"Your progress has been saved — you won't lose your answers."
                 )
+            elif too_few_priorities:
+                # The leader must commit to at least one area to work on
+                try:
+                    db.save_draft(rater_id, ratings, comments)
+                    db.save_development_priorities(rater_info['leader_id'], priorities)
+                except Exception:
+                    pass
+
+                st.error(
+                    f"Please choose at least one development priority before "
+                    f"submitting. Pick the dimension you most want to work on and "
+                    f"say what you intend to do differently. If it helps, build on "
+                    f"what you wrote in the closing questions above.\n\n"
+                    f"Your progress has been saved — you won't lose your answers."
+                )
+            elif duplicate_dims:
+                # Ranking the same dimension twice is meaningless, so block it
+                try:
+                    db.save_draft(rater_id, ratings, comments)
+                    db.save_development_priorities(rater_info['leader_id'], priorities)
+                except Exception:
+                    pass
+
+                st.error(
+                    f"Please choose a different dimension for each development "
+                    f"priority. Currently chosen more than once: "
+                    f"{', '.join(duplicate_dims)}.\n\n"
+                    f"Your progress has been saved — you won't lose your answers."
+                )
+            elif priorities_without_actions:
+                # A chosen dimension with no actions carries nothing into the
+                # coaching conversation, so require the pair
+                try:
+                    db.save_draft(rater_id, ratings, comments)
+                    db.save_development_priorities(rater_info['leader_id'], priorities)
+                except Exception:
+                    pass
+
+                ranks = ', '.join(str(r) for r in priorities_without_actions)
+                plural = 'ies' if len(priorities_without_actions) > 1 else 'y'
+                st.error(
+                    f"Please say what you intend to do for each priority you've "
+                    f"chosen. Missing specifics for Priorit{plural} {ranks}.\n\n"
+                    f"Name the behaviours you want to change and the actions you'll "
+                    f"take. If you'd rather not commit to one of these areas yet, "
+                    f"set its dimension back to \"Select a dimension...\".\n\n"
+                    f"Your progress has been saved — you won't lose your answers."
+                )
             else:
-                # Process ratings for final submission
+                # Process ratings for final submission — values are "0" (no
+                # opportunity to observe) through "5" on the frequency scale
                 processed_ratings = {}
                 for item_num, rating in ratings.items():
-                    if rating == "N/O":
-                        processed_ratings[item_num] = "NO"
-                    elif rating == "N/A":
-                        processed_ratings[item_num] = "NA"
-                    elif rating:
+                    if rating != "":
                         processed_ratings[item_num] = int(rating)
                 
                 # Process comments
@@ -380,8 +498,17 @@ def render_feedback_form(db, rater_info):
                 
                 # Submit to database (this also clears the draft)
                 try:
+                    # Priorities first: submit_feedback severs identity, and the
+                    # priorities belong to the leader either way, but saving them
+                    # before the irreversible step means a failure there cannot
+                    # lose what the leader typed
+                    if is_self:
+                        db.save_development_priorities(
+                            rater_info['leader_id'], priorities
+                        )
+
                     db.submit_feedback(rater_id, processed_ratings, processed_comments)
-                    
+
                     st.success("Thank you! Your feedback has been submitted successfully.")
                     st.balloons()
                     
@@ -409,14 +536,14 @@ def render_feedback_form(db, rater_info):
         st.markdown("### 📊 Your Progress")
         
         answered = 0
-        for item_num in range(1, 48):
+        for item_num in range(1, TOTAL_ITEMS + 1):
             val = st.session_state.get(f"rating_{item_num}", "")
             if val and val != "":
                 answered += 1
-        
-        progress = answered / 47
+
+        progress = answered / TOTAL_ITEMS
         st.progress(progress)
-        st.markdown(f"**{answered}** of **47** items answered ({int(progress * 100)}%)")
+        st.markdown(f"**{answered}** of **{TOTAL_ITEMS}** items answered ({int(progress * 100)}%)")
         
         if st.session_state.get('last_saved'):
             st.markdown(f"<p style='color: #999; font-size: 0.8rem;'>Last saved: {st.session_state.last_saved}</p>", 

@@ -1,0 +1,43 @@
+# ==========================================
+# Credentials — NEVER commit these
+# ==========================================
+# Turso URL/token and SMTP credentials live here
+.streamlit/secrets.toml
+secrets.toml
+*.env
+.env
+
+# ==========================================
+# Databases
+# ==========================================
+# Local SQLite fallback and any test databases. The real data lives in Turso.
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ==========================================
+# Generated output
+# ==========================================
+# Word reports are generated on demand and can contain real feedback data
+reports/
+
+# ==========================================
+# Python
+# ==========================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ==========================================
+# Editor / OS
+# ==========================================
+.DS_Store
+.vscode/
+.idea/
+
+# Machine-specific Claude Code settings (launch.json IS committed deliberately,
+# so a fresh session can start the app without reconstructing the config)
+.claude/settings.local.json

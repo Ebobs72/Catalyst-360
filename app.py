@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-THE 360 DEVELOPMENT CATALYST - Complete Web Application
-========================================================
+BENTLEY COMPASS 360 - Complete Web Application
+===============================================
 
 A Streamlit application that replaces Microsoft Forms for 360 feedback collection.
 
@@ -32,7 +32,7 @@ from leader_portal import render_leader_portal
 
 # Page config
 st.set_page_config(
-    page_title="The 360 Development Catalyst",
+    page_title="Bentley Compass 360",
     page_icon="🧭",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -185,55 +185,108 @@ st.markdown("""
         border-color: #024731;
     }
     
-    /* Button styling */
-    .stButton > button {
-        background: linear-gradient(135deg, #024731 0%, #035D40 100%);
-        color: white !important;
-        border: none;
+    /* ============================================
+       BUTTONS
+       Every rule below sets text colour and background TOGETHER. Setting one
+       without the other is what produced white-on-white buttons: Streamlit
+       renders a light default background on its "secondary" variants, so a
+       blanket `color: white` made the label invisible.
+       Selectors hook the data-testid on the button element itself rather than
+       using `.stButton > button`, because Streamlit nests a div between the
+       wrapper and the button, which breaks the direct-child selector.
+       ============================================ */
+
+    /* Primary actions — filled Bentley green, white label */
+    button[data-testid="stBaseButton-primary"],
+    button[data-testid="stBaseButton-primaryFormSubmit"] {
+        background: linear-gradient(135deg, #024731 0%, #035D40 100%) !important;
+        color: #FFFFFF !important;
+        border: 1px solid #024731 !important;
         padding: 0.6rem 2rem;
         font-family: 'Source Sans Pro', sans-serif;
         font-weight: 600;
         letter-spacing: 0.05em;
         transition: all 0.3s;
     }
-    
-    .stButton > button:hover {
+    button[data-testid="stBaseButton-primary"] *,
+    button[data-testid="stBaseButton-primaryFormSubmit"] * {
+        color: #FFFFFF !important;
+    }
+    button[data-testid="stBaseButton-primary"]:hover,
+    button[data-testid="stBaseButton-primaryFormSubmit"]:hover {
+        background: linear-gradient(135deg, #013825 0%, #024731 100%) !important;
+        color: #FFFFFF !important;
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(2, 71, 49, 0.3);
-        color: white !important;
     }
-    
-    /* Ensure ALL button variants have white text */
-    .stButton > button p,
-    .stButton > button span,
-    .stFormSubmitButton > button,
-    .stFormSubmitButton > button p,
-    .stFormSubmitButton > button span,
-    [data-testid="stBaseButton-primary"],
-    [data-testid="stBaseButton-primary"] p,
-    [data-testid="stBaseButton-primary"] span,
-    [data-testid="stBaseButton-secondary"],
-    [data-testid="stBaseButton-secondary"] p,
-    [data-testid="stBaseButton-secondary"] span {
-        color: white !important;
+    button[data-testid="stBaseButton-primary"]:hover *,
+    button[data-testid="stBaseButton-primaryFormSubmit"]:hover * {
+        color: #FFFFFF !important;
     }
-    
-    /* Download buttons — dark text on light background */
-    .stDownloadButton > button,
-    .stDownloadButton > button p,
-    .stDownloadButton > button span,
-    [data-testid="stBaseButton-secondary"].stDownloadButton > button {
-        background: white !important;
-        color: #333 !important;
-        border: 1px solid #DDD !important;
-    }
-    
-    .stDownloadButton > button:hover {
-        background: #F5F5F5 !important;
-        border-color: #024731 !important;
+
+    /* Secondary actions — white with a green label and green border */
+    button[data-testid="stBaseButton-secondary"],
+    button[data-testid="stBaseButton-secondaryFormSubmit"] {
+        background: #FFFFFF !important;
         color: #024731 !important;
+        border: 1px solid #024731 !important;
+        font-family: 'Source Sans Pro', sans-serif;
+        font-weight: 600;
+        transition: all 0.3s;
+    }
+    button[data-testid="stBaseButton-secondary"] *,
+    button[data-testid="stBaseButton-secondaryFormSubmit"] * {
+        color: #024731 !important;
+    }
+    button[data-testid="stBaseButton-secondary"]:hover,
+    button[data-testid="stBaseButton-secondaryFormSubmit"]:hover {
+        background: #F0F5F2 !important;
+        color: #024731 !important;
+        border-color: #024731 !important;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(2, 71, 49, 0.15);
+    }
+    button[data-testid="stBaseButton-secondary"]:hover *,
+    button[data-testid="stBaseButton-secondaryFormSubmit"]:hover * {
+        color: #024731 !important;
+    }
+
+    /* Download buttons — neutral grey, distinct from the green action buttons */
+    .stDownloadButton button {
+        background: #FFFFFF !important;
+        color: #333333 !important;
+        border: 1px solid #DDDDDD !important;
+    }
+    .stDownloadButton button * {
+        color: #333333 !important;
+    }
+    .stDownloadButton button:hover {
+        background: #F5F5F5 !important;
+        color: #024731 !important;
+        border-color: #024731 !important;
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .stDownloadButton button:hover * {
+        color: #024731 !important;
+    }
+
+    /* Disabled buttons — muted but still legible */
+    button[data-testid="stBaseButton-primary"]:disabled,
+    button[data-testid="stBaseButton-primaryFormSubmit"]:disabled,
+    button[data-testid="stBaseButton-secondary"]:disabled,
+    button[data-testid="stBaseButton-secondaryFormSubmit"]:disabled {
+        background: #F0F0F0 !important;
+        color: #666666 !important;
+        border-color: #CCCCCC !important;
+        transform: none;
+        box-shadow: none;
+    }
+    button[data-testid="stBaseButton-primary"]:disabled *,
+    button[data-testid="stBaseButton-primaryFormSubmit"]:disabled *,
+    button[data-testid="stBaseButton-secondary"]:disabled *,
+    button[data-testid="stBaseButton-secondaryFormSubmit"]:disabled * {
+        color: #666666 !important;
     }
     
     /* Thank you page */
@@ -308,29 +361,29 @@ def load_demo_data_if_empty():
                 ratings = {}
                 rel = rater['relationship']
                 
-                for item_num in range(1, 43):
+                for item_num in range(1, 46):
                     dim_name = None
                     for d, (start, end) in DIMENSIONS.items():
                         if start <= item_num <= end:
                             dim_name = d
                             break
-                    
+
                     base = 4.3 if dim_name in leader_strengths else (3.5 if dim_name in leader_dev_areas else 4.0)
                     if rel == 'Self' and dim_name in leader_dev_areas:
                         base += 0.5
-                    
+
                     score = int(round(min(5.0, max(1.0, base + np.random.uniform(-0.5, 0.5)))))
-                    ratings[item_num] = 'NO' if (rel == 'Others' and np.random.random() < 0.1) else score
-                
+                    ratings[item_num] = 0 if (rel == 'Others' and np.random.random() < 0.1) else score
+
                 comments = {}
                 for dim in list(np.random.choice(list(DIMENSIONS.keys()), np.random.randint(2, 4), replace=False)):
                     if dim in comments_pool:
                         comments[dim] = np.random.choice(comments_pool[dim])
-                
+
                 if rel != 'Self':
-                    comments['strengths'] = np.random.choice(comments_pool['strengths'])
-                    comments['development'] = np.random.choice(comments_pool['development'])
-                
+                    comments['keep'] = np.random.choice(comments_pool['strengths'])
+                    comments['change'] = np.random.choice(comments_pool['development'])
+
                 db.submit_feedback(rater['id'], ratings, comments)
 
 load_demo_data_if_empty()
@@ -358,8 +411,8 @@ def get_route():
 
 def render_landing_page():
     """Render the main landing/info page."""
-    st.markdown('<p class="main-title">THE 360 DEVELOPMENT CATALYST</p>', unsafe_allow_html=True)
-    st.markdown('<p class="subtitle">Bentley Compass Leadership Programme</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">360-Degree Leadership Feedback</p>', unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     

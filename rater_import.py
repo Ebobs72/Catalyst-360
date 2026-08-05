@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rater import and anonymity-severing module for the 360 Development Catalyst.
+Rater import and anonymity-severing module for Bentley Compass 360.
 
 Two responsibilities:
 

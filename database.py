@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Database module for the 360 Development Catalyst.
+Database module for Bentley Compass 360.
 
 Handles all data persistence using Turso (libSQL) for cloud hosting,
 with fallback to local SQLite for development.
@@ -153,6 +153,19 @@ class Database:
         self._safe_add_column("leaders", "portal_token", "TEXT")
         self._safe_add_column("leaders", "portal_email_sent_at", "TIMESTAMP")
         self._safe_add_column("leaders", "nomination_reminder_sent_at", "TIMESTAMP")
+        # The leader's own record of who they nominated. Deliberately stored on
+        # the LEADER, not on `raters`: identity severing nulls raters.name and
+        # raters.email at submission, so a roster held there would be destroyed
+        # for exactly the people who responded (and the blank rows would leak
+        # per-person response status). Held here it survives severing, and the
+        # only link back to a rater row is the email address, which severing
+        # removes as a side effect. See CLAUDE.md section 5.
+        self._safe_add_column("leaders", "nomination_roster", "TEXT")
+        # Self-identified development priorities, captured at self-assessment.
+        # Stored on the LEADER rather than the Self rater row because they are
+        # the leader's own development intent, not anonymous feedback, and they
+        # need to outlive any change to how self-assessment rows are handled.
+        self._safe_add_column("leaders", "development_priorities", "TEXT")
         
         # Continue with rest of schema
         conn = self.get_connection()
@@ -418,9 +431,173 @@ class Database:
         """, (days_since_portal_email,))
     
     # ==========================================
+    # NOMINATION ROSTER
+    # ==========================================
+    #
+    # The leader's own durable record of who they nominated. Survives identity
+    # severing because it lives on the `leaders` row, not on `raters`. Used for
+    # display and for email correction only — never for scoring, and never
+    # joined to responses.
+
+    def get_nomination_roster(self, leader_id):
+        """
+        Return the leader's nomination roster as a list of dicts
+        ({'name', 'email', 'relationship'}).
+
+        Falls back to building the roster from the current `raters` rows if the
+        column is empty (i.e. a leader nominated before this column existed).
+        That backfill is only accurate for raters not yet severed, which is
+        correct: severed rows carry no identity to recover.
+        """
+        row = self._fetchone(
+            "SELECT nomination_roster FROM leaders WHERE id = ?", (leader_id,)
+        )
+        if row and row.get('nomination_roster'):
+            try:
+                return json.loads(row['nomination_roster'])
+            except (ValueError, TypeError):
+                pass
+
+        # Backfill from raters for pre-existing data
+        backfilled = [
+            {
+                'name': r.get('name'),
+                'email': r.get('email'),
+                'relationship': r['relationship'],
+            }
+            for r in self.get_raters_for_leader(leader_id)
+            if r['relationship'] != 'Self' and (r.get('name') or r.get('email'))
+        ]
+        if backfilled:
+            self._save_nomination_roster(leader_id, backfilled)
+        return backfilled
+
+    def _save_nomination_roster(self, leader_id, roster):
+        """Persist the roster list back to the leader row."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE leaders SET nomination_roster = ? WHERE id = ?",
+            (json.dumps(roster), leader_id)
+        )
+        conn.commit()
+        conn.close()
+
+    def add_to_nomination_roster(self, leader_id, name, email, relationship):
+        """
+        Append a nominee to the leader's roster, if not already present.
+
+        The dedupe matters: callers add the rater row first, so on a leader whose
+        roster column is still empty the backfill in get_nomination_roster
+        already picks up the rater that is about to be appended here. Matching is
+        by email where there is one, since that is the link to the rater row,
+        and by name plus relationship otherwise.
+        """
+        roster = self.get_nomination_roster(leader_id)
+
+        for entry in roster:
+            if email and entry.get('email') == email:
+                return
+            if not email and entry.get('name') == name \
+                    and entry.get('relationship') == relationship:
+                return
+
+        roster.append({'name': name, 'email': email, 'relationship': relationship})
+        self._save_nomination_roster(leader_id, roster)
+
+    def update_nomination_entry(self, leader_id, old_email,
+                                new_email=None, new_relationship=None):
+        """
+        Correct a nominee's email address and/or relationship on the roster.
+
+        Returns True if a roster entry was updated. Matching is by the old
+        address, which is also the only link back to the `raters` row — once a
+        rater is severed their email is NULL, so no match exists and the
+        response cannot be re-identified by writing an address back.
+        """
+        roster = self.get_nomination_roster(leader_id)
+        updated = False
+        for entry in roster:
+            if entry.get('email') == old_email:
+                if new_email:
+                    entry['email'] = new_email
+                if new_relationship:
+                    entry['relationship'] = new_relationship
+                updated = True
+                break
+        if updated:
+            self._save_nomination_roster(leader_id, roster)
+        return updated
+
+    def get_unsevered_rater_by_email(self, leader_id, email):
+        """
+        Find a rater row for this leader still carrying the given email.
+
+        Returns None once the rater has been severed, which is how the email
+        correction path stays safe: there is nothing to write an address onto.
+        """
+        if not email:
+            return None
+        return self._fetchone("""
+            SELECT *,
+                CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END as completed
+            FROM raters
+            WHERE leader_id = ? AND email = ?
+        """, (leader_id, email))
+
+    # ==========================================
+    # SELF-IDENTIFIED DEVELOPMENT PRIORITIES
+    # ==========================================
+
+    def get_development_priorities(self, leader_id):
+        """
+        Return the leader's ranked development priorities as a list of dicts
+        ({'rank', 'dimension', 'actions'}), lowest rank first. Empty list if none.
+        """
+        row = self._fetchone(
+            "SELECT development_priorities FROM leaders WHERE id = ?", (leader_id,)
+        )
+        if not row or not row.get('development_priorities'):
+            return []
+        try:
+            priorities = json.loads(row['development_priorities'])
+        except (ValueError, TypeError):
+            return []
+        return sorted(priorities, key=lambda p: p.get('rank', 0))
+
+    def save_development_priorities(self, leader_id, priorities):
+        """
+        Replace the leader's development priorities.
+
+        Args:
+            leader_id: The leader's ID
+            priorities: List of {'rank': int, 'dimension': str, 'actions': str}.
+                Entries with no dimension are dropped, so a partially filled
+                form saves only what was actually chosen.
+        """
+        cleaned = [
+            {
+                'rank': p.get('rank'),
+                'dimension': p.get('dimension'),
+                'actions': (p.get('actions') or '').strip(),
+            }
+            for p in priorities
+            if p.get('dimension')
+        ]
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE leaders SET development_priorities = ? WHERE id = ?",
+            (json.dumps(cleaned), leader_id)
+        )
+        conn.commit()
+        conn.close()
+
+    # ==========================================
     # RATER MANAGEMENT
     # ==========================================
-    
+
     def generate_token(self):
         """Generate a unique, URL-safe token."""
         return secrets.token_urlsafe(6)
@@ -487,11 +664,22 @@ class Database:
         """, (leader_id,))
     
     def update_rater(self, rater_id, **kwargs):
-        """Update rater details (name, email)."""
+        """
+        Update rater details (name, email, relationship).
+
+        CALLERS MUST NOT change `relationship` on a rater who has already
+        submitted. Their answers were given in the context of the relationship
+        they were invited under, so recategorising them afterwards would
+        misrepresent their input, and moving anonymous responses between groups
+        would let someone probe which group a given response sits in. The portal
+        enforces this by only ever resolving the rater through
+        get_unsevered_rater_by_email, which finds nothing once they have
+        submitted.
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
-        valid_fields = ['name', 'email']
+
+        valid_fields = ['name', 'email', 'relationship']
         updates = {k: v for k, v in kwargs.items() if k in valid_fields}
         
         if updates:
@@ -519,30 +707,79 @@ class Database:
         """Mark a rater as having completed their feedback and clear draft."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute("""
-            UPDATE raters 
+            UPDATE raters
             SET completed_at = CURRENT_TIMESTAMP,
                 draft_ratings = NULL,
                 draft_comments = NULL,
                 draft_saved_at = NULL
             WHERE id = ?
         """, (rater_id,))
-        
+
+        conn.commit()
+        conn.close()
+
+    def sever_rater_identity(self, rater_id):
+        """
+        Irreversibly detach a submitted response from the person who gave it
+        (anonymity severing, Model A).
+
+        Nulls `raters.name` AND `raters.email`, and overwrites
+        `email_log.to_email` with a placeholder (that column is NOT NULL, so it
+        cannot be set to NULL). Token, relationship and all responses are
+        preserved, so scoring and group attribution are unaffected, but the
+        response can no longer be resolved to a named individual.
+
+        Both identifiers must go: the name is the stronger of the two, so
+        nulling only the email would sever nothing meaningful.
+
+        The leader's own record of who they nominated is unaffected, because it
+        lives on `leaders.nomination_roster` rather than on this row.
+
+        IRREVERSIBLE BY DESIGN. Called from submit_feedback after the completion
+        commit. Never call it on a rater who has not submitted.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "UPDATE raters SET name = NULL, email = NULL WHERE id = ?",
+            (rater_id,)
+        )
+        cursor.execute(
+            "UPDATE email_log SET to_email = '[severed]' WHERE rater_id = ?",
+            (rater_id,)
+        )
+
         conn.commit()
         conn.close()
     
     def delete_rater(self, rater_id):
-        """Delete a rater and their responses."""
+        """
+        Delete a rater and their responses.
+
+        Refuses to delete a rater who has already responded — this is the
+        DB-level guard behind the UI's "only remove raters who haven't
+        responded yet" rule, so it holds even if the UI check is bypassed.
+
+        Returns:
+            True if deleted, False if refused because the rater has already completed.
+        """
+        row = self._fetchone("SELECT completed_at FROM raters WHERE id = ?", (rater_id,))
+        if row is None or row['completed_at'] is not None:
+            return False
+
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute("DELETE FROM ratings WHERE rater_id = ?", (rater_id,))
         cursor.execute("DELETE FROM comments WHERE rater_id = ?", (rater_id,))
         cursor.execute("DELETE FROM raters WHERE id = ?", (rater_id,))
-        
+
         conn.commit()
         conn.close()
+        return True
     
     # ==========================================
     # DRAFT SAVE & RESUME
@@ -560,8 +797,10 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        # Convert int keys to strings for JSON serialisation
-        ratings_json = json.dumps({str(k): v for k, v in ratings.items() if v})
+        # Convert int keys to strings for JSON serialisation.
+        # NB: "no opportunity to observe" is a real, meaningful answer of 0/"0" —
+        # must not be filtered out as falsy alongside genuinely unanswered items.
+        ratings_json = json.dumps({str(k): v for k, v in ratings.items() if v != '' and v is not None})
         comments_json = json.dumps({k: v for k, v in comments.items() if v and v.strip()})
         
         cursor.execute("""
@@ -624,13 +863,16 @@ class Database:
         
         Args:
             rater_id: The rater's ID
-            ratings: Dict of {item_number: score} where score is 1-5, 'NO' for no opportunity, or 'NA' for not applicable
+            ratings: Dict of {item_number: score} where score is 1-5 on the frequency
+                scale, or 0 / 'NO' for "no opportunity to observe" (excluded from
+                averages, not counted as a low score). 'NA' is accepted for
+                backward compatibility with older callers.
         """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
         for item_num, score in ratings.items():
-            no_opp = score == 'NO'
+            no_opp = score == 'NO' or score == 0 or score == '0'
             not_applicable = score == 'NA'
             actual_score = None if (no_opp or not_applicable) else int(score)
             
@@ -664,10 +906,18 @@ class Database:
         conn.close()
     
     def submit_feedback(self, rater_id, ratings, comments):
-        """Submit complete feedback (ratings + comments) and mark as complete."""
+        """
+        Submit complete feedback (ratings + comments), mark as complete, and
+        sever the responder's identity.
+
+        Severing runs AFTER the completion commit so a failure part-way through
+        cannot leave a severed rater with no recorded response. It is
+        irreversible: see sever_rater_identity.
+        """
         self.submit_ratings(rater_id, ratings)
         self.submit_comments(rater_id, comments)
         self.mark_rater_complete(rater_id)
+        self.sever_rater_identity(rater_id)
     
     # ==========================================
     # EMAIL LOGGING
@@ -730,13 +980,15 @@ class Database:
         Get all feedback data for a leader in the format needed for report generation.
         
         Applies anonymity threshold - groups with fewer than ANONYMITY_THRESHOLD
-        respondents have their data folded into 'Others' category.
+        respondents have their data folded into 'Others' category. If 'Others'
+        itself is still thin after absorbing them, it folds again into whichever
+        of Peers/DRs is still standing on its own (see the fold cascade below).
         Boss and Self are exempt from this threshold.
         
         Returns:
             Tuple of (data_dict, comments_dict) matching the report generator format
         """
-        from framework import ITEMS, DIMENSIONS, ANONYMITY_THRESHOLD
+        from framework import DIMENSIONS, ANONYMITY_THRESHOLD, get_item_text
         
         # Get response counts by relationship
         rows = self._fetchall("""
@@ -752,33 +1004,84 @@ class Database:
         for row in rows:
             raw_response_counts[relationship_map.get(row['relationship'], row['relationship'])] = row['count']
         
-        # Determine which groups meet the anonymity threshold
+        # Determine which groups meet the anonymity threshold.
+        #
+        # TIER 1 — Peers and DRs below the threshold FOLD INTO Others, which is
+        # safe because merging hides the split: you cannot recover a folded
+        # group's mean from a combined one.
+        #
+        # TIER 2 — 'Others' used to have nothing to fold into if it was STILL thin
+        # after absorbing tier 1. It was whitelisted as always-visible, which meant
+        # a single "Other" respondent was published as a group of one with their
+        # own score. That broke the hard floor. The fix folded it the other way:
+        # if Others (after absorbing tier 1) is still below the threshold, it
+        # folds INTO whichever of Peers/DRs is still standing on its own (prefer
+        # Peers; fall back to DRs). This preserves those responses inside a
+        # standing group's average and comments instead of throwing them away.
+        #
+        # Tier 2 can only fail to find a home when NEITHER Peers nor DRs stands —
+        # i.e. every non-Boss/Self group is thin. Given MIN_RESPONSES_FOR_REPORT
+        # (5) and Boss's 2-person cap, at least 3 non-Boss responses always exist
+        # by the time a report is generated, so folding every thin group together
+        # always clears ANONYMITY_THRESHOLD (3) on its own — this branch is
+        # unreachable today. SUPPRESSION below is kept as a defensive fallback in
+        # case that gate ever changes, not as the expected path.
+        #
+        # Suppression, when it does fire, has to come out of Combined too, not
+        # just the per-group display. Combined is the mean of the group means, so
+        # if every other group is shown then a suppressed group's mean is
+        # recoverable by simple subtraction. Suppression that leaves the number
+        # derivable is not suppression.
         visible_groups = ['Self', 'Boss']
         hidden_groups = []
-        
-        for group in ['Peers', 'DRs', 'Others']:
+
+        for group in ['Peers', 'DRs']:
             count = raw_response_counts.get(group, 0)
             if count >= ANONYMITY_THRESHOLD:
                 visible_groups.append(group)
             elif count > 0:
                 hidden_groups.append(group)
-        
-        # Build response_counts for visible groups only
-        response_counts = {}
+
+        # What Others will hold once the tier 1 groups are folded in
         others_count = raw_response_counts.get('Others', 0)
-        
+        for group in hidden_groups:
+            others_count += raw_response_counts.get(group, 0)
+
+        others_suppressed = False
+        suppressed_groups = []
+        others_fold_target = None
+
+        if others_count >= ANONYMITY_THRESHOLD:
+            visible_groups.append('Others')
+        elif others_count > 0:
+            for candidate in ['Peers', 'DRs']:
+                if candidate in visible_groups:
+                    others_fold_target = candidate
+                    break
+            if others_fold_target is None:
+                # Nowhere left to fold into — every non-Boss group is thin.
+                others_suppressed = True
+                suppressed_groups = sorted(
+                    set(hidden_groups) |
+                    ({'Others'} if raw_response_counts.get('Others', 0) else set())
+                )
+
+        # Build response_counts for the groups that are actually reportable
+        response_counts = {}
         for group in ['Self', 'Boss', 'Peers', 'DRs']:
             if group in visible_groups:
                 response_counts[group] = raw_response_counts.get(group, 0)
-            elif group in hidden_groups:
-                others_count += raw_response_counts.get(group, 0)
-        
-        if others_count > 0 or 'Others' in visible_groups:
+                if group == others_fold_target:
+                    response_counts[group] += others_count
+
+        if 'Others' in visible_groups:
             response_counts['Others'] = others_count
-        
+
         def map_group(group):
             if group in hidden_groups:
-                return 'Others'
+                return others_fold_target or 'Others'
+            if group == 'Others' and others_fold_target:
+                return others_fold_target
             return group
         
         # Get all ratings
@@ -793,12 +1096,16 @@ class Database:
             WHERE r.leader_id = ? AND r.completed_at IS NOT NULL
         """, (leader_id,))
         
-        # Build the by_item structure (47 items)
+        # Build the by_item structure (45 items)
         by_item = {}
         no_opportunity = {}
-        
-        for item_num in range(1, 48):
-            by_item[item_num] = {'text': ITEMS.get(item_num, '')}
+
+        # NB: 'text' is always the They-form. It suits the Full 360, where the item
+        # was put to others that way. The Self-Assessment report must NOT use it:
+        # that report's only rater was the leader, who answered the I-form, so
+        # add_dimension_section resolves the wording itself via get_item_text.
+        for item_num in range(1, 46):
+            by_item[item_num] = {'text': get_item_text(item_num, 'Others')}
         
         # Collect scores by item and mapped group
         item_scores = {}
@@ -823,32 +1130,38 @@ class Database:
                 item_scores[item_num][mapped_group].append(row['score'])
         
         # Calculate averages per item per group
-        for item_num in range(1, 48):
+        for item_num in range(1, 46):
             if item_num in item_scores:
                 for group, scores in item_scores[item_num].items():
                     if scores:
                         by_item[item_num][group] = round(sum(scores) / len(scores), 1)
-            
+
             if item_num in item_no_opp:
                 total_no_opp = sum(item_no_opp[item_num].values())
                 if total_no_opp > 0:
                     no_opportunity[item_num] = {
                         'count': total_no_opp,
                         'groups': [],
-                        'text': ITEMS.get(item_num, '')
+                        'text': get_item_text(item_num, 'Others')
                     }
                     for group, count in item_no_opp[item_num].items():
                         no_opportunity[item_num]['groups'].extend([group] * count)
         
+        # Drop a suppressed Others group from the per-item scores before anything
+        # is averaged, so it cannot reach Combined or the dimension rollups
+        if others_suppressed:
+            for item in by_item.values():
+                item.pop('Others', None)
+
         # Calculate combined scores and gaps
         for item_num in by_item:
             item = by_item[item_num]
             other_scores = []
             for g in ['Boss', 'Peers', 'DRs', 'Others']:
-                if g in visible_groups or g == 'Others':
+                if g in visible_groups:
                     if item.get(g) is not None:
                         other_scores.append(item[g])
-            
+
             if other_scores:
                 item['Combined'] = round(sum(other_scores) / len(other_scores), 2)
                 if item.get('Self') is not None:
@@ -867,7 +1180,7 @@ class Database:
             
             by_dimension[dim_name] = {}
             for g, scores in dim_scores.items():
-                if scores and (g in visible_groups or g in ['Self', 'Combined', 'Others']):
+                if scores and (g in visible_groups or g in ['Self', 'Combined']):
                     by_dimension[dim_name][g] = round(sum(scores) / len(scores), 2)
             
             if 'Self' in by_dimension[dim_name] and 'Combined' in by_dimension[dim_name]:
@@ -875,21 +1188,18 @@ class Database:
                     by_dimension[dim_name]['Self'] - by_dimension[dim_name]['Combined'], 2
                 )
         
-        # Build overall items (Q46 and Q47)
-        overall = {}
-        for item_num in [46, 47]:
-            overall[item_num] = by_item.get(item_num, {})
-        
         data = {
             'by_item': by_item,
             'by_dimension': by_dimension,
-            'overall': overall,
+            'development_priorities': self.get_development_priorities(leader_id),
             'response_counts': response_counts,
             'raw_response_counts': raw_response_counts,
             'no_opportunity': no_opportunity,
             'visible_groups': visible_groups,
             'hidden_groups': hidden_groups,
-            'anonymity_applied': len(hidden_groups) > 0
+            'suppressed_groups': suppressed_groups,
+            'suppressed_count': others_count if others_suppressed else 0,
+            'anonymity_applied': len(hidden_groups) > 0 or bool(suppressed_groups)
         }
         
         # Get comments
@@ -902,21 +1212,27 @@ class Database:
         
         comments = {
             'by_section': {},
-            'strengths': [],
-            'development': []
+            'keep': [],
+            'change': []
         }
-        
+
         for row in comment_rows:
             section = row['section']
             raw_group = row['relationship']
             mapped_group = map_group(raw_group)
-            
+
+            # A suppressed group's verbatims are held back too. Showing them, even
+            # unlabelled, would tell the leader they came from the two or three
+            # people in that group, since every other comment carries its group.
+            if others_suppressed and mapped_group == 'Others':
+                continue
+
             comment = {'group': mapped_group, 'text': row['comment_text']}
-            
-            if section == 'strengths':
-                comments['strengths'].append(comment)
-            elif section == 'development':
-                comments['development'].append(comment)
+
+            if section == 'keep':
+                comments['keep'].append(comment)
+            elif section == 'change':
+                comments['change'].append(comment)
             else:
                 if section not in comments['by_section']:
                     comments['by_section'][section] = []
