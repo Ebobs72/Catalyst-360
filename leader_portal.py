@@ -193,6 +193,12 @@ def render_nomination_section(db, leader_info, existing_raters):
                 status_icon = "✓"
                 status_color = "#024731"
                 status_text = f"{count} nominated"
+                # Peers/DRs face the same one-non-response risk as Others: sitting
+                # exactly on the anonymity floor means a single non-response tips
+                # them under it and folds them into Others (tier 1). Boss is exempt
+                # from folding entirely, so it never enters this check.
+                if cat in ('Peers', 'DRs') and count == ANONYMITY_THRESHOLD:
+                    at_risk_groups.append((cat, count))
             else:
                 status_icon = "⚠️"
                 status_color = "#B8860B"
@@ -223,13 +229,24 @@ def render_nomination_section(db, leader_info, existing_raters):
             f"them and use whichever other category genuinely fits."
         )
 
+    # Where each category's responses fold into if it drops below the anonymity
+    # floor. Peers/DRs fold into Others (tier 1); Others folds into whichever of
+    # Peers/DRs is still standing (tier 2) — see database.py's
+    # get_leader_feedback_data for the actual cascade.
+    FOLD_TARGET_TEXT = {
+        'Peers': 'Others',
+        'DRs': 'Others',
+        'Others': 'Peers or Direct Reports',
+    }
+
     for cat, count in at_risk_groups:
         label = RELATIONSHIP_TYPES.get(cat, cat)
+        fold_target = FOLD_TARGET_TEXT.get(cat, 'another group')
         st.info(
             f"You've nominated exactly {count} under **{label}**, which is the "
             f"minimum needed to report that group on its own. If even one of them "
             f"doesn't respond it drops below the minimum — their responses won't "
-            f"be lost, but they'd get folded into your Peers or Direct Reports "
+            f"be lost, but they'd get folded into your {fold_target} "
             f"group rather than showing up as {label} in their own right. Worth "
             f"adding one or two more as cover."
         )
