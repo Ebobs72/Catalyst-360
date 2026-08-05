@@ -54,9 +54,11 @@ def _progress_summary_text(completed, total):
 # Rater requirements
 # 'Others' is optional, but ALL OR NOTHING above the anonymity threshold:
 # nominate none, or nominate at least ANONYMITY_THRESHOLD. One or two "Others" is
-# the worst case, because unlike a thin Peers or DRs group there is no larger
-# group for them to be folded into, so their feedback has to be left out of the
-# report entirely to keep them anonymous. `min_if_any` captures that rule.
+# still worth avoiding: their responses don't get dropped (a thin Others group
+# folds into whichever of Peers/DRs is large enough — see database.py's
+# get_leader_feedback_data), but they lose their own voice in the report, showing
+# up as part of that group rather than as Others. `min_if_any` captures the
+# practical recommendation.
 RATER_REQUIREMENTS = {
     'Boss': {'min': 1, 'max': 2, 'suggested': 1, 'required_nomination': True, 'show_minimum': True},
     'Peers': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True, 'show_minimum': True},
@@ -213,20 +215,23 @@ def render_nomination_section(db, leader_info, existing_raters):
         label = RELATIONSHIP_TYPES.get(cat, cat)
         st.warning(
             f"⚠️ You've nominated {count} under **{label}**, which isn't enough to "
-            f"report anonymously. Unlike the other categories, there's no larger "
-            f"group for a small {label} group to be combined with, so their "
-            f"feedback would have to be left out of your report altogether. "
-            f"Either take it to {needed} or more, or remove them and use another "
-            f"category instead."
+            f"report as its own group. Their responses won't be lost — with fewer "
+            f"than {needed}, a thin {label} group gets folded into your Peers or "
+            f"Direct Reports group instead, so nobody's individual view stands out. "
+            f"But it does mean their perspective as {label} won't show up on its "
+            f"own in the report. Either take it to {needed} or more, or remove "
+            f"them and use whichever other category genuinely fits."
         )
 
     for cat, count in at_risk_groups:
         label = RELATIONSHIP_TYPES.get(cat, cat)
         st.info(
             f"You've nominated exactly {count} under **{label}**, which is the "
-            f"minimum needed to report that group anonymously. If even one of them "
-            f"doesn't respond it drops below the minimum, and their feedback would "
-            f"have to be left out. Worth adding one or two more as cover."
+            f"minimum needed to report that group on its own. If even one of them "
+            f"doesn't respond it drops below the minimum — their responses won't "
+            f"be lost, but they'd get folded into your Peers or Direct Reports "
+            f"group rather than showing up as {label} in their own right. Worth "
+            f"adding one or two more as cover."
         )
 
     st.markdown("---")
@@ -312,11 +317,17 @@ def render_nomination_section(db, leader_info, existing_raters):
             f"{RELATIONSHIP_INPUT_HELP} — capitalisation doesn't matter."
         )
 
+        # Keyed on a counter that bumps after a successful import (below), so the
+        # widget resets on the rerun instead of re-processing the same file — which
+        # otherwise gets parsed again against the now-updated roster and reported
+        # as duplicates of the people just added.
+        csv_uploader_key = f"rater_csv_uploader_{st.session_state.get('rater_csv_upload_count', 0)}"
         uploaded_file = st.file_uploader(
             "Upload CSV",
             type="csv",
             help=f"Columns: name, email, relationship. "
-                 f"Relationship accepts {RELATIONSHIP_INPUT_HELP}, in any case."
+                 f"Relationship accepts {RELATIONSHIP_INPUT_HELP}, in any case.",
+            key=csv_uploader_key
         )
 
         if uploaded_file:
@@ -362,6 +373,8 @@ def render_nomination_section(db, leader_info, existing_raters):
 
                         st.success(f"✓ Imported {imported} "
                                    f"{'person' if imported == 1 else 'people'}")
+                        st.session_state['rater_csv_upload_count'] = \
+                            st.session_state.get('rater_csv_upload_count', 0) + 1
                         st.rerun()
                 elif not problems:
                     st.warning("That file didn't contain any rows to import.")
@@ -735,11 +748,14 @@ def render_guidelines_section():
     undermine the candour of the feedback.
 
     If a group does fall below 3, we combine it into Others so nobody's individual view can be
-    picked out. That is why **Others itself needs 3 or more if you use it**: it is the category
-    everything else gets combined into, so there is nothing larger for a thin Others group to
-    hide inside. One or two people there cannot be reported anonymously at all, and their
-    feedback would have to be left out of your report. Better to ask three or more, or to place
-    those people in whichever of the other categories genuinely fits.
+    picked out. If Others itself is still below 3 after that, we combine it the other way —
+    into whichever of your Peers or Direct Reports group has enough responses. Either way,
+    nobody's feedback is thrown away just for landing in a small group. What you do lose is
+    that group's own voice in the report: a thin Others group blended into Peers, for example,
+    shows up as part of the Peers picture rather than as its own perspective. That is why
+    **Others needs 3 or more if you use it at all** — to stand as its own group in the report
+    rather than disappearing into another one. Better to ask three or more, or to place those
+    people in whichever of the other categories genuinely fits.
 
     We suggest **5 raters per category** as best practice — this provides richer data and
     accounts for any non-responses.
