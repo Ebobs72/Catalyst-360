@@ -846,12 +846,37 @@ _TEST_KEEP_COMMENTS = [
     "Keep bringing the same energy and consistency to the team.",
     "Keep making time for people even when things are busy.",
     "Keep setting the standard on follow-through.",
+    "Keep being someone people feel comfortable raising problems with.",
+    "Keep pushing the team to aim higher without burning people out.",
 ]
 
 _TEST_CHANGE_COMMENTS = [
     "Delegate a little more to free up time for strategic thinking.",
     "Bring the team into changes earlier, before decisions feel final.",
     "Be a bit more explicit about the 'why' behind priorities.",
+    "Slow down in meetings to make sure quieter voices get heard.",
+    "Follow up more consistently on things raised in one-to-ones.",
+]
+
+# Comment templates keyed by whether the rater's actual generated score for that
+# dimension came out high or low, so comments correlate with the numbers instead
+# of reading as generic praise regardless of rating — closer to how real raters
+# write, and gives the Key Themes synthesis genuine texture to work with instead
+# of the same sentence repeated across every rater.
+_TEST_STRENGTH_COMMENTS = [
+    "One of the real strengths — comes through consistently.",
+    "This is where they genuinely shine, especially under pressure.",
+    "Others notice this a lot; it's a clear asset.",
+    "Consistently strong here, worth them knowing that landed.",
+    "A standout area compared to most leaders I've worked with.",
+]
+
+_TEST_DEVELOPMENT_COMMENTS = [
+    "Room to grow here — doesn't always land as intended.",
+    "This is the area I'd most like to see develop further.",
+    "Inconsistent at times, particularly when things get busy.",
+    "Would benefit from more focus on this going forward.",
+    "Not the strongest area currently; worth prioritising.",
 ]
 
 
@@ -871,9 +896,13 @@ def _generate_test_feedback():
             ratings[item_num] = random.choices([1, 2, 3, 4, 5], weights=[5, 10, 25, 35, 25])[0]
 
     comments = {}
-    for dim_name in DIMENSIONS.keys():
-        if random.random() < 0.6:
-            comments[dim_name] = f"Genuinely strong around {dim_name.lower()}, worth calling out."
+    for dim_name, (start, end) in DIMENSIONS.items():
+        if random.random() >= 0.6:
+            continue
+        dim_scores = [ratings[n] for n in range(start, end + 1) if ratings[n] > 0]
+        avg = sum(dim_scores) / len(dim_scores) if dim_scores else 3
+        pool = _TEST_STRENGTH_COMMENTS if avg >= 3.5 else _TEST_DEVELOPMENT_COMMENTS
+        comments[dim_name] = random.choice(pool)
 
     comments['keep'] = random.choice(_TEST_KEEP_COMMENTS)
     comments['change'] = random.choice(_TEST_CHANGE_COMMENTS)
