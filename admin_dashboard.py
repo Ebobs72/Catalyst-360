@@ -283,7 +283,7 @@ def render_database_management(db):
                     for item_num, scores in data['by_item'].items():
                         row = {
                             'Leader': leader['name'],
-                            'Dealership': leader.get('dealership', ''),
+                            'Retailer': leader.get('dealership', ''),
                             'Cohort': leader.get('cohort', ''),
                             'Item': item_num,
                             'Statement': scores.get('text', ''),
@@ -490,22 +490,37 @@ def render_leaders_tab(db):
     
     with st.form("add_leader_form"):
         col1, col2 = st.columns(2)
-        
+
         with col1:
             name = st.text_input("Leader Name *")
-            email = st.text_input("Email")
-        
+            email = st.text_input("Email *")
+
         with col2:
-            dealership = st.text_input("Dealership")
-            cohort = st.text_input("Cohort (e.g., 'January 2026')")
-        
+            dealership = st.text_input("Retailer *")
+            cohort = st.text_input("Cohort (e.g., 'January 2026') *")
+
         if st.form_submit_button("Add Leader"):
-            if name:
-                leader_id = db.add_leader(name, email, dealership, cohort)
-                st.success(f"Added {name} successfully!")
-                st.rerun()
+            missing = []
+            if not name:
+                missing.append("leader name")
+            if not email:
+                missing.append("email")
+            elif '@' not in email:
+                missing.append("a valid email address")
+            if not dealership:
+                missing.append("retailer")
+            if not cohort:
+                missing.append("cohort")
+
+            if missing:
+                st.error(f"Please provide: {', '.join(missing)}")
             else:
-                st.error("Please enter a leader name")
+                leader_id = db.add_leader(name, email, dealership, cohort)
+                # Every leader completes a self-assessment, so their link is
+                # created immediately rather than needing a separate manual step.
+                db.add_rater(leader_id, 'Self', name, email)
+                st.success(f"Added {name} successfully, with their self-assessment link ready.")
+                st.rerun()
     
     st.markdown("---")
     
@@ -518,7 +533,7 @@ def render_leaders_tab(db):
         return
     
     for leader in leaders:
-        with st.expander(f"**{leader['name']}** - {leader.get('dealership', 'No dealership')}"):
+        with st.expander(f"**{leader['name']}** - {leader.get('dealership', 'No retailer')}"):
             col1, col2, col3 = st.columns([2, 2, 1])
             
             with col1:
@@ -526,7 +541,7 @@ def render_leaders_tab(db):
                 st.write(f"**Cohort:** {leader.get('cohort', 'Not set')}")
             
             with col2:
-                st.write(f"**Dealership:** {leader.get('dealership', 'Not set')}")
+                st.write(f"**Retailer:** {leader.get('dealership', 'Not set')}")
                 st.write(f"**Assessment Year:** {leader.get('assessment_year', 1)}")
             
             with col3:
@@ -544,29 +559,59 @@ def render_leaders_tab(db):
     st.subheader("Bulk Import Leaders")
     
     st.markdown("""
-    Upload a CSV file with columns: `name`, `email` (optional), `dealership` (optional), `cohort` (optional)
+    Upload a CSV file with columns: `name`, `email`, `retailer`, `cohort` — all four are required for every row.
     """)
-    
+
     uploaded_file = st.file_uploader("Choose CSV file", type="csv")
-    
+
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
         st.write("Preview:")
         st.dataframe(df.head())
-        
+
         if st.button("Import All"):
-            count = 0
-            for _, row in df.iterrows():
-                if pd.notna(row.get('name')):
-                    db.add_leader(
-                        name=row['name'],
-                        email=row.get('email') if pd.notna(row.get('email')) else None,
-                        dealership=row.get('dealership') if pd.notna(row.get('dealership')) else None,
-                        cohort=row.get('cohort') if pd.notna(row.get('cohort')) else None
+            errors = []
+            valid_rows = []
+
+            for i, row in df.iterrows():
+                row_num = i + 2  # header is row 1
+                name = row.get('name')
+                email = row.get('email')
+                retailer = row.get('retailer')
+                cohort = row.get('cohort')
+
+                if not pd.notna(name) or not str(name).strip():
+                    errors.append(f"Row {row_num}: missing name")
+                elif not pd.notna(email) or '@' not in str(email):
+                    errors.append(f"Row {row_num} ({name}): missing or invalid email")
+                elif not pd.notna(retailer) or not str(retailer).strip():
+                    errors.append(f"Row {row_num} ({name}): missing retailer")
+                elif not pd.notna(cohort) or not str(cohort).strip():
+                    errors.append(f"Row {row_num} ({name}): missing cohort")
+                else:
+                    valid_rows.append({
+                        'name': str(name).strip(),
+                        'email': str(email).strip(),
+                        'retailer': str(retailer).strip(),
+                        'cohort': str(cohort).strip(),
+                    })
+
+            if errors:
+                st.error(
+                    "Import stopped — fix these rows and re-upload:\n\n" +
+                    "\n".join(f"- {e}" for e in errors)
+                )
+            else:
+                for r in valid_rows:
+                    leader_id = db.add_leader(
+                        name=r['name'],
+                        email=r['email'],
+                        dealership=r['retailer'],
+                        cohort=r['cohort']
                     )
-                    count += 1
-            st.success(f"Imported {count} leaders!")
-            st.rerun()
+                    db.add_rater(leader_id, 'Self', r['name'], r['email'])
+                st.success(f"Imported {len(valid_rows)} leader(s), each with their self-assessment link ready.")
+                st.rerun()
 
 
 def render_portal_management_tab(db):
@@ -761,7 +806,7 @@ def render_portal_management_tab(db):
     with st.expander(f"📋 Awaiting Self-Assessment ({len(no_self_assessment)})"):
         if no_self_assessment:
             for leader in no_self_assessment:
-                st.write(f"• {leader['name']} ({leader.get('dealership', 'No dealership')})")
+                st.write(f"• {leader['name']} ({leader.get('dealership', 'No retailer')})")
         else:
             st.info("All leaders have completed their self-assessment.")
     
@@ -791,6 +836,11 @@ def render_portal_management_tab(db):
                         st.rerun()
 
 
+def _has_self_rater(db, leader_id):
+    """True if this leader already has a Self rater row (added via Add Leader)."""
+    return any(r['relationship'] == 'Self' for r in db.get_raters_for_leader(leader_id))
+
+
 def render_links_tab(db):
     """Render the links generation and tracking tab."""
     
@@ -810,7 +860,7 @@ def render_links_tab(db):
     st.markdown("---")
     
     # Leader selector
-    leader_options = {l['id']: f"{l['name']} ({l.get('dealership', 'No dealership')})" for l in leaders}
+    leader_options = {l['id']: f"{l['name']} ({l.get('dealership', 'No retailer')})" for l in leaders}
     selected_leader_id = st.selectbox(
         "Select Leader",
         options=list(leader_options.keys()),
@@ -846,9 +896,12 @@ def render_links_tab(db):
                                         help="Add email to enable sending invitations")
             
             if st.form_submit_button("Add Rater"):
-                rater_id, token = db.add_rater(selected_leader_id, relationship, rater_name, rater_email)
-                st.success(f"Added rater successfully!")
-                st.rerun()
+                if relationship == 'Self' and _has_self_rater(db, selected_leader_id):
+                    st.warning(f"{selected_leader['name']} already has a self-assessment link — not adding another.")
+                else:
+                    rater_id, token = db.add_rater(selected_leader_id, relationship, rater_name, rater_email)
+                    st.success(f"Added rater successfully!")
+                    st.rerun()
     
     with col2:
         st.markdown("**Quick Add Multiple Raters**")
@@ -863,9 +916,12 @@ def render_links_tab(db):
             if st.form_submit_button("Create All Raters"):
                 count = 0
                 if add_self:
-                    # Use leader's email for self-assessment
-                    db.add_rater(selected_leader_id, 'Self', selected_leader['name'], selected_leader.get('email'))
-                    count += 1
+                    if _has_self_rater(db, selected_leader_id):
+                        st.info(f"{selected_leader['name']} already has a self-assessment link — skipped.")
+                    else:
+                        # Use leader's email for self-assessment
+                        db.add_rater(selected_leader_id, 'Self', selected_leader['name'], selected_leader.get('email'))
+                        count += 1
                 if add_boss:
                     db.add_rater(selected_leader_id, 'Boss')
                     count += 1
