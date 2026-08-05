@@ -1,11 +1,14 @@
-# Pinned exact, not >=. 1.61.0 (released 2026-08-04) ships a broken
-# starlette_gzip_middleware.py: _MediaAwareGZipResponder calls
-# GZipResponder.__init__() without the thread_minimum_size kwarg it now
-# requires, so the app 500s on every request before any of our code runs. Not
-# our bug, but an open >= let a fresh build silently pick it up. 1.60.0 is the
-# prior release, two weeks old at time of writing and stable. Bump deliberately,
-# not automatically, once Streamlit ships a fix.
+# Pinning streamlit alone was NOT enough (proven: pinning to 1.60.0 still 500'd).
+# Streamlit's own vendored starlette_gzip_middleware.py calls
+# GZipResponder.__init__() without the thread_minimum_size kwarg, and Streamlit
+# declares a wide starlette<2,>=0.40.0 range, so uv kept resolving to whatever
+# starlette is newest regardless of which streamlit version we pin. Starlette
+# 1.4.0 (released 2026-08-05, the same morning this broke) is the release that
+# added the new required kwarg without Streamlit's wrapper being updated for it.
+# Pinning starlette itself to 1.3.1, the prior release, is what actually fixes
+# it. Bump both deliberately, not automatically, once Streamlit ships a fix.
 streamlit==1.60.0
+starlette==1.3.1
 python-docx>=0.8.11
 matplotlib>=3.7.0
 numpy>=1.24.0
