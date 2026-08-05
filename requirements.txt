@@ -1,4 +1,11 @@
-streamlit>=1.28.0
+# Pinned exact, not >=. 1.61.0 (released 2026-08-04) ships a broken
+# starlette_gzip_middleware.py: _MediaAwareGZipResponder calls
+# GZipResponder.__init__() without the thread_minimum_size kwarg it now
+# requires, so the app 500s on every request before any of our code runs. Not
+# our bug, but an open >= let a fresh build silently pick it up. 1.60.0 is the
+# prior release, two weeks old at time of writing and stable. Bump deliberately,
+# not automatically, once Streamlit ships a fix.
+streamlit==1.60.0
 python-docx>=0.8.11
 matplotlib>=3.7.0
 numpy>=1.24.0
