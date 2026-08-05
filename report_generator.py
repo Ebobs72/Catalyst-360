@@ -21,6 +21,7 @@ from datetime import datetime
 import tempfile
 import os
 import sys
+import time
 import textwrap
 import requests
 from pathlib import Path
@@ -71,6 +72,14 @@ ITEM_CHART_WIDTH_IN = (CONTENT_WIDTH_IN / 2) - 0.2
 # Swap to 'claude-sonnet-5' if the human decides the cost per report matters more
 # than synthesis quality.
 SYNTHESIS_MODEL = 'claude-opus-5'
+
+# HTTP statuses worth retrying: 429 (rate limited), 500 (api_error), 529
+# (overloaded_error) are all transient, server-side, and routinely resolve a
+# few seconds later. 4xx statuses like 400/401/403/404 mean something is wrong
+# with the key or request and retrying won't help, so they fail immediately.
+SYNTHESIS_TRANSIENT_STATUS_CODES = {429, 500, 529}
+SYNTHESIS_MAX_RETRIES = 2
+SYNTHESIS_RETRY_DELAY_SECONDS = 3
 
 
 def content_columns(*relative_widths):
@@ -1418,79 +1427,93 @@ Please identify 4-6 key themes that emerge from this feedback. For each theme:
 1. Give it a clear, concise title (e.g., "Building Trust Through Authenticity" or "Balancing Operational Focus with Strategic Thinking")
 2. Write a 2-3 sentence narrative that synthesises the evidence — reference what respondents said without quoting them verbatim, connect to the quantitative scores where relevant, and speak directly to {leader_name} using "you" and "your"."""
 
-    try:
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": _get_api_key(),
-                "anthropic-version": "2023-06-01"
-            },
-            json={
-                "model": SYNTHESIS_MODEL,
-                # Thinking is ON BY DEFAULT on this model, and max_tokens caps
-                # thinking PLUS response text together. 2000 was enough when the
-                # old model did no thinking; it would now truncate the JSON.
-                "max_tokens": 8000,
-                # Structured outputs guarantee valid JSON, which removes the need
-                # to strip markdown fences off the response and hope it parses.
-                "output_config": {
-                    "format": {
-                        "type": "json_schema",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "themes": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "title": {"type": "string"},
-                                            "narrative": {"type": "string"},
-                                        },
-                                        "required": ["title", "narrative"],
-                                        "additionalProperties": False,
-                                    },
-                                }
+    request_payload = {
+        "model": SYNTHESIS_MODEL,
+        # Thinking is ON BY DEFAULT on this model, and max_tokens caps
+        # thinking PLUS response text together. 2000 was enough when the
+        # old model did no thinking; it would now truncate the JSON.
+        "max_tokens": 8000,
+        # Structured outputs guarantee valid JSON, which removes the need
+        # to strip markdown fences off the response and hope it parses.
+        "output_config": {
+            "format": {
+                "type": "json_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "themes": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string"},
+                                    "narrative": {"type": "string"},
+                                },
+                                "required": ["title", "narrative"],
+                                "additionalProperties": False,
                             },
-                            "required": ["themes"],
-                            "additionalProperties": False,
-                        },
-                    }
+                        }
+                    },
+                    "required": ["themes"],
+                    "additionalProperties": False,
                 },
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ]
-            },
-            timeout=120
-        )
+            }
+        },
+        "messages": [
+            {"role": "user", "content": prompt}
+        ]
+    }
 
-        if response.status_code == 200:
-            result = response.json()
+    for attempt in range(SYNTHESIS_MAX_RETRIES + 1):
+        try:
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": _get_api_key(),
+                    "anthropic-version": "2023-06-01"
+                },
+                json=request_payload,
+                timeout=120
+            )
 
-            # A refusal returns HTTP 200 with no usable content, so check before
-            # reading content[0]
-            if result.get('stop_reason') == 'refusal':
-                warning = "the request was declined by the Anthropic API's safety classifiers"
-                print(f"SYNTHESIS SKIPPED: {warning}. The rest of the report is unaffected.",
-                      file=sys.stderr)
-                return None, warning
+            if response.status_code == 200:
+                result = response.json()
 
-            text = result['content'][0]['text'].strip()
-            return json.loads(text)['themes'], None
-        else:
-            # Loud, specific, and on stderr so it reaches the Streamlit logs, and
-            # returned as a warning so the admin UI can surface it too. A silent
-            # skip here means a leader's report quietly loses a whole section,
-            # which is worse than a visible failure.
+                # A refusal returns HTTP 200 with no usable content, so check
+                # before reading content[0]
+                if result.get('stop_reason') == 'refusal':
+                    warning = "the request was declined by the Anthropic API's safety classifiers"
+                    print(f"SYNTHESIS SKIPPED: {warning}. The rest of the report is unaffected.",
+                          file=sys.stderr)
+                    return None, warning
+
+                text = result['content'][0]['text'].strip()
+                return json.loads(text)['themes'], None
+
+            # 429/500/529 are transient and routinely resolve a few seconds
+            # later, so worth a couple of quick retries rather than losing the
+            # whole section over a momentary blip. Anything else (bad key, bad
+            # request) won't be fixed by retrying, so fails immediately.
+            if response.status_code in SYNTHESIS_TRANSIENT_STATUS_CODES and attempt < SYNTHESIS_MAX_RETRIES:
+                print(f"SYNTHESIS RETRY {attempt + 1}/{SYNTHESIS_MAX_RETRIES}: HTTP "
+                      f"{response.status_code} from the Anthropic API (transient), "
+                      f"retrying in {SYNTHESIS_RETRY_DELAY_SECONDS}s...", file=sys.stderr)
+                time.sleep(SYNTHESIS_RETRY_DELAY_SECONDS)
+                continue
+
+            # Loud, specific, and on stderr so it reaches the Streamlit logs,
+            # and returned as a warning so the admin UI can surface it too. A
+            # silent skip here means a leader's report quietly loses a whole
+            # section, which is worse than a visible failure.
             warning = f"the Anthropic API returned HTTP {response.status_code}"
             print(f"SYNTHESIS FAILED: {warning}. The Key Themes section will be "
                   f"missing from this report. Response: {response.text[:500]}", file=sys.stderr)
             return None, warning
 
-    except Exception as e:
-        print(f"Theme synthesis failed: {e}")
-        return None, f"theme synthesis raised an exception: {e}"
+        except Exception as e:
+            print(f"Theme synthesis failed: {e}")
+            return None, f"theme synthesis raised an exception: {e}"
 
 
 def _get_api_key():
