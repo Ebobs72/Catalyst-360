@@ -703,6 +703,36 @@ class Database:
         conn.commit()
         conn.close()
     
+    def reset_rater_response(self, rater_id):
+        """
+        Testing helper: clear a rater's submitted response (ratings, comments,
+        completed_at) so the same rater row and token can be resubmitted or
+        re-simulated from a clean slate.
+
+        Does NOT restore identity. Real or simulated, a completed rater has
+        already been through sever_rater_identity, which nulls name and email
+        irreversibly by design — this only clears response content and reopens
+        completed_at, it never touches identity. Not for use on a genuinely
+        completed real rater outside testing: it discards their actual
+        feedback with no way to recover it.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("DELETE FROM ratings WHERE rater_id = ?", (rater_id,))
+        cursor.execute("DELETE FROM comments WHERE rater_id = ?", (rater_id,))
+        cursor.execute("""
+            UPDATE raters
+            SET completed_at = NULL,
+                draft_ratings = NULL,
+                draft_comments = NULL,
+                draft_saved_at = NULL
+            WHERE id = ?
+        """, (rater_id,))
+
+        conn.commit()
+        conn.close()
+
     def mark_rater_complete(self, rater_id):
         """Mark a rater as having completed their feedback and clear draft."""
         conn = self.get_connection()

@@ -1125,6 +1125,40 @@ def render_links_tab(db):
 
             st.markdown("---")
 
+        # Testing tool: clear responses (ratings, comments, completed_at) for
+        # non-Self raters so the same rater rows/tokens can be re-simulated,
+        # without touching Self or the leader's own record. Does not restore
+        # identity — a completed rater has already been through
+        # sever_rater_identity either way, so name/email stay null regardless.
+        completed_other_raters = [
+            r for r in raters if r.get('completed') and r['relationship'] != 'Self'
+        ]
+        if completed_other_raters:
+            with st.expander(
+                f"🧪 Testing: Reset {len(completed_other_raters)} Response(s) for Retesting"
+            ):
+                st.caption(
+                    "Clears ratings and comments and reopens every non-Self "
+                    "rater so you can run Simulate Responses again with the "
+                    "same list of raters. Self is never touched. For "
+                    "retesting on this sandbox only — clearing a genuinely "
+                    "completed real rater's response discards their actual "
+                    "feedback with no way to recover it."
+                )
+                if st.button(
+                    f"Reset {len(completed_other_raters)} response(s)",
+                    key=f"reset_responses_{selected_leader_id}"
+                ):
+                    for rater in completed_other_raters:
+                        db.reset_rater_response(rater['id'])
+                    st.success(
+                        f"Reset {len(completed_other_raters)} response(s). "
+                        f"Ready to simulate again."
+                    )
+                    st.rerun()
+
+            st.markdown("---")
+
         # Display raters table
         for rel in ['Self', 'Boss', 'Peers', 'DRs', 'Others']:
             if rel not in raters_by_group:
