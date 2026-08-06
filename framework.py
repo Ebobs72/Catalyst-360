@@ -244,10 +244,10 @@ RELATIONSHIP_INPUT_HELP = "Line Manager, Peer, Direct Report, or Other"
 COLOURS = {
     'bentley_green': '#024731',      # Primary Bentley green - Self, always
     'green_tint': '#6b9c87',         # Peers
-    'leather_tan': '#9C6148',        # Line Manager
+    'leather_tan': '#9C6148',        # All Raters (combined) - also Potential Blind Spots header
     'tan_tint': '#c9a692',           # Direct Reports
     'charcoal_grey': '#5F5E5A',      # Others (the rater category)
-    'mid_grey': '#8a8a85',           # All Raters (combined)
+    'mid_grey': '#8a8a85',           # Line Manager
     'bentley_cream': '#F5F5DC',      # Bentley cream
     'bentley_charcoal': '#2C2C2C',   # Bentley charcoal
     'light_grey': '#F5F5F5',
@@ -263,10 +263,13 @@ COLOURS = {
 # Group colours for report bar charts and comment labels - fixed brand palette,
 # not to be extended: Self is always green; Others (the rater category, not
 # the "All Raters"/Combined figure) reuses charcoal_grey since the brand
-# palette has no colour of its own assigned to that group.
+# palette has no colour of its own assigned to that group. Line Manager uses
+# mid_grey rather than leather_tan (swapped 2026-08-06) so leather_tan is free
+# to mean "All Raters" consistently everywhere it appears - the radar chart's
+# Combined line, and the item bar charts' Combined bar.
 GROUP_COLOURS = {
     'Self': COLOURS['bentley_green'],
-    'Boss': COLOURS['leather_tan'],
+    'Boss': COLOURS['mid_grey'],
     'Peers': COLOURS['green_tint'],
     'DRs': COLOURS['tan_tint'],
     'Others': COLOURS['charcoal_grey'],

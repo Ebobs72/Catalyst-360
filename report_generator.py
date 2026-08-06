@@ -203,7 +203,7 @@ def apply_document_font(doc, font_name=REPORT_FONT):
 # Colour map for comment source labels (RGB tuples for python-docx), matching
 # the fixed report palette in framework.COLOURS.
 COMMENT_SOURCE_COLOURS = {
-    'Line Manager':   RGBColor(0x9C, 0x61, 0x48),   # Leather tan
+    'Line Manager':   RGBColor(0x8a, 0x8a, 0x85),   # Mid grey
     'Peers':          RGBColor(0x6b, 0x9c, 0x87),   # Green tint
     'Direct Reports': RGBColor(0xc9, 0xa6, 0x92),   # Tan tint
     'Others':         RGBColor(0x5F, 0x5E, 0x5A),   # Charcoal grey
@@ -477,13 +477,17 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
             color=COLOURS['bentley_green'], markersize=10)
     ax.fill(angles, self_values, alpha=0.25, color=COLOURS['bentley_green'])
     
-    # Plot Combined scores if available
+    # Plot Combined scores if available. Leather tan is "All Raters" everywhere
+    # in the report - here, and on the Combined bar in create_item_bar_chart -
+    # since mid grey (used for Line Manager) washed out too much against the
+    # grid lines on this chart. Also the Potential Blind Spots table header,
+    # but nothing in this chart carries that categorisation to collide with.
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
         ax.plot(angles, combined_values, 'o-', linewidth=3, label='All Raters',
-                color=COLOURS['mid_grey'], markersize=10)
-        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['mid_grey'])
+                color=COLOURS['leather_tan'], markersize=10)
+        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['leather_tan'])
     
     # Configure the chart
     ax.set_ylim(0, 5)
@@ -545,7 +549,7 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
     if include_combined and scores.get('Combined') is not None:
         groups.append(GROUP_DISPLAY['Combined'])
         values.append(scores['Combined'])
-        colors.append(COLOURS['mid_grey'])
+        colors.append(COLOURS['leather_tan'])
     
     if not values:
         return False
@@ -1107,64 +1111,17 @@ def add_papu_nanu_section(doc, data):
     # No explicit page break — next section uses page_break_before
 
 
-# ============================================
-# DIMENSION SECTION PAGINATION ESTIMATE
-# ============================================
-#
-# python-docx has no layout engine - it emits OOXML, and actual pagination only
-# happens when Word (or LibreOffice, for the PDF preview) renders it. There is
-# no way to ask "how much space is left on the current page" directly. These
-# estimates are calibrated against real measurements of the tightened item bar
-# chart (see create_item_bar_chart): a rendered chart is
-# ITEM_CHART_WIDTH_IN * (fig_height / fig_width) tall once cropped by
-# bbox_inches='tight', which empirically comes out to about 0.27in per bar
-# (measured 2026-08-06: 2 bars -> 0.42in, 6 bars -> 1.50in, near-linear).
-# Good enough to decide "force a break or let it flow", not exact to the inch.
-_MEASURED_IN_PER_BAR = 0.27
-_ITEM_TEXT_ROW_OVERHEAD_IN = 0.35   # item text/coverage line + spacing after
-_DIMENSION_HEADING_OVERHEAD_IN = 0.9  # heading + description + spacing
-_COMMENT_BLOCK_HEIGHT_IN = 0.55       # source label + text + rule, per comment
-_COMMENT_HEADING_HEIGHT_IN = 0.3      # "Comments on <dimension>" line
-
-
-def _estimate_item_height_in(item_scores, is_self_only):
-    """Estimate one item's rendered row height (chart or text, whichever taller)."""
-    if is_self_only:
-        return 0.65 + _ITEM_TEXT_ROW_OVERHEAD_IN
-    n_bars = sum(
-        1 for g in ['Self', 'Boss', 'Peers', 'DRs', 'Others']
-        if item_scores.get(g) is not None
-    )
-    if item_scores.get('Combined') is not None:
-        n_bars += 1
-    chart_h = max(0.65, n_bars * _MEASURED_IN_PER_BAR)
-    return chart_h + _ITEM_TEXT_ROW_OVERHEAD_IN
-
-
-def _estimate_dimension_height_in(dim_name, data, comments, is_self_only):
-    """Estimate a whole dimension section's rendered height, items plus comments."""
-    start, end = DIMENSIONS[dim_name]
-    items_total = sum(
-        _estimate_item_height_in(data['by_item'].get(item_num, {}), is_self_only)
-        for item_num in range(start, end + 1)
-    )
-    section_comments = comments.get('by_section', {}).get(dim_name, [])
-    comments_total = 0.0
-    if section_comments:
-        comments_total = _COMMENT_HEADING_HEIGHT_IN + len(section_comments) * _COMMENT_BLOCK_HEIGHT_IN
-    return _DIMENSION_HEADING_OVERHEAD_IN + items_total + comments_total
-
-
-def add_dimension_section(doc, dim_name, data, comments, is_self_only=False,
-                          is_first_dimension=False, force_page_break=True):
+def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_first_dimension=False):
     """Add a dimension section with items displayed side-by-side with bar charts."""
     heading = doc.add_heading(dim_name, level=2)
-    # First dimension flows after the "Detailed Feedback" heading; later ones
-    # only force a break when there isn't much room left on the current page
-    # (see _estimate_dimension_height_in and its caller in generate_report) -
-    # otherwise they flow into whatever space remains, rather than always
-    # jumping to a fresh page regardless of how little of the last one was used.
-    if not is_first_dimension and force_page_break:
+    # Every dimension always starts on a fresh page (except the first, which
+    # flows straight after the "Detailed Feedback" heading). A space-aware
+    # heuristic was tried instead - only forcing a break when little room was
+    # left on the current page - but comment length varies enough between
+    # leaders that it produced worse results in practice (e.g. a dimension
+    # starting at the very bottom of a page), so this reverts to the simple,
+    # reliable rule per the human's instruction 2026-08-06.
+    if not is_first_dimension:
         heading.paragraph_format.page_break_before = True
     
     # Dimension description
@@ -1234,7 +1191,14 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False,
         doc.add_paragraph()
 
     # --- CLEAN COMMENTS (replaces old table style) ---
+    # The Self-Assessment report must only ever show the leader's own comment,
+    # never other raters' - it's generated before Module 1, when the leader is
+    # the only person who has responded at all, and even when regenerated later
+    # for the record it should still read as the leader's own view only, not a
+    # mix of the two report stages.
     section_comments = comments.get('by_section', {}).get(dim_name, [])
+    if is_self_only:
+        section_comments = [c for c in section_comments if c.get('group') == 'Self']
     if section_comments:
         comment_heading = doc.add_paragraph()
         run = comment_heading.add_run(f"Comments on {dim_name}")
@@ -1455,7 +1419,7 @@ def add_what_happens_next(doc):
     )
 
     steps = [
-        ("Your Coaching Conversation (Module 1)",
+        ("Your Coaching Conversation (following Module 1)",
          "You will talk this report through with your coach. The aim is to understand your own view "
          "of your leadership first, before any other perspectives are introduced, and to sharpen the "
          "development priorities you have named."),
@@ -1854,19 +1818,9 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         detail_heading.paragraph_format.page_break_before = True
         detail_heading.paragraph_format.keep_with_next = True
         
-        # Track estimated position on the current page (see
-        # _estimate_dimension_height_in) so later dimensions only force a page
-        # break when little room is actually left, rather than always.
-        page_position_in = 0.5  # the "Detailed..." heading above
         for i, dim_name in enumerate(DIMENSIONS.keys()):
-            estimated_height = _estimate_dimension_height_in(dim_name, data, comments, is_self_only=True)
-            force_break = (i > 0) and (CONTENT_HEIGHT_IN - page_position_in) < (CONTENT_HEIGHT_IN / 2)
             add_dimension_section(doc, dim_name, data, comments, is_self_only=True,
-                                  is_first_dimension=(i == 0), force_page_break=force_break)
-            start_position = 0.0 if (force_break or i == 0) else page_position_in
-            page_position_in = start_position + estimated_height
-            if page_position_in > CONTENT_HEIGHT_IN:
-                page_position_in %= CONTENT_HEIGHT_IN
+                                  is_first_dimension=(i == 0))
 
         # Self-identified development priorities
         add_development_priorities(
@@ -1908,16 +1862,9 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         # keep_with_next ensures heading stays with first dimension
         detail_heading.paragraph_format.keep_with_next = True
         
-        page_position_in = 0.5  # the "Detailed Feedback by Dimension" heading above
         for i, dim_name in enumerate(DIMENSIONS.keys()):
-            estimated_height = _estimate_dimension_height_in(dim_name, data, comments, is_self_only=False)
-            force_break = (i > 0) and (CONTENT_HEIGHT_IN - page_position_in) < (CONTENT_HEIGHT_IN / 2)
             add_dimension_section(doc, dim_name, data, comments, is_self_only=False,
-                                  is_first_dimension=(i == 0), force_page_break=force_break)
-            start_position = 0.0 if (force_break or i == 0) else page_position_in
-            page_position_in = start_position + estimated_height
-            if page_position_in > CONTENT_HEIGHT_IN:
-                page_position_in %= CONTENT_HEIGHT_IN
+                                  is_first_dimension=(i == 0))
 
         add_overall_comments(doc, comments)
         theme_warning = add_theme_synthesis(doc, leader_name, comments, data)
