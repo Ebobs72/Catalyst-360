@@ -35,6 +35,24 @@ except ImportError:
         return ""
 
 
+def _search_leaders(leaders, query):
+    """
+    Filter leaders by a case-insensitive substring match against name or
+    retailer. Name is a single field (not split first/last), so a plain
+    substring search already covers "search by first or last name" without
+    needing two separate inputs.
+    """
+    if not query:
+        return leaders
+    q = query.strip().lower()
+    if not q:
+        return leaders
+    return [
+        l for l in leaders
+        if q in (l.get('name') or '').lower() or q in (l.get('dealership') or '').lower()
+    ]
+
+
 def render_admin_dashboard(db):
     """Render the admin dashboard."""
     
@@ -445,7 +463,15 @@ def render_overview_tab(db):
         
         st.markdown("---")
         st.subheader("Leader Status")
-        
+
+        search_query = st.text_input(
+            "Search leaders", key="overview_tab_search",
+            placeholder="Name or retailer...", label_visibility="collapsed"
+        )
+        leaders = _search_leaders(leaders, search_query)
+        if search_query and not leaders:
+            st.info(f"No leaders match \"{search_query}\".")
+
         # Show leaders in this cohort
         for leader in leaders:
             completed = leader['completed_raters']
@@ -528,13 +554,21 @@ def render_leaders_tab(db):
     st.markdown("---")
     
     st.subheader("Existing Leaders")
-    
+
     leaders = db.get_all_leaders()
-    
+
     if not leaders:
         st.info("No leaders added yet.")
         return
-    
+
+    search_query = st.text_input(
+        "Search leaders", key="leaders_tab_search",
+        placeholder="Name or retailer...", label_visibility="collapsed"
+    )
+    leaders = _search_leaders(leaders, search_query)
+    if search_query and not leaders:
+        st.info(f"No leaders match \"{search_query}\".")
+
     for leader in leaders:
         with st.expander(f"**{leader['name']}** - {leader.get('dealership', 'No retailer')}"):
             col1, col2, col3 = st.columns([2, 2, 1])
