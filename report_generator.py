@@ -1624,8 +1624,24 @@ Please identify 4-6 key themes that emerge from this feedback. For each theme:
 
 
 def _get_api_key():
-    """Get the Anthropic API key from environment or Streamlit secrets."""
-    # Try Streamlit secrets first
+    """
+    Get the Anthropic API key from the environment, falling back to
+    Streamlit secrets.
+
+    Environment variable checked first (2026-08-06, was the other way round)
+    so the app isn't tied to Streamlit Cloud's specific secrets mechanism -
+    we've moved hosting once already and might reasonably do so again. A
+    plain ANTHROPIC_API_KEY env var works the same way on Render, Streamlit
+    Cloud, or anywhere else; the Streamlit secrets path only matters for a
+    deployment that still configures it that way instead.
+    """
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
+
+    # Fall back to Streamlit secrets, structured as [anthropic] api_key = "..."
+    # (not a flat ANTHROPIC_API_KEY key) - matches how existing Streamlit
+    # Cloud deployments of this app already have their secrets.toml set up.
     try:
         import streamlit as st
         key = st.secrets.get("anthropic", {}).get("api_key")
@@ -1633,12 +1649,7 @@ def _get_api_key():
             return key
     except Exception:
         pass
-    
-    # Fall back to environment variable
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if key:
-        return key
-    
+
     raise ValueError("No Anthropic API key found. Set ANTHROPIC_API_KEY or add to Streamlit secrets.")
 
 
