@@ -15,7 +15,7 @@ from datetime import datetime
 
 from framework import (
     ANONYMITY_THRESHOLD, RELATIONSHIP_TYPES,
-    RELATIONSHIP_INPUT_HELP, normalise_relationship
+    RELATIONSHIP_INPUT_HELP, normalise_relationship, get_logo_data_uri
 )
 
 # Import email functionality if available
@@ -75,7 +75,9 @@ def render_leader_portal(db, leader_info):
     leader_name = leader_info['name']
     
     # Header
-    st.markdown('<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
+    logo_uri = get_logo_data_uri()
+    logo_html = f'<img src="{logo_uri}" class="main-title-logo">' if logo_uri else ''
+    st.markdown(f'{logo_html}<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">Your Leadership Feedback Portal</p>', unsafe_allow_html=True)
     
     # Welcome section. This portal is only ever issued after Module 1 (the portal
@@ -84,7 +86,7 @@ def render_leader_portal(db, leader_info):
     # coaching conversation. Nominating raters is the task in front of them now.
     st.markdown(f"""
     <div style="background: white; padding: 1.5rem; border-radius: 12px; border: 1px solid #E2E0D8; margin-bottom: 1.5rem;">
-        <h3 style="margin: 0 0 0.5rem 0; color: #024731;">Welcome, {leader_name}</h3>
+        <h3 style="margin: 0 0 0.5rem 0; color: #183319;">Welcome, {leader_name}</h3>
         <p style="color: #666; margin: 0 0 0.75rem 0;">{leader_info.get('dealership', '')} · {leader_info.get('cohort', '')}</p>
         <p style="color: #333; margin: 0; line-height: 1.6;">
             You've completed your self-assessment and talked it through with your coach.
@@ -184,18 +186,18 @@ def render_nomination_section(db, leader_info, existing_raters):
                 # Optional group, but too thin to report anonymously. Warn rather
                 # than block, consistent with the soft-warning approach elsewhere.
                 status_icon = "⚠"
-                status_color = "#B8860B"
+                status_color = "#4D4D4F"
                 status_text = f"{count}/{min_if_any} needed"
                 thin_optional_groups.append((cat, count, min_if_any))
             elif not req.get('required_nomination', True):
                 status_icon = "✓" if count > 0 else "○"
-                status_color = "#024731" if count > 0 else "#666"
+                status_color = "#183319" if count > 0 else "#666"
                 status_text = f"{count} nominated" if count > 0 else "Optional"
                 if min_if_any and count == min_if_any:
                     at_risk_groups.append((cat, count))
             elif count >= req['min']:
                 status_icon = "✓"
-                status_color = "#024731"
+                status_color = "#183319"
                 status_text = f"{count} nominated"
                 # Peers/DRs face the same one-non-response risk as Others: sitting
                 # exactly on the anonymity floor means a single non-response tips
@@ -205,7 +207,7 @@ def render_nomination_section(db, leader_info, existing_raters):
                     at_risk_groups.append((cat, count))
             else:
                 status_icon = "⚠"
-                status_color = "#B8860B"
+                status_color = "#4D4D4F"
                 status_text = f"{count}/{req['min']} minimum"
                 if req.get('required_nomination', True):
                     all_requirements_met = False
@@ -213,7 +215,7 @@ def render_nomination_section(db, leader_info, existing_raters):
             st.markdown(f"""
             <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid #E0E0E0;">
                 <div style="font-size: 1.5rem;">{status_icon}</div>
-                <div style="font-weight: 600; color: #024731;">{RELATIONSHIP_TYPES.get(cat, cat)}</div>
+                <div style="font-weight: 600; color: #183319;">{RELATIONSHIP_TYPES.get(cat, cat)}</div>
                 <div style="color: {status_color}; font-size: 0.9rem;">{status_text}</div>
             </div>
             """, unsafe_allow_html=True)

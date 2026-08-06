@@ -24,6 +24,7 @@ import json
 from pathlib import Path
 
 # Import our modules
+from framework import get_logo_data_uri
 from database import Database
 from feedback_form import render_feedback_form
 from admin_dashboard import render_admin_dashboard
@@ -44,8 +45,7 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@300;400;600;700&display=swap');
     
     :root {
-        --bentley-green: #024731;
-        --bentley-gold: #B8860B;
+        --bentley-green: #183319;
         --bentley-cream: #F5F5DC;
         --bentley-charcoal: #2C2C2C;
     }
@@ -63,12 +63,18 @@ st.markdown("""
         font-family: 'Source Sans Pro', sans-serif;
         font-size: 2.8rem;
         font-weight: 600;
-        color: #024731;
+        color: #183319;
         text-align: center;
         margin-bottom: 0.5rem;
         letter-spacing: 0.05em;
     }
-    
+
+    .main-title-logo {
+        display: block;
+        max-height: 76px;
+        margin: 0 auto 0.75rem auto;
+    }
+
     .subtitle {
         font-family: 'Source Sans Pro', sans-serif;
         font-size: 1.1rem;
@@ -87,7 +93,7 @@ st.markdown("""
         border-radius: 8px;
         padding: 1.5rem;
         border: 1px solid #E2E0D8;
-        border-left: 4px solid #024731;
+        border-left: 4px solid #183319;
         margin-bottom: 1rem;
     }
 
@@ -106,7 +112,7 @@ st.markdown("""
         font-family: 'Source Sans Pro', sans-serif;
         font-size: 2.5rem;
         font-weight: 600;
-        color: #024731;
+        color: #183319;
     }
     
     .stat-label {
@@ -118,12 +124,12 @@ st.markdown("""
     }
     
     .progress-complete {
-        color: #024731;
+        color: #183319;
         font-weight: 600;
     }
     
     .progress-partial {
-        color: #B8860B;
+        color: #4D4D4F;
         font-weight: 600;
     }
     
@@ -131,28 +137,35 @@ st.markdown("""
         color: #999;
     }
     
-    /* Form styling. Plain background, wordmark carried by type, a thin gold
-       rule underneath — no gradient. */
+    /* Form styling. Plain background, wordmark carried by type, a thin green
+       rule underneath — no gradient. Gold retired from the brand palette
+       2026-08-06 (the confirmed Bentley green replaced an earlier estimate,
+       and gold/tan/leather tones aren't in the real brand book at all). */
     .feedback-header {
         background: #FFFFFF;
-        color: #024731;
+        color: #183319;
         padding: 1.5rem 2rem;
-        border-bottom: 2px solid #B8860B;
+        border-bottom: 2px solid #183319;
         margin-bottom: 2rem;
         text-align: center;
     }
 
     .feedback-header h1 {
-        color: #024731 !important;
+        color: #183319 !important;
         margin-bottom: 0.5rem;
     }
 
     .feedback-header p {
         color: #505046;
     }
+
+    .feedback-header-logo {
+        max-height: 56px;
+        margin-bottom: 0.5rem;
+    }
     
     .dimension-header {
-        background: #024731;
+        background: #183319;
         color: white;
         padding: 0.8rem 1.2rem;
         border-radius: 6px;
@@ -187,8 +200,8 @@ st.markdown("""
         margin-bottom: 0.5rem;
     }
     button[data-testid="stBaseButton-segmented_controlActive"] {
-        background: #024731 !important;
-        border-color: #024731 !important;
+        background: #183319 !important;
+        border-color: #183319 !important;
     }
     button[data-testid="stBaseButton-segmented_controlActive"] * {
         color: #FFFFFF !important;
@@ -228,7 +241,7 @@ st.markdown("""
     }
     .item-progress-fill {
         height: 100%;
-        background: #024731;
+        background: #183319;
         border-radius: 2px;
         transition: width 0.2s;
     }
@@ -255,9 +268,9 @@ st.markdown("""
        darker solid shade. */
     button[data-testid="stBaseButton-primary"],
     button[data-testid="stBaseButton-primaryFormSubmit"] {
-        background: #024731 !important;
+        background: #183319 !important;
         color: #FFFFFF !important;
-        border: 1px solid #024731 !important;
+        border: 1px solid #183319 !important;
         padding: 0.6rem 2rem;
         font-family: 'Source Sans Pro', sans-serif;
         font-weight: 600;
@@ -283,26 +296,26 @@ st.markdown("""
     button[data-testid="stBaseButton-secondary"],
     button[data-testid="stBaseButton-secondaryFormSubmit"] {
         background: #FFFFFF !important;
-        color: #024731 !important;
-        border: 1px solid #024731 !important;
+        color: #183319 !important;
+        border: 1px solid #183319 !important;
         font-family: 'Source Sans Pro', sans-serif;
         font-weight: 600;
         transition: border-color 0.2s, opacity 0.2s;
     }
     button[data-testid="stBaseButton-secondary"] *,
     button[data-testid="stBaseButton-secondaryFormSubmit"] * {
-        color: #024731 !important;
+        color: #183319 !important;
     }
     button[data-testid="stBaseButton-secondary"]:hover,
     button[data-testid="stBaseButton-secondaryFormSubmit"]:hover {
         background: #FFFFFF !important;
-        color: #024731 !important;
+        color: #183319 !important;
         border-color: #013825 !important;
         opacity: 0.85;
     }
     button[data-testid="stBaseButton-secondary"]:hover *,
     button[data-testid="stBaseButton-secondaryFormSubmit"]:hover * {
-        color: #024731 !important;
+        color: #183319 !important;
     }
 
     /* Download buttons — neutral grey, distinct from the green action buttons */
@@ -317,11 +330,11 @@ st.markdown("""
     }
     .stDownloadButton button:hover {
         background: #FFFFFF !important;
-        color: #024731 !important;
-        border-color: #024731 !important;
+        color: #183319 !important;
+        border-color: #183319 !important;
     }
     .stDownloadButton button:hover * {
-        color: #024731 !important;
+        color: #183319 !important;
     }
 
     /* Disabled buttons — muted but still legible */
@@ -463,7 +476,9 @@ def get_route():
 
 def render_landing_page():
     """Render the main landing/info page."""
-    st.markdown('<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
+    logo_uri = get_logo_data_uri()
+    logo_html = f'<img src="{logo_uri}" class="main-title-logo">' if logo_uri else ''
+    st.markdown(f'{logo_html}<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">360-Degree Leadership Feedback</p>', unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -528,7 +543,7 @@ def render_thank_you_page(already_completed=False):
     st.markdown("""
     <div class="thank-you-container">
         <div class="thank-you-icon">
-            <svg width="56" height="56" viewBox="0 0 24 24" fill="#024731" xmlns="http://www.w3.org/2000/svg">
+            <svg width="56" height="56" viewBox="0 0 24 24" fill="#183319" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
             </svg>
         </div>

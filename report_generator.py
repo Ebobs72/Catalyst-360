@@ -31,18 +31,17 @@ from framework import (
     COLOURS, GROUP_COLOURS, GROUP_DISPLAY,
     HIGH_SCORE_THRESHOLD, SIGNIFICANT_GAP,
     REPORT_FONT, CHART_FONT_PREFERENCE,
+    LOGO_PATH,
     get_item_text
 )
 
 REPORTS_DIR = Path("reports")
 REPORTS_DIR.mkdir(exist_ok=True)
 
-# Bentley wings logo, dark green on transparent. Report pages stay white, so
-# only the dark variant is used. Not yet committed to the repo as of the 2026-08
-# report visual refresh — save the provided PNG here under this exact name to
-# have it picked up; report generation degrades gracefully (skips the picture,
-# prints a one-line stderr warning) if it's missing, rather than crashing.
-LOGO_PATH = Path("assets/bentley-wings-green.png")
+# LOGO_PATH itself lives in framework.py - the single source of truth for the
+# asset path, shared with the Streamlit pages and email templates. Report
+# generation degrades gracefully (skips the picture, prints a one-line stderr
+# warning) if the file is ever missing, rather than crashing.
 _logo_missing_warned = False
 
 
@@ -191,7 +190,7 @@ def apply_document_font(doc, font_name=REPORT_FONT):
 
         style.font.name = font_name
         if style_name in heading_styles:
-            style.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+            style.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
         rpr = style.element.get_or_add_rPr()
         rfonts = rpr.find(qn('w:rFonts'))
         if rfonts is None:
@@ -203,11 +202,11 @@ def apply_document_font(doc, font_name=REPORT_FONT):
 # Colour map for comment source labels (RGB tuples for python-docx), matching
 # the fixed report palette in framework.COLOURS.
 COMMENT_SOURCE_COLOURS = {
-    'Line Manager':   RGBColor(0x8a, 0x8a, 0x85),   # Mid grey
-    'Peers':          RGBColor(0x6b, 0x9c, 0x87),   # Green tint
-    'Direct Reports': RGBColor(0xc9, 0xa6, 0x92),   # Tan tint
-    'Others':         RGBColor(0x5F, 0x5E, 0x5A),   # Charcoal grey
-    'Self':           RGBColor(0x02, 0x47, 0x31),   # Bentley green
+    'Line Manager':   RGBColor(0x3D, 0x5F, 0x44),   # green_mid
+    'Peers':          RGBColor(0x5C, 0x7F, 0x63),   # green_soft
+    'Direct Reports': RGBColor(0x7F, 0xA0, 0x87),   # green_pale
+    'Others':         RGBColor(0xA8, 0xC2, 0xAC),   # green_lightest
+    'Self':           RGBColor(0x18, 0x33, 0x19),   # Bentley green
 }
 
 
@@ -257,6 +256,7 @@ def _add_thin_rule(doc, colour='CCCCCC'):
         f'</w:pBdr>'
     )
     pPr.append(pBdr)
+    return p
 
 
 # ============================================
@@ -317,7 +317,7 @@ def add_priority_capture_table(doc, rows=3):
     hdr[1].text = "What I will do differently"
     for i, cell in enumerate(hdr):
         cell.width = widths[i]
-        set_cell_shading(cell, '024731')
+        set_cell_shading(cell, '183319')
         cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
         cell.paragraphs[0].runs[0].bold = True
         cell.paragraphs[0].runs[0].font.size = Pt(9)
@@ -343,10 +343,13 @@ def _add_comment_block(doc, group_name, comment_text):
     # Resolve display name
     display_name = GROUP_DISPLAY.get(group_name, group_name)
 
-    # Source label
+    # Source label - keep_with_next stops Word breaking the page right here,
+    # which would otherwise strand the label alone at the bottom of a page
+    # with its comment text starting fresh on the next.
     source_para = doc.add_paragraph()
     source_para.paragraph_format.space_before = Pt(8)
     source_para.paragraph_format.space_after = Pt(2)
+    source_para.paragraph_format.keep_with_next = True
     run = source_para.add_run(display_name)
     run.bold = True
     run.font.size = Pt(9)
@@ -371,7 +374,12 @@ def add_clean_comments(doc, comments_list):
     if not comments_list:
         return
 
-    _add_thin_rule(doc)
+    # keep_with_next on the opening rule chains it to the first comment's own
+    # label (which in turn keeps itself with its text - see
+    # _add_comment_block), so a page break can't land between the "Comments
+    # on X" heading and the first comment either.
+    opening_rule = _add_thin_rule(doc)
+    opening_rule.paragraph_format.keep_with_next = True
     for comment in comments_list:
         _add_comment_block(doc, comment['group'], comment['text'])
         _add_thin_rule(doc)
@@ -477,17 +485,17 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
             color=COLOURS['bentley_green'], markersize=10)
     ax.fill(angles, self_values, alpha=0.25, color=COLOURS['bentley_green'])
     
-    # Plot Combined scores if available. Leather tan is "All Raters" everywhere
-    # in the report - here, and on the Combined bar in create_item_bar_chart -
-    # since mid grey (used for Line Manager) washed out too much against the
-    # grid lines on this chart. Also the Potential Blind Spots table header,
-    # but nothing in this chart carries that categorisation to collide with.
+    # Plot Combined scores if available. Charcoal is "All Raters" everywhere in
+    # the report - here, and on the Combined bar in create_item_bar_chart -
+    # deliberately outside the green family so the aggregate reads as
+    # categorically different from any one individual perspective, and dark
+    # enough not to wash out against the grid lines on this chart.
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
         ax.plot(angles, combined_values, 'o-', linewidth=3, label='All Raters',
-                color=COLOURS['leather_tan'], markersize=10)
-        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['leather_tan'])
+                color=COLOURS['charcoal'], markersize=10)
+        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['charcoal'])
     
     # Configure the chart
     ax.set_ylim(0, 5)
@@ -549,7 +557,7 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
     if include_combined and scores.get('Combined') is not None:
         groups.append(GROUP_DISPLAY['Combined'])
         values.append(scores['Combined'])
-        colors.append(COLOURS['leather_tan'])
+        colors.append(COLOURS['charcoal'])
     
     if not values:
         return False
@@ -696,7 +704,7 @@ def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=Non
 
     logo_para = doc.add_paragraph()
     logo_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if _add_logo_if_present(logo_para, width_in=1.8):
+    if _add_logo_if_present(logo_para, width_in=2.3):
         doc.add_paragraph()
 
     title = doc.add_paragraph()
@@ -704,7 +712,7 @@ def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=Non
     run = title.add_run("BENTLEY COMPASS 360")
     run.bold = True
     run.font.size = Pt(28)
-    run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+    run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
     
     subtitle = doc.add_paragraph()
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -719,7 +727,7 @@ def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=Non
     run = name_para.add_run(leader_name)
     run.bold = True
     run.font.size = Pt(24)
-    run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+    run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
     
     if dealership:
         detail = doc.add_paragraph()
@@ -784,7 +792,7 @@ def _add_header_logo(section):
     header.is_linked_to_previous = False
     para = header.paragraphs[0]
     para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    _add_logo_if_present(para, width_in=0.7)
+    _add_logo_if_present(para, width_in=0.95)
 
 
 def add_table_of_contents(doc):
@@ -843,7 +851,7 @@ def add_response_summary(doc, data):
     hdr_cells[1].width = widths[1]
     
     for cell in hdr_cells:
-        set_cell_shading(cell, '024731')
+        set_cell_shading(cell, '183319')
         cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
         cell.paragraphs[0].runs[0].bold = True
     
@@ -922,7 +930,7 @@ def add_executive_summary(doc, data):
     hdr[3].text = "Gap"
 
     for cell in hdr:
-        set_cell_shading(cell, '024731')
+        set_cell_shading(cell, '183319')
         cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
         cell.paragraphs[0].runs[0].bold = True
         cell.paragraphs[0].runs[0].font.size = Pt(10)
@@ -982,7 +990,7 @@ def add_executive_summary(doc, data):
         run = chart_heading.add_run("Your Profile at a Glance")
         run.bold = True
         run.font.size = Pt(13)
-        run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+        run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
 
         para = doc.add_paragraph()
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1013,12 +1021,17 @@ def add_papu_nanu_section(doc, data):
                 for para in cell.paragraphs:
                     para.paragraph_format.keep_with_next = False
     
-    def create_papu_table(doc, items, header_color):
-        """Create a PAPU-NANU table with consistent formatting."""
+    def create_papu_table(doc, items, header_color, header_text_color=RGBColor(255, 255, 255)):
+        """Create a PAPU-NANU table with consistent formatting.
+
+        header_text_color defaults to white; Development Areas' heritage
+        white background needs dark green text instead, since white text
+        would be invisible on it.
+        """
         table = doc.add_table(rows=1, cols=5)
         table.style = 'Table Grid'
         table.autofit = False
-        
+
         # Column widths: # | Behaviour | Self | All Raters | Gap
         widths = content_columns(0.4, 3.8, 0.6, 0.6, 0.6)
 
@@ -1028,11 +1041,11 @@ def add_papu_nanu_section(doc, data):
         hdr[2].text = "Self"
         hdr[3].text = GROUP_DISPLAY['Combined']
         hdr[4].text = "Gap"
-        
+
         for i, cell in enumerate(hdr):
             cell.width = widths[i]
             set_cell_shading(cell, header_color)
-            cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+            cell.paragraphs[0].runs[0].font.color.rgb = header_text_color
             cell.paragraphs[0].runs[0].bold = True
             cell.paragraphs[0].runs[0].font.size = Pt(9)
             if i != 1:
@@ -1075,28 +1088,32 @@ def add_papu_nanu_section(doc, data):
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph("You and others agree these are strengths - keep doing these.")
         desc.paragraph_format.keep_with_next = True
-        create_papu_table(doc, categories['agreed_strengths'][:8], '024731')
+        create_papu_table(doc, categories['agreed_strengths'][:8], '183319')
         doc.add_paragraph()
 
-    # Good News (green tint header)
+    # Good News (green soft header)
     if categories['good_news']:
         heading = doc.add_heading("Good News", level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph("Others rate you higher than you rate yourself - you may be underselling yourself.")
         desc.paragraph_format.keep_with_next = True
-        create_papu_table(doc, categories['good_news'], '6b9c87')
+        create_papu_table(doc, categories['good_news'], '5C7F63')
         doc.add_paragraph()
 
-    # Development Areas (charcoal grey header)
+    # Development Areas (heritage white header, dark green text - white text
+    # would be invisible on this background)
     if categories['development_areas']:
         heading = doc.add_heading("Development Areas", level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph("Both you and others see room for growth - priority focus for development.")
         desc.paragraph_format.keep_with_next = True
-        create_papu_table(doc, categories['development_areas'][:8], '5F5E5A')
+        create_papu_table(
+            doc, categories['development_areas'][:8], 'DCD8C0',
+            header_text_color=RGBColor(0x18, 0x33, 0x19)
+        )
         doc.add_paragraph()
 
-    # Potential Blind Spots / Hidden Talents (leather tan header)
+    # Potential Blind Spots / Hidden Talents (charcoal grey header)
     if categories['hidden_talents']:
         heading = doc.add_heading("Potential Blind Spots", level=2)
         heading.paragraph_format.keep_with_next = True
@@ -1105,7 +1122,7 @@ def add_papu_nanu_section(doc, data):
             "isn't landing as clearly as you think, or that it's an area worth a closer look."
         )
         desc.paragraph_format.keep_with_next = True
-        create_papu_table(doc, categories['hidden_talents'], '9C6148')
+        create_papu_table(doc, categories['hidden_talents'], '5F5E5A')
         doc.add_paragraph()
     
     # No explicit page break — next section uses page_break_before
@@ -1201,10 +1218,11 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
         section_comments = [c for c in section_comments if c.get('group') == 'Self']
     if section_comments:
         comment_heading = doc.add_paragraph()
+        comment_heading.paragraph_format.keep_with_next = True
         run = comment_heading.add_run(f"Comments on {dim_name}")
         run.bold = True
         run.font.size = Pt(11)
-        run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+        run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
 
         add_clean_comments(doc, section_comments)
 
@@ -1220,7 +1238,7 @@ def add_overall_comments(doc, comments):
     if comments.get('keep'):
         heading = doc.add_heading("What to Keep Doing", level=2)
         for run in heading.runs:
-            run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+            run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
 
         add_clean_comments(doc, comments['keep'])
 
@@ -1230,7 +1248,7 @@ def add_overall_comments(doc, comments):
     if comments.get('change'):
         heading = doc.add_heading("The One Change That Would Make the Biggest Difference", level=2)
         for run in heading.runs:
-            run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+            run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
 
         add_clean_comments(doc, comments['change'])
 
@@ -1289,7 +1307,7 @@ def add_development_priorities(doc, priorities, data, is_self_only=False):
         run = title_para.add_run(f"Priority {priority.get('rank', '')}: {dimension}")
         run.bold = True
         run.font.size = Pt(12)
-        run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+        run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
 
         # How that dimension actually scored
         dim_data = data.get('by_dimension', {}).get(dimension, {})
@@ -1341,7 +1359,7 @@ def add_development_priorities(doc, priorities, data, is_self_only=False):
     )
     run.bold = True
     run.font.size = Pt(12)
-    run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
+    run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
 
     if not stated:
         prompt_text = (
@@ -1657,7 +1675,7 @@ def add_theme_synthesis(doc, leader_name, comments, data):
         run = title_para.add_run(f"{i + 1}. {theme['title']}")
         run.bold = True
         run.font.size = Pt(12)
-        run.font.color.rgb = RGBColor(0x02, 0x47, 0x31)  # Bentley green
+        run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)  # Bentley green
         
         # Theme narrative
         narrative_para = doc.add_paragraph(theme['narrative'])
@@ -1777,7 +1795,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         hdr[1].text = "Your Score"
         for i, cell in enumerate(hdr):
             cell.width = widths[i]
-            set_cell_shading(cell, '024731')
+            set_cell_shading(cell, '183319')
             cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
             cell.paragraphs[0].runs[0].bold = True
             cell.paragraphs[0].runs[0].font.size = Pt(10)

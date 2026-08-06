@@ -6,6 +6,8 @@ Contains all dimensions, items, and display configuration.
 """
 
 import re
+import base64
+from pathlib import Path
 
 # ============================================
 # DIMENSION STRUCTURE
@@ -242,38 +244,83 @@ RELATIONSHIP_INPUT_HELP = "Line Manager, Peer, Direct Report, or Other"
 # ============================================
 
 COLOURS = {
-    'bentley_green': '#024731',      # Primary Bentley green - Self, always
-    'green_tint': '#6b9c87',         # Peers
-    'leather_tan': '#9C6148',        # All Raters (combined) - also Potential Blind Spots header
-    'tan_tint': '#c9a692',           # Direct Reports
-    'charcoal_grey': '#5F5E5A',      # Others (the rater category)
-    'mid_grey': '#8a8a85',           # Line Manager
+    'bentley_green': '#183319',      # Official Bentley Green - Self, Agreed Strengths header
+    'green_mid': '#3D5F44',          # Line Manager
+    'green_soft': '#5C7F63',         # Peers, Good News header
+    'green_pale': '#7FA087',         # Direct Reports
+    'green_lightest': '#A8C2AC',     # Others
+    'charcoal': '#4D4D4F',           # All Raters - deliberately outside the
+                                      # green family so the aggregate reads as
+                                      # categorically different from any one
+                                      # individual perspective
+    'charcoal_grey': '#5F5E5A',      # Potential Blind Spots header
+    'heritage_white': '#DCD8C0',     # Development Areas header (dark text on this one)
     'bentley_cream': '#F5F5DC',      # Bentley cream
     'bentley_charcoal': '#2C2C2C',   # Bentley charcoal
     'light_grey': '#F5F5F5',
     'dark_grey': '#333333',
 }
-# NB: the fixed report palette above (green/green_tint/leather_tan/tan_tint/
-# charcoal_grey/mid_grey) is the only palette report_generator.py is allowed to
-# use, per the 2026-08 report visual refresh. goldenrod (previously
-# 'bentley_gold', #B8860B) and the old burgundy/deep_teal/slate/forest_green
-# entries are retired from the report palette; removed here since nothing else
-# in the codebase referenced them (confirmed by grep 2026-08-06).
+# NB: the fixed report palette above (bentley_green/green_mid/green_soft/
+# green_pale/green_lightest/charcoal/charcoal_grey/heritage_white) is the only
+# palette report_generator.py is allowed to use, per the confirmed brand book
+# correction 2026-08-06. #024731 was an estimate made before the real brand
+# book was available - #183319 is the confirmed official Bentley Green. Tan,
+# leather and gold tones (previously 'leather_tan' #9C6148, 'tan_tint'
+# #c9a692, and 'bentley_gold' #B8860B before that) are retired entirely - none
+# of them are in Bentley's confirmed palette.
 
-# Group colours for report bar charts and comment labels - fixed brand palette,
-# not to be extended: Self is always green; Others (the rater category, not
-# the "All Raters"/Combined figure) reuses charcoal_grey since the brand
-# palette has no colour of its own assigned to that group. Line Manager uses
-# mid_grey rather than leather_tan (swapped 2026-08-06) so leather_tan is free
-# to mean "All Raters" consistently everywhere it appears - the radar chart's
-# Combined line, and the item bar charts' Combined bar.
+# Group colours for report bar charts and comment labels - fixed brand
+# palette, not to be extended. Each rater group now has its own colour in the
+# green family (Self always the full-strength green, unique to Self); "All
+# Raters" (GROUP_DISPLAY['Combined']) uses 'charcoal' instead, wherever it
+# appears - the radar chart's Combined line, and the item bar charts'
+# Combined bar - not a GROUP_COLOURS entry since it isn't a rater group.
 GROUP_COLOURS = {
     'Self': COLOURS['bentley_green'],
-    'Boss': COLOURS['mid_grey'],
-    'Peers': COLOURS['green_tint'],
-    'DRs': COLOURS['tan_tint'],
-    'Others': COLOURS['charcoal_grey'],
+    'Boss': COLOURS['green_mid'],
+    'Peers': COLOURS['green_soft'],
+    'DRs': COLOURS['green_pale'],
+    'Others': COLOURS['green_lightest'],
 }
+
+# ============================================
+# LOGO
+# ============================================
+
+# The official Bentley "Simplified" lockup (wings + wordmark) - Positive is
+# dark-on-light for white/light backgrounds, Negative is white-on-transparent
+# for dark backgrounds (the email header banners, which use the dark green or
+# charcoal fill). Single source of truth for both asset paths -
+# report_generator.py, the Streamlit pages, and the email templates all read
+# the same files rather than each keeping their own copy of the path.
+LOGO_PATH = Path("assets/bentley-logo-simplified-positive.png")
+LOGO_NEGATIVE_PATH = Path("assets/bentley-logo-simplified-negative.png")
+
+
+def get_logo_data_uri(negative=False):
+    """Base64 data: URI for the logo, for embedding directly in HTML.
+
+    Pass negative=True for the white-on-transparent variant, needed on dark
+    backgrounds (e.g. the email header banners) - the dark-on-light default
+    would be nearly invisible there.
+
+    Used in Streamlit pages (unsafe_allow_html blocks) and email templates,
+    where there's no "file on disk" the browser/email client can load from -
+    only a string of HTML. Returns None if the asset is missing so callers
+    can degrade gracefully rather than show a broken image.
+
+    NB for email specifically: base64 data: URIs render fine in Gmail, Apple
+    Mail, and mobile clients, but Outlook desktop has a long history of NOT
+    rendering inline base64 images reliably. If dealership recipients are
+    mostly on Outlook, the email logo may not always show - a real image URL
+    hosted somewhere reachable would be the robust fix, which is
+    infrastructure this project doesn't have yet.
+    """
+    path = LOGO_NEGATIVE_PATH if negative else LOGO_PATH
+    if not path.exists():
+        return None
+    encoded = base64.b64encode(path.read_bytes()).decode('ascii')
+    return f"data:image/png;base64,{encoded}"
 
 # ============================================
 # REPORT TYPOGRAPHY

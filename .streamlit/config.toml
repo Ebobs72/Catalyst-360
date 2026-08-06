@@ -5,5 +5,5 @@
 # change between versions). Buttons elsewhere are already forced to Bentley
 # green via explicit !important CSS in app.py regardless of this setting.
 [theme]
-primaryColor = "#024731"
+primaryColor = "#183319"
 base = "light"

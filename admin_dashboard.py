@@ -9,7 +9,7 @@ import random
 from datetime import datetime
 from framework import (
     RELATIONSHIP_TYPES, GROUP_DISPLAY, MIN_RESPONSES_FOR_REPORT,
-    RELATIONSHIP_INPUT_HELP, normalise_relationship, DIMENSIONS
+    RELATIONSHIP_INPUT_HELP, normalise_relationship, DIMENSIONS, get_logo_data_uri
 )
 
 # Try to import email functionality
@@ -39,7 +39,9 @@ def render_admin_dashboard(db):
     """Render the admin dashboard."""
     
     # Header
-    st.markdown('<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
+    logo_uri = get_logo_data_uri()
+    logo_html = f'<img src="{logo_uri}" class="main-title-logo">' if logo_uri else ''
+    st.markdown(f'{logo_html}<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">Administrator Dashboard</p>', unsafe_allow_html=True)
     
     # Navigation tabs

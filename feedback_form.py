@@ -16,7 +16,7 @@ from framework import (
     DEVELOPMENT_PRIORITY_COUNT, DEVELOPMENT_PRIORITY_INTRO,
     DEVELOPMENT_PRIORITY_PROMPT, DEVELOPMENT_PRIORITY_MINIMUM,
     DEVELOPMENT_PRIORITY_ACTION_MIN_CHARS,
-    get_item_text, get_prompt_text
+    get_item_text, get_prompt_text, get_logo_data_uri
 )
 
 TOTAL_ITEMS = 45
@@ -160,8 +160,11 @@ def render_feedback_form(db, rater_info):
         st.session_state.draft_saved_at = draft_saved_at
     
     # Header
+    logo_uri = get_logo_data_uri()
+    logo_html = f'<img src="{logo_uri}" class="feedback-header-logo">' if logo_uri else ''
     st.markdown(f"""
     <div class="feedback-header">
+        {logo_html}
         <h1 style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
         <p style="font-size: 1.1rem; opacity: 0.9; margin: 0;">
             {'Self-Assessment' if is_self else f'Feedback for <strong>{leader_name}</strong>'}
@@ -183,7 +186,7 @@ def render_feedback_form(db, rater_info):
     # Instructions
     if is_self:
         st.markdown("""
-        <div style="background: #F8F9FA; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #024731;">
+        <div style="background: #F8F9FA; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #183319;">
             <p style="margin: 0; color: #333; line-height: 1.6;">
                 <strong>About this self-assessment</strong><br>
                 Please rate yourself honestly on each statement below. Your self-assessment will be compared 
@@ -194,7 +197,7 @@ def render_feedback_form(db, rater_info):
         """, unsafe_allow_html=True)
     else:
         st.markdown(f"""
-        <div style="background: #F8F9FA; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #024731;">
+        <div style="background: #F8F9FA; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #183319;">
             <p style="margin: 0; color: #333; line-height: 1.6;">
                 Thank you for taking the time to complete this questionnaire. The results will be shared with 
                 <strong>{leader_name}</strong> as part of the Bentley Compass Leadership Development Programme.
@@ -217,7 +220,7 @@ def render_feedback_form(db, rater_info):
                 observe someone behaving in that way, please choose <strong>"No opportunity to observe"</strong>
                 rather than guessing.
             </p>
-            <p style="margin: 1rem 0 0 0; color: #024731; line-height: 1.6;">
+            <p style="margin: 1rem 0 0 0; color: #183319; line-height: 1.6;">
                 <strong>Your progress is saved automatically.</strong> You can close this window at any time
                 and return to this link to continue where you left off.
             </p>
@@ -372,7 +375,7 @@ def render_feedback_form(db, rater_info):
                          'what you\'ll do)</span>'
                 )
                 st.markdown(f"""
-                <p style="margin-top: 1.2rem; margin-bottom: 0.3rem; color: #024731; font-weight: 600;">
+                <p style="margin-top: 1.2rem; margin-bottom: 0.3rem; color: #183319; font-weight: 600;">
                     Priority {rank}{required_label}
                 </p>
                 """, unsafe_allow_html=True)
@@ -590,7 +593,7 @@ def render_thank_you():
     <div style="text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px;
                 border: 1px solid #E2E0D8; max-width: 600px; margin: 2rem auto;">
         <div style="font-size: 4rem; margin-bottom: 1rem;">✓</div>
-        <h2 style="color: #024731; margin-bottom: 1rem;">Thank You</h2>
+        <h2 style="color: #183319; margin-bottom: 1rem;">Thank You</h2>
         <p style="color: #666; font-size: 1.1rem; line-height: 1.8;">
             Your feedback has been successfully submitted and will help support this leader's development.
         </p>

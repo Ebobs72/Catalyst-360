@@ -14,8 +14,28 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 import streamlit as st
 
+from framework import get_logo_data_uri
+
 # Minimum time between reminder emails to the same rater
 REMINDER_THROTTLE_HOURS = 48
+
+
+def _email_logo_html():
+    """Logo <img> tag for the email header banner, or '' if the asset is missing.
+
+    Uses the negative (white-on-transparent) variant - every email header
+    banner has a dark fill (green for invitations, charcoal for reminders),
+    and the dark-on-light default logo would be nearly invisible there.
+
+    NB: base64 data: URIs render fine in Gmail, Apple Mail, and mobile clients,
+    but Outlook desktop has a long history of NOT rendering inline base64
+    images reliably. If dealership recipients are mostly on Outlook, this may
+    not always show - see get_logo_data_uri()'s docstring in framework.py.
+    """
+    logo_uri = get_logo_data_uri(negative=True)
+    if not logo_uri:
+        return ''
+    return f'<img src="{logo_uri}" alt="Bentley Compass 360" style="height: 44px; margin-bottom: 12px;">'
 
 # Last-resort fallback for building rater/portal links. This points at the LIVE
 # app, so any other deployment (e.g. the sandbox) MUST set `[app] base_url` in
@@ -128,6 +148,7 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url):
         intro = f"You have been invited to provide 360-degree feedback for <strong>{leader_name}</strong> as part of the Bentley Compass Leadership Programme{suffix}."
         cta_text = "Provide Feedback"
     
+    logo_html = _email_logo_html()
     return f"""
 <!DOCTYPE html>
 <html>
@@ -143,7 +164,8 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url):
                     
                     <!-- Header -->
                     <tr>
-                        <td style="background: linear-gradient(135deg, #024731 0%, #035D40 100%); padding: 30px 40px; text-align: center;">
+                        <td style="background: #183319; padding: 30px 40px; text-align: center;">
+                            {logo_html}
                             <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
                                 BENTLEY COMPASS 360
                             </h1>
@@ -169,7 +191,7 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url):
                                 <tr>
                                     <td align="center" style="padding: 20px 0;">
                                         <a href="{assessment_url}" 
-                                           style="display: inline-block; background: linear-gradient(135deg, #024731 0%, #035D40 100%); 
+                                           style="display: inline-block; background: #183319; 
                                                   color: #ffffff; text-decoration: none; padding: 16px 40px; 
                                                   border-radius: 6px; font-size: 16px; font-weight: 600;
                                                   letter-spacing: 0.5px;">
@@ -181,7 +203,7 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url):
                             
                             <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
                                 If the button doesn't work, copy and paste this link into your browser:<br>
-                                <a href="{assessment_url}" style="color: #024731; word-break: break-all;">{assessment_url}</a>
+                                <a href="{assessment_url}" style="color: #183319; word-break: break-all;">{assessment_url}</a>
                             </p>
                         </td>
                     </tr>
@@ -213,6 +235,7 @@ def _get_reminder_html(leader_name, relationship, assessment_url):
     else:
         intro = f"This is a friendly reminder to provide your 360-degree feedback for <strong>{leader_name}</strong>."
     
+    logo_html = _email_logo_html()
     return f"""
 <!DOCTYPE html>
 <html>
@@ -228,7 +251,8 @@ def _get_reminder_html(leader_name, relationship, assessment_url):
                     
                     <!-- Header -->
                     <tr>
-                        <td style="background: linear-gradient(135deg, #B8860B 0%, #D4A017 100%); padding: 30px 40px; text-align: center;">
+                        <td style="background: #4D4D4F; padding: 30px 40px; text-align: center;">
+                            {logo_html}
                             <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
                                 FRIENDLY REMINDER
                             </h1>
@@ -254,7 +278,7 @@ def _get_reminder_html(leader_name, relationship, assessment_url):
                                 <tr>
                                     <td align="center" style="padding: 20px 0;">
                                         <a href="{assessment_url}" 
-                                           style="display: inline-block; background: linear-gradient(135deg, #024731 0%, #035D40 100%); 
+                                           style="display: inline-block; background: #183319; 
                                                   color: #ffffff; text-decoration: none; padding: 16px 40px; 
                                                   border-radius: 6px; font-size: 16px; font-weight: 600;
                                                   letter-spacing: 0.5px;">
@@ -266,7 +290,7 @@ def _get_reminder_html(leader_name, relationship, assessment_url):
                             
                             <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
                                 If the button doesn't work, copy and paste this link into your browser:<br>
-                                <a href="{assessment_url}" style="color: #024731; word-break: break-all;">{assessment_url}</a>
+                                <a href="{assessment_url}" style="color: #183319; word-break: break-all;">{assessment_url}</a>
                             </p>
                         </td>
                     </tr>
@@ -301,7 +325,7 @@ def _get_leader_notification_html(leader_name, report_url=None):
                                 <tr>
                                     <td align="center" style="padding: 20px 0;">
                                         <a href="{report_url}" 
-                                           style="display: inline-block; background: linear-gradient(135deg, #024731 0%, #035D40 100%); 
+                                           style="display: inline-block; background: #183319; 
                                                   color: #ffffff; text-decoration: none; padding: 16px 40px; 
                                                   border-radius: 6px; font-size: 16px; font-weight: 600;
                                                   letter-spacing: 0.5px;">
@@ -312,6 +336,7 @@ def _get_leader_notification_html(leader_name, report_url=None):
                             </table>
         """
     
+    logo_html = _email_logo_html()
     return f"""
 <!DOCTYPE html>
 <html>
@@ -327,7 +352,8 @@ def _get_leader_notification_html(leader_name, report_url=None):
                     
                     <!-- Header -->
                     <tr>
-                        <td style="background: linear-gradient(135deg, #024731 0%, #035D40 100%); padding: 30px 40px; text-align: center;">
+                        <td style="background: #183319; padding: 30px 40px; text-align: center;">
+                            {logo_html}
                             <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
                                 YOUR FEEDBACK IS READY
                             </h1>
@@ -594,6 +620,7 @@ def send_bulk_reminders(raters, leader_name, base_url, db):
 def _get_portal_invitation_html(leader_name, portal_url):
     """Generate HTML for leader portal invitation email (post Module 1)."""
     
+    logo_html = _email_logo_html()
     return f"""
 <!DOCTYPE html>
 <html>
@@ -609,7 +636,8 @@ def _get_portal_invitation_html(leader_name, portal_url):
                     
                     <!-- Header -->
                     <tr>
-                        <td style="background: linear-gradient(135deg, #024731 0%, #035D40 100%); padding: 30px 40px; text-align: center;">
+                        <td style="background: #183319; padding: 30px 40px; text-align: center;">
+                            {logo_html}
                             <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
                                 YOUR 360 FEEDBACK PORTAL
                             </h1>
@@ -640,7 +668,7 @@ def _get_portal_invitation_html(leader_name, portal_url):
                                 <tr>
                                     <td align="center" style="padding: 20px 0;">
                                         <a href="{portal_url}" 
-                                           style="display: inline-block; background: linear-gradient(135deg, #024731 0%, #035D40 100%); 
+                                           style="display: inline-block; background: #183319; 
                                                   color: #ffffff; text-decoration: none; padding: 16px 40px; 
                                                   border-radius: 6px; font-size: 16px; font-weight: 600;
                                                   letter-spacing: 0.5px;">
@@ -651,8 +679,8 @@ def _get_portal_invitation_html(leader_name, portal_url):
                             </table>
                             
                             <!-- Requirements Box -->
-                            <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #024731;">
-                                <p style="color: #024731; font-weight: 600; margin: 0 0 12px 0;">
+                            <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #183319;">
+                                <p style="color: #183319; font-weight: 600; margin: 0 0 12px 0;">
                                     Who should you nominate?
                                 </p>
                                 <table style="width: 100%; color: #666; font-size: 14px; line-height: 1.8;">
@@ -686,7 +714,7 @@ def _get_portal_invitation_html(leader_name, portal_url):
                             
                             <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
                                 If the button doesn't work, copy and paste this link into your browser:<br>
-                                <a href="{portal_url}" style="color: #024731; word-break: break-all;">{portal_url}</a>
+                                <a href="{portal_url}" style="color: #183319; word-break: break-all;">{portal_url}</a>
                             </p>
                         </td>
                     </tr>
@@ -715,6 +743,7 @@ def _get_leader_nomination_reminder_html(leader_name, portal_url, nominated_coun
     
     message = "You haven't added any raters yet." if nominated_count == 0 else f"You've nominated {nominated_count} rater(s) so far, but we recommend at least 8-10 for comprehensive feedback."
     
+    logo_html = _email_logo_html()
     return f"""
 <!DOCTYPE html>
 <html>
@@ -730,7 +759,8 @@ def _get_leader_nomination_reminder_html(leader_name, portal_url, nominated_coun
                     
                     <!-- Header -->
                     <tr>
-                        <td style="background: linear-gradient(135deg, #B8860B 0%, #D4A017 100%); padding: 30px 40px; text-align: center;">
+                        <td style="background: #4D4D4F; padding: 30px 40px; text-align: center;">
+                            {logo_html}
                             <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
                                 REMINDER: NOMINATE YOUR RATERS
                             </h1>
@@ -761,7 +791,7 @@ def _get_leader_nomination_reminder_html(leader_name, portal_url, nominated_coun
                                 <tr>
                                     <td align="center" style="padding: 20px 0;">
                                         <a href="{portal_url}" 
-                                           style="display: inline-block; background: linear-gradient(135deg, #024731 0%, #035D40 100%); 
+                                           style="display: inline-block; background: #183319; 
                                                   color: #ffffff; text-decoration: none; padding: 16px 40px; 
                                                   border-radius: 6px; font-size: 16px; font-weight: 600;
                                                   letter-spacing: 0.5px;">
@@ -773,7 +803,7 @@ def _get_leader_nomination_reminder_html(leader_name, portal_url, nominated_coun
                             
                             <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
                                 If the button doesn't work, copy and paste this link into your browser:<br>
-                                <a href="{portal_url}" style="color: #024731; word-break: break-all;">{portal_url}</a>
+                                <a href="{portal_url}" style="color: #183319; word-break: break-all;">{portal_url}</a>
                             </p>
                         </td>
                     </tr>
