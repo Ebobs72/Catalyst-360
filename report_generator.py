@@ -485,18 +485,19 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
             color=COLOURS['bentley_green'], markersize=10)
     ax.fill(angles, self_values, alpha=0.25, color=COLOURS['bentley_green'])
     
-    # Plot Combined scores if available. Uses radar_all_raters (a lighter,
-    # confirmed-brand grey), NOT the charcoal used for "All Raters" on the bar
-    # charts elsewhere - this chart's two series have semi-transparent fills
-    # that overlap, and charcoal sat too close to bentley_green in tonal
-    # value, so the overlap zone blended into indistinguishable from either
-    # series alone. The bar charts don't stack fills like this, so they keep
-    # the darker charcoal there.
+    # Plot Combined scores if available. Line/markers use 'charcoal' - the
+    # SAME colour as "All Raters" on the bar charts elsewhere in the report,
+    # so the identity is consistent wherever the legend/line appears. Only the
+    # FILL uses the lighter 'radar_all_raters' grey: this chart's two series
+    # have semi-transparent fills that overlap, and a charcoal fill sat too
+    # close to bentley_green's fill in tonal value, so the overlap zone
+    # blended into indistinguishable from either series alone. The bar charts
+    # don't stack fills like this, so they don't need this split.
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
         ax.plot(angles, combined_values, 'o-', linewidth=3, label='All Raters',
-                color=COLOURS['radar_all_raters'], markersize=10)
+                color=COLOURS['charcoal'], markersize=10)
         ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['radar_all_raters'])
     
     # Configure the chart

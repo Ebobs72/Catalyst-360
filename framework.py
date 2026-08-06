@@ -254,19 +254,22 @@ COLOURS = {
                                       # categorically different from any one
                                       # individual perspective
     'charcoal_grey': '#5F5E5A',      # Potential Blind Spots header
-    'radar_all_raters': '#B2B2B2',   # All Raters fill/line on the OVERVIEW
-                                      # RADAR ONLY, not the bar charts. Confirmed
-                                      # Bentley brand value, lighter than
-                                      # 'charcoal' on purpose: the radar's two
-                                      # series have semi-transparent fills that
-                                      # overlap, and charcoal sat too close to
-                                      # bentley_green in tonal value there -
+    'radar_all_raters': '#B2B2B2',   # All Raters FILL on the OVERVIEW RADAR
+                                      # ONLY, not the bar charts, and not the
+                                      # radar's own line/markers either - those
+                                      # stay 'charcoal' so the "All Raters"
+                                      # identity is consistent everywhere the
+                                      # line/legend appears. Confirmed Bentley
+                                      # brand value, lighter than 'charcoal' on
+                                      # purpose: the radar's two series have
+                                      # semi-transparent fills that overlap,
+                                      # and a charcoal fill sat too close to
+                                      # bentley_green's fill in tonal value -
                                       # the blended overlap read as indistinct
                                       # from either series alone. Bar charts
                                       # don't have this problem (bars sit side
                                       # by side, not stacked transparently), so
-                                      # they keep the darker, more assertive
-                                      # charcoal.
+                                      # they keep charcoal for fill too.
     'heritage_white': '#DCD8C0',     # Development Areas header (dark text on this one)
     'bentley_cream': '#F5F5DC',      # Bentley cream
     'bentley_charcoal': '#2C2C2C',   # Bentley charcoal
