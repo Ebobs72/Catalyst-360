@@ -1,0 +1,9 @@
+# App-wide theme. primaryColor drives the selected/active accent on widgets
+# that don't have their own hardcoded colour override — notably
+# st.segmented_control's selected state, which has no stable CSS class to
+# target directly (Streamlit's internal class names are build-hashed and
+# change between versions). Buttons elsewhere are already forced to Bentley
+# green via explicit !important CSS in app.py regardless of this setting.
+[theme]
+primaryColor = "#024731"
+base = "light"

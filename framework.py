@@ -166,7 +166,7 @@ GROUP_DISPLAY = {
     'Peers': 'Peers',
     'DRs': 'Direct Reports',
     'Others': 'Others',
-    'Combined': 'Combined Others'
+    'Combined': 'All Raters'
 }
 
 # ============================================
@@ -242,25 +242,34 @@ RELATIONSHIP_INPUT_HELP = "Line Manager, Peer, Direct Report, or Other"
 # ============================================
 
 COLOURS = {
-    'bentley_green': '#024731',      # Primary Bentley green
-    'bentley_gold': '#B8860B',       # Bentley gold
+    'bentley_green': '#024731',      # Primary Bentley green - Self, always
+    'green_tint': '#6b9c87',         # Peers
+    'leather_tan': '#9C6148',        # Line Manager
+    'tan_tint': '#c9a692',           # Direct Reports
+    'charcoal_grey': '#5F5E5A',      # Others (the rater category)
+    'mid_grey': '#8a8a85',           # All Raters (combined)
     'bentley_cream': '#F5F5DC',      # Bentley cream
     'bentley_charcoal': '#2C2C2C',   # Bentley charcoal
-    'forest_green': '#035D40',       # Lighter green
-    'deep_teal': '#0A5E55',          # Teal accent
-    'burgundy': '#722F37',           # Burgundy accent
-    'slate': '#4A5568',              # Slate grey
     'light_grey': '#F5F5F5',
     'dark_grey': '#333333',
 }
+# NB: the fixed report palette above (green/green_tint/leather_tan/tan_tint/
+# charcoal_grey/mid_grey) is the only palette report_generator.py is allowed to
+# use, per the 2026-08 report visual refresh. goldenrod (previously
+# 'bentley_gold', #B8860B) and the old burgundy/deep_teal/slate/forest_green
+# entries are retired from the report palette; removed here since nothing else
+# in the codebase referenced them (confirmed by grep 2026-08-06).
 
-# Group colours for bar charts - Bentley-appropriate palette
+# Group colours for report bar charts and comment labels - fixed brand palette,
+# not to be extended: Self is always green; Others (the rater category, not
+# the "All Raters"/Combined figure) reuses charcoal_grey since the brand
+# palette has no colour of its own assigned to that group.
 GROUP_COLOURS = {
-    'Self': COLOURS['bentley_green'],    # Deep green for Self
-    'Boss': COLOURS['burgundy'],          # Burgundy for Boss
-    'Peers': COLOURS['deep_teal'],        # Teal for Peers
-    'DRs': COLOURS['bentley_gold'],       # Gold for Direct Reports
-    'Others': COLOURS['slate'],           # Slate for Others
+    'Self': COLOURS['bentley_green'],
+    'Boss': COLOURS['leather_tan'],
+    'Peers': COLOURS['green_tint'],
+    'DRs': COLOURS['tan_tint'],
+    'Others': COLOURS['charcoal_grey'],
 }
 
 # ============================================

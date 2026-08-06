@@ -46,10 +46,10 @@ def _progress_summary_text(completed, total):
 
     outstanding = total - completed
     if outstanding == 0:
-        return "✅ All responses received."
+        return ":material/check_circle: All responses received."
     if total < ANONYMITY_THRESHOLD or outstanding == 1:
-        return "🔄 Responses are coming in."
-    return f"📊 {completed} of {total} responses received."
+        return ":material/autorenew: Responses are coming in."
+    return f":material/bar_chart: {completed} of {total} responses received."
 
 # Rater requirements
 # 'Others' is optional, but ALL OR NOTHING above the anonymity threshold:
@@ -83,7 +83,7 @@ def render_leader_portal(db, leader_info):
     # leader has already completed their self-assessment and had their first
     # coaching conversation. Nominating raters is the task in front of them now.
     st.markdown(f"""
-    <div style="background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 1.5rem;">
+    <div style="background: white; padding: 1.5rem; border-radius: 12px; border: 1px solid #E2E0D8; margin-bottom: 1.5rem;">
         <h3 style="margin: 0 0 0.5rem 0; color: #024731;">Welcome, {leader_name}</h3>
         <p style="color: #666; margin: 0 0 0.75rem 0;">{leader_info.get('dealership', '')} · {leader_info.get('cohort', '')}</p>
         <p style="color: #333; margin: 0; line-height: 1.6;">
@@ -107,7 +107,7 @@ def render_leader_portal(db, leader_info):
     st.markdown("---")
     
     # Tabs for different sections - Guidelines first so they read instructions
-    tab1, tab2, tab3 = st.tabs(["ℹ️ Guidelines", "📝 Nominate Raters", "📊 Response Progress"])
+    tab1, tab2, tab3 = st.tabs([":material/info: Guidelines", ":material/edit_note: Nominate Raters", ":material/bar_chart: Response Progress"])
     
     with tab1:
         render_guidelines_section()
@@ -126,7 +126,7 @@ def render_status_overview(self_rater, other_raters):
     
     with col1:
         if self_rater and self_rater.get('completed'):
-            st.success("✓ Self-Assessment Complete")
+            st.success("Self-Assessment Complete", icon=":material/check:")
         elif self_rater:
             st.warning("○ Self-Assessment Pending")
         else:
@@ -176,10 +176,14 @@ def render_nomination_section(db, leader_info, existing_raters):
             min_if_any = req.get('min_if_any')
 
             # Determine status
+            # NB: status_icon renders inside a raw HTML div below (unsafe_allow_html),
+            # which does not parse Streamlit's :material/...: shortcode syntax —
+            # that only works in markdown-rendered text. Keep these as plain
+            # characters, not shortcodes.
             if min_if_any and 0 < count < min_if_any:
                 # Optional group, but too thin to report anonymously. Warn rather
                 # than block, consistent with the soft-warning approach elsewhere.
-                status_icon = "⚠️"
+                status_icon = "⚠"
                 status_color = "#B8860B"
                 status_text = f"{count}/{min_if_any} needed"
                 thin_optional_groups.append((cat, count, min_if_any))
@@ -200,7 +204,7 @@ def render_nomination_section(db, leader_info, existing_raters):
                 if cat in ('Peers', 'DRs') and count == ANONYMITY_THRESHOLD:
                     at_risk_groups.append((cat, count))
             else:
-                status_icon = "⚠️"
+                status_icon = "⚠"
                 status_color = "#B8860B"
                 status_text = f"{count}/{req['min']} minimum"
                 if req.get('required_nomination', True):
@@ -215,12 +219,12 @@ def render_nomination_section(db, leader_info, existing_raters):
             """, unsafe_allow_html=True)
     
     if not all_requirements_met:
-        st.warning("⚠️ Please ensure you meet the minimum requirements for each category before the deadline.")
+        st.warning("Please ensure you meet the minimum requirements for each category before the deadline.", icon=":material/warning:")
 
     for cat, count, needed in thin_optional_groups:
         label = RELATIONSHIP_TYPES.get(cat, cat)
         st.warning(
-            f"⚠️ You've nominated {count} under **{label}**, which isn't enough to "
+            f"You've nominated {count} under **{label}**, which isn't enough to "
             f"report as its own group. Their responses won't be lost — with fewer "
             f"than {needed}, a thin {label} group gets folded into your Peers or "
             f"Direct Reports group instead, so nobody's individual view stands out. "
@@ -302,11 +306,11 @@ def render_nomination_section(db, leader_info, existing_raters):
                             db
                         )
                         if success:
-                            st.success(f"✓ Added {rater_name} and sent invitation email")
+                            st.success(f"Added {rater_name} and sent invitation email", icon=":material/check:")
                         else:
-                            st.warning(f"✓ Added {rater_name} but email failed: {msg}")
+                            st.warning(f"Added {rater_name} but email failed: {msg}", icon=":material/check:")
                     else:
-                        st.success(f"✓ Added {rater_name}")
+                        st.success(f"Added {rater_name}", icon=":material/check:")
                     
                     st.rerun()
     
@@ -323,7 +327,7 @@ def render_nomination_section(db, leader_info, existing_raters):
         })
 
         st.download_button(
-            "📄 Download Template",
+            "Download Template",
             template_df.to_csv(index=False),
             "rater_template.csv",
             "text/csv",
@@ -388,7 +392,7 @@ def render_nomination_section(db, leader_info, existing_raters):
 
                             imported += 1
 
-                        st.success(f"✓ Imported {imported} "
+                        st.success(f"Imported {imported} "
                                    f"{'person' if imported == 1 else 'people'}")
                         st.session_state['rater_csv_upload_count'] = \
                             st.session_state.get('rater_csv_upload_count', 0) + 1
@@ -509,7 +513,7 @@ def render_nominated_list(db, leader_info, base_url):
                 with col2:
                     st.caption(current_email or "No email address")
                 with col3:
-                    if st.button("✏️", key=f"edit_{idx}",
+                    if st.button("", icon=":material/edit:", key=f"edit_{idx}",
                                  help="Correct this person's email or relationship"):
                         st.session_state[editing_key] = True
                         st.rerun()
@@ -693,7 +697,7 @@ def render_progress_section(db, leader_info, raters):
     if incomplete_raters:
         st.markdown("---")
         if email_configured:
-            if st.button("🔔 Remind Everyone Still to Respond", use_container_width=True):
+            if st.button("Remind Everyone Still to Respond", icon=":material/notifications:", use_container_width=True):
                 for rater in incomplete_raters:
                     # Skip anyone with no address on file. Severed raters have a
                     # NULL email, but they are complete by definition and so
@@ -719,7 +723,7 @@ def render_guidelines_section():
     
     ---
     
-    **👔 Line Manager (Boss)** — *1-2 required*
+    :material/badge: **Line Manager (Boss)** — *1-2 required*
     
     Your direct line manager should always be included. If you also have a dotted-line, matrix, 
     or secondary reporting relationship, you may add them as well.
@@ -728,7 +732,7 @@ def render_guidelines_section():
     
     ---
     
-    **👥 Peers** — *Minimum 3, suggested 5*
+    :material/group: **Peers** — *Minimum 3, suggested 5*
     
     Colleagues at a similar level who work alongside you. They should have regular interaction 
     with you and be able to observe your leadership behaviours.
@@ -737,7 +741,7 @@ def render_guidelines_section():
     
     ---
     
-    **📋 Direct Reports** — *Minimum 3 if applicable, suggested 5*
+    :material/assignment: **Direct Reports** — *Minimum 3 if applicable, suggested 5*
     
     People who report directly to you. If you have fewer than 3 direct reports, include all of them 
     and make up the numbers with Peers or Others.
@@ -746,7 +750,7 @@ def render_guidelines_section():
     
     ---
     
-    **🔄 Others** — *Optional, but 3 or more if you use it at all*
+    :material/autorenew: **Others** — *Optional, but 3 or more if you use it at all*
 
     Additional stakeholders who can provide valuable perspective. This might include internal
     customers, matrix reports, key suppliers, or other regular contacts.

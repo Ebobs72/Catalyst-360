@@ -21,17 +21,51 @@ from framework import (
 
 TOTAL_ITEMS = 45
 
+# Rating scale as a single row of 6 labelled buttons (st.segmented_control),
+# not a dropdown. "No opportunity to observe" is functionally a different kind
+# of answer to the 5 frequency options — not a 6th point on the scale — and is
+# set apart visually via CSS (see the stSegmentedControl rules in app.py), but
+# it stays one widget with the other five rather than a second, separately-
+# coordinated control: widgets inside st.form don't fire on_change, so there is
+# no way to keep two separate controls mutually exclusive live as the rater
+# clicks. Selected/unselected colouring comes from .streamlit/config.toml's
+# theme, not custom CSS here.
+SCALE_OPTIONS = [SCALE_FREQUENCY[i] for i in (1, 2, 3, 4, 5, 0)]
+SCALE_LABEL_TO_VALUE = {v: str(k) for k, v in SCALE_FREQUENCY.items()}
+
+
+def _count_answered_ratings(draft_ratings=None):
+    """How many of the 45 items have a rating selected right now.
+
+    A widget instantiated with only `default=` (never yet clicked by the
+    rater in this browser session) doesn't reliably show up in
+    st.session_state on the same run it's restored from a draft, so items
+    already present in draft_ratings are counted even when the widget's own
+    session_state entry is still empty.
+    """
+    count = 0
+    for item_num in range(1, TOTAL_ITEMS + 1):
+        val = st.session_state.get(f"rating_{item_num}")
+        if not val and draft_ratings and item_num in draft_ratings:
+            val = draft_ratings[item_num]
+        if val:
+            count += 1
+    return count
+
 
 def _collect_current_answers():
     """Gather all current ratings and comments from session state."""
     ratings = {}
     comments = {}
 
-    # Ratings (Q1-Q45)
+    # Ratings (Q1-Q45). The widget's own session state holds the scale label
+    # text (e.g. "Often"), converted back here to the stored code ("0"-"5")
+    # so the draft/submission format is exactly what it was under the old
+    # selectbox — only the widget changed, not what gets saved.
     for item_num in range(1, TOTAL_ITEMS + 1):
-        val = st.session_state.get(f"rating_{item_num}", "")
-        if val and val != "":
-            ratings[item_num] = val
+        label = st.session_state.get(f"rating_{item_num}")
+        if label:
+            ratings[item_num] = SCALE_LABEL_TO_VALUE.get(label, "")
 
     # Dimension comments
     for dim_name in DIMENSIONS.keys():
@@ -141,9 +175,9 @@ def render_feedback_form(db, rater_info):
     # Resume banner
     if has_draft and draft_saved_at:
         st.info(
-            f"📋 **Welcome back!** Your previous answers have been restored. "
+            f"**Welcome back!** Your previous answers have been restored. "
             f"You can continue from where you left off.",
-            icon="📋"
+            icon=":material/history:"
         )
     
     # Instructions
@@ -184,19 +218,12 @@ def render_feedback_form(db, rater_info):
                 rather than guessing.
             </p>
             <p style="margin: 1rem 0 0 0; color: #024731; line-height: 1.6;">
-                <strong>💾 Your progress is saved automatically.</strong> You can close this window at any time 
+                <strong>Your progress is saved automatically.</strong> You can close this window at any time
                 and return to this link to continue where you left off.
             </p>
         </div>
         """, unsafe_allow_html=True)
-    
-    # Rating options — frequency scale (1-5) plus "no opportunity to observe" (0)
-    rating_options = [""] + [str(i) for i in range(1, 6)] + ["0"]
-    rating_labels = {"": "Select..."}
-    for i in range(1, 6):
-        rating_labels[str(i)] = f"{i} - {SCALE_FREQUENCY[i]}"
-    rating_labels["0"] = SCALE_FREQUENCY[0]
-    
+
     # --- FORM (using st.form for clean submission, with draft pre-population) ---
     # Note: We use st.form for the actual widgets, but auto-save happens via
     # a separate mechanism outside the form since on_change doesn't fire inside forms.
@@ -215,32 +242,42 @@ def render_feedback_form(db, rater_info):
             for item_num in range(start_item, end_item + 1):
                 item_text = get_item_text(item_num, relationship)
 
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
-                    st.markdown(f"""
-                    <div class="item-container">
-                        <span style="color: #999; font-size: 0.85rem;">Q{item_num}.</span>
-                        <span class="item-text">{item_text}</span>
+                st.markdown(f"""
+                <div class="item-container">
+                    <span style="color: #999; font-size: 0.85rem;">Q{item_num}.</span>
+                    <span class="item-text">{item_text}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Pre-populate from draft if available. draft_ratings holds the
+                # stored code ("0"-"5"); the widget itself works in label text,
+                # so look up the matching label to preselect.
+                default_label = None
+                if has_draft and draft_ratings and item_num in draft_ratings:
+                    try:
+                        default_label = SCALE_FREQUENCY.get(int(draft_ratings[item_num]))
+                    except (TypeError, ValueError):
+                        default_label = None
+
+                st.segmented_control(
+                    f"Rating for Q{item_num}",
+                    options=SCALE_OPTIONS,
+                    default=default_label,
+                    key=f"rating_{item_num}",
+                    label_visibility="collapsed"
+                )
+
+                # Slim inline progress readout, replacing the old sidebar panel
+                answered = _count_answered_ratings(draft_ratings)
+                pct = answered / TOTAL_ITEMS * 100
+                st.markdown(f"""
+                <div class="item-progress">
+                    <div class="item-progress-track">
+                        <div class="item-progress-fill" style="width: {pct:.1f}%;"></div>
                     </div>
-                    """, unsafe_allow_html=True)
-                
-                with col2:
-                    # Pre-populate from draft if available
-                    default_idx = 0
-                    if has_draft and draft_ratings and item_num in draft_ratings:
-                        draft_val = str(draft_ratings[item_num])
-                        if draft_val in rating_options:
-                            default_idx = rating_options.index(draft_val)
-                    
-                    st.selectbox(
-                        f"Rating for Q{item_num}",
-                        options=rating_options,
-                        index=default_idx,
-                        format_func=lambda x: rating_labels.get(x, x),
-                        key=f"rating_{item_num}",
-                        label_visibility="collapsed"
-                    )
+                    <span class="item-progress-text">{answered} of {TOTAL_ITEMS}</span>
+                </div>
+                """, unsafe_allow_html=True)
             
             # Comment for this dimension
             st.markdown(f"""
@@ -369,13 +406,15 @@ def render_feedback_form(db, rater_info):
         
         with col_save:
             save_clicked = st.form_submit_button(
-                "💾 Save & Continue Later",
+                "Save & Continue Later",
+                icon=":material/save:",
                 use_container_width=True
             )
-        
+
         with col_submit:
             submit_clicked = st.form_submit_button(
-                "✅ Submit Feedback",
+                "Submit Feedback",
+                icon=":material/check_circle:",
                 use_container_width=True,
                 type="primary"
             )
@@ -394,9 +433,10 @@ def render_feedback_form(db, rater_info):
                 answered = len(ratings)
                 total = TOTAL_ITEMS
                 st.success(
-                    f"✅ **Progress saved!** ({answered} of {total} items answered)\n\n"
+                    f"**Progress saved!** ({answered} of {total} items answered)\n\n"
                     f"You can safely close this window. When you're ready to continue, "
-                    f"just use the same link — your answers will be waiting for you."
+                    f"just use the same link — your answers will be waiting for you.",
+                    icon=":material/check_circle:"
                 )
             except Exception as e:
                 st.error(f"Could not save progress: {str(e)}")
@@ -531,20 +571,11 @@ def render_feedback_form(db, rater_info):
     </script>
     """, unsafe_allow_html=True)
     
-    # --- Progress indicator in sidebar ---
+    # --- Save-time indicator in sidebar ---
+    # The running "X of 45" count now lives inline under each item (see the
+    # form loop above), replacing the big progress panel that used to be here.
+    # This keeps just the save/draft timestamp, which the inline bar doesn't show.
     with st.sidebar:
-        st.markdown("### 📊 Your Progress")
-        
-        answered = 0
-        for item_num in range(1, TOTAL_ITEMS + 1):
-            val = st.session_state.get(f"rating_{item_num}", "")
-            if val and val != "":
-                answered += 1
-
-        progress = answered / TOTAL_ITEMS
-        st.progress(progress)
-        st.markdown(f"**{answered}** of **{TOTAL_ITEMS}** items answered ({int(progress * 100)}%)")
-        
         if st.session_state.get('last_saved'):
             st.markdown(f"<p style='color: #999; font-size: 0.8rem;'>Last saved: {st.session_state.last_saved}</p>", 
                        unsafe_allow_html=True)
@@ -556,8 +587,8 @@ def render_feedback_form(db, rater_info):
 def render_thank_you():
     """Render thank you page after submission."""
     st.markdown("""
-    <div style="text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px; 
-                box-shadow: 0 4px 20px rgba(0,0,0,0.1); max-width: 600px; margin: 2rem auto;">
+    <div style="text-align: center; padding: 4rem 2rem; background: white; border-radius: 12px;
+                border: 1px solid #E2E0D8; max-width: 600px; margin: 2rem auto;">
         <div style="font-size: 4rem; margin-bottom: 1rem;">✓</div>
         <h2 style="color: #024731; margin-bottom: 1rem;">Thank You</h2>
         <p style="color: #666; font-size: 1.1rem; line-height: 1.8;">

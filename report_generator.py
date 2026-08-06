@@ -37,6 +37,36 @@ from framework import (
 REPORTS_DIR = Path("reports")
 REPORTS_DIR.mkdir(exist_ok=True)
 
+# Bentley wings logo, dark green on transparent. Report pages stay white, so
+# only the dark variant is used. Not yet committed to the repo as of the 2026-08
+# report visual refresh — save the provided PNG here under this exact name to
+# have it picked up; report generation degrades gracefully (skips the picture,
+# prints a one-line stderr warning) if it's missing, rather than crashing.
+LOGO_PATH = Path("assets/bentley-wings-green.png")
+_logo_missing_warned = False
+
+
+def _add_logo_if_present(paragraph, width_in):
+    """Add the Bentley wings logo to a paragraph at width_in inches.
+
+    Caller sets the paragraph's alignment beforehand. Returns True if the
+    picture was added. Missing-asset case is reported once per process to
+    stderr rather than silently leaving a gap in every report.
+    """
+    global _logo_missing_warned
+    if not LOGO_PATH.exists():
+        if not _logo_missing_warned:
+            print(
+                f"WARNING: logo asset not found at {LOGO_PATH} - reports will "
+                f"generate without it until the file is added.",
+                file=sys.stderr,
+            )
+            _logo_missing_warned = True
+        return False
+    run = paragraph.add_run()
+    run.add_picture(str(LOGO_PATH), width=Inches(width_in))
+    return True
+
 # ============================================
 # PAGE GEOMETRY
 # ============================================
@@ -146,6 +176,12 @@ def apply_document_font(doc, font_name=REPORT_FONT):
         'Heading 1', 'Heading 2', 'Heading 3',
         'List Bullet', 'List Number',
     ]
+    # Heading 1-3 inherit Word's default template colour (a theme blue) unless
+    # given an explicit override — setting the font name/size above doesn't
+    # touch colour. Every section heading in this module goes through
+    # doc.add_heading at level 1 or 2, so both need it; level 3 and Title
+    # aren't currently used but are included for consistency.
+    heading_styles = {'Title', 'Heading 1', 'Heading 2', 'Heading 3'}
 
     for style_name in style_names:
         try:
@@ -154,6 +190,8 @@ def apply_document_font(doc, font_name=REPORT_FONT):
             continue
 
         style.font.name = font_name
+        if style_name in heading_styles:
+            style.font.color.rgb = RGBColor(0x02, 0x47, 0x31)
         rpr = style.element.get_or_add_rPr()
         rfonts = rpr.find(qn('w:rFonts'))
         if rfonts is None:
@@ -162,13 +200,14 @@ def apply_document_font(doc, font_name=REPORT_FONT):
         for attr in ('w:ascii', 'w:hAnsi', 'w:cs', 'w:eastAsia'):
             rfonts.set(qn(attr), font_name)
 
-# Colour map for comment source labels (RGB tuples for python-docx)
+# Colour map for comment source labels (RGB tuples for python-docx), matching
+# the fixed report palette in framework.COLOURS.
 COMMENT_SOURCE_COLOURS = {
-    'Line Manager': RGBColor(0x72, 0x2F, 0x37),   # Burgundy
-    'Peers':        RGBColor(0x0A, 0x5E, 0x55),   # Deep Teal
-    'Direct Reports': RGBColor(0xB8, 0x86, 0x0B),  # Bentley Gold
-    'Others':       RGBColor(0x4A, 0x55, 0x68),    # Slate Grey
-    'Self':         RGBColor(0x02, 0x47, 0x31),    # Bentley Green
+    'Line Manager':   RGBColor(0x9C, 0x61, 0x48),   # Leather tan
+    'Peers':          RGBColor(0x6b, 0x9c, 0x87),   # Green tint
+    'Direct Reports': RGBColor(0xc9, 0xa6, 0x92),   # Tan tint
+    'Others':         RGBColor(0x5F, 0x5E, 0x5A),   # Charcoal grey
+    'Self':           RGBColor(0x02, 0x47, 0x31),   # Bentley green
 }
 
 
@@ -312,7 +351,7 @@ def _add_comment_block(doc, group_name, comment_text):
     run.bold = True
     run.font.size = Pt(9)
     run.font.color.rgb = COMMENT_SOURCE_COLOURS.get(
-        display_name, RGBColor(0x4A, 0x55, 0x68)
+        display_name, RGBColor(0x5F, 0x5E, 0x5A)
     )
 
     # Comment text
@@ -442,9 +481,9 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
-        ax.plot(angles, combined_values, 'o-', linewidth=3, label='Combined Others', 
-                color=COLOURS['bentley_gold'], markersize=10)
-        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['bentley_gold'])
+        ax.plot(angles, combined_values, 'o-', linewidth=3, label='All Raters',
+                color=COLOURS['mid_grey'], markersize=10)
+        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['mid_grey'])
     
     # Configure the chart
     ax.set_ylim(0, 5)
@@ -504,9 +543,9 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
     
     # Add combined bar if requested and available
     if include_combined and scores.get('Combined') is not None:
-        groups.append('Combined Others')
+        groups.append(GROUP_DISPLAY['Combined'])
         values.append(scores['Combined'])
-        colors.append('#333333')  # Black for combined
+        colors.append(COLOURS['mid_grey'])
     
     if not values:
         return False
@@ -515,10 +554,13 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
     values = values[::-1]
     colors = colors[::-1]
     
-    fig, ax = plt.subplots(figsize=(4.5, max(0.8, len(groups) * 0.5)))
-    
+    # Per-group vertical allocation tightened from 0.5in to 0.4in (and the
+    # floor from 0.8in to 0.65in) so more items fit on a page - aiming for
+    # about four per page in the dimension sections rather than three.
+    fig, ax = plt.subplots(figsize=(4.5, max(0.65, len(groups) * 0.4)))
+
     y_pos = np.arange(len(groups))
-    bars = ax.barh(y_pos, values, color=colors, height=0.5)
+    bars = ax.barh(y_pos, values, color=colors, height=0.4)
     
     ax.set_yticks(y_pos)
     ax.set_yticklabels(groups, fontsize=10, fontweight='bold')
@@ -538,17 +580,17 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
     ax.spines['right'].set_visible(False)
     
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', pad_inches=0.05, facecolor='white')
     plt.close()
     return True
 
 
 def create_self_only_bar(score, output_path):
     """Create horizontal bar chart for self-assessment only."""
-    fig, ax = plt.subplots(figsize=(4.5, 0.8))
-    
+    fig, ax = plt.subplots(figsize=(4.5, 0.65))
+
     if score is not None:
-        ax.barh([0], [score], color=COLOURS['bentley_green'], height=0.5)
+        ax.barh([0], [score], color=COLOURS['bentley_green'], height=0.4)
         # Place score at fixed right-aligned position
         ax.text(5.7, 0, f'{score:.1f}', va='center', ha='right', fontsize=12, fontweight='bold')
     
@@ -565,7 +607,7 @@ def create_self_only_bar(score, output_path):
     ax.spines['right'].set_visible(False)
     
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', pad_inches=0.05, facecolor='white')
     plt.close()
 
 
@@ -645,9 +687,14 @@ def _add_page_number_footer(section):
 
 def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=None):
     """Create the cover page."""
-    for _ in range(6):
+    for _ in range(2):
         doc.add_paragraph()
-    
+
+    logo_para = doc.add_paragraph()
+    logo_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if _add_logo_if_present(logo_para, width_in=1.8):
+        doc.add_paragraph()
+
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = title.add_run("BENTLEY COMPASS 360")
@@ -691,9 +738,9 @@ def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=Non
     run.font.size = Pt(12)
     run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
     
-    for _ in range(4):
+    for _ in range(2):
         doc.add_paragraph()
-    
+
     prog = doc.add_paragraph()
     prog.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = prog.add_run("Bentley Compass Leadership Programme")
@@ -724,6 +771,16 @@ def create_cover_page(doc, leader_name, report_type, dealership=None, cohort=Non
     
     # Add "Page X of Y" footer to the new section
     _add_page_number_footer(new_section)
+    _add_header_logo(new_section)
+
+
+def _add_header_logo(section):
+    """Add a small logo to the top-right of every page in this section."""
+    header = section.header
+    header.is_linked_to_previous = False
+    para = header.paragraphs[0]
+    para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _add_logo_if_present(para, width_in=0.7)
 
 
 def add_table_of_contents(doc):
@@ -857,9 +914,9 @@ def add_executive_summary(doc, data):
     hdr = table.rows[0].cells
     hdr[0].text = "Dimension"
     hdr[1].text = "Self"
-    hdr[2].text = "Combined"
+    hdr[2].text = GROUP_DISPLAY['Combined']
     hdr[3].text = "Gap"
-    
+
     for cell in hdr:
         set_cell_shading(cell, '024731')
         cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
@@ -891,7 +948,19 @@ def add_executive_summary(doc, data):
                 set_cell_shading(row[3], 'C6EFCE')  # Green for under-rating
         else:
             row[3].text = "-"
-    
+
+    # First occurrence of "All Raters" in the report (the same header appears
+    # again in the radar legend just below, then throughout the Strengths &
+    # Development tables and every item bar chart) - explain the composition
+    # here once, rather than repeating it at every later occurrence.
+    caption = doc.add_paragraph()
+    run = caption.add_run(
+        "All raters combined: line manager, peers, direct reports, and others."
+    )
+    run.font.size = Pt(8)
+    run.font.italic = True
+    run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
         self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
         combined_scores = {dim: data['by_dimension'].get(dim, {}).get('Combined') for dim in DIMENSIONS}
@@ -946,14 +1015,14 @@ def add_papu_nanu_section(doc, data):
         table.style = 'Table Grid'
         table.autofit = False
         
-        # Column widths: # | Behaviour | Self | Others | Gap
+        # Column widths: # | Behaviour | Self | All Raters | Gap
         widths = content_columns(0.4, 3.8, 0.6, 0.6, 0.6)
-        
+
         hdr = table.rows[0].cells
         hdr[0].text = "#"
         hdr[1].text = "Behaviour"
         hdr[2].text = "Self"
-        hdr[3].text = "Others"
+        hdr[3].text = GROUP_DISPLAY['Combined']
         hdr[4].text = "Gap"
         
         for i, cell in enumerate(hdr):
@@ -996,50 +1065,106 @@ def add_papu_nanu_section(doc, data):
         keep_table_together(table)
         return table
     
-    # Agreed Strengths (green header)
+    # Agreed Strengths (Bentley green header)
     if categories['agreed_strengths']:
         heading = doc.add_heading("Agreed Strengths", level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph("You and others agree these are strengths - keep doing these.")
         desc.paragraph_format.keep_with_next = True
-        create_papu_table(doc, categories['agreed_strengths'][:8], '375623')
+        create_papu_table(doc, categories['agreed_strengths'][:8], '024731')
         doc.add_paragraph()
-    
-    # Good News (blue header)
+
+    # Good News (green tint header)
     if categories['good_news']:
         heading = doc.add_heading("Good News", level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph("Others rate you higher than you rate yourself - you may be underselling yourself.")
         desc.paragraph_format.keep_with_next = True
-        create_papu_table(doc, categories['good_news'], '2F5496')
+        create_papu_table(doc, categories['good_news'], '6b9c87')
         doc.add_paragraph()
-    
-    # Development Areas (orange header)
+
+    # Development Areas (charcoal grey header)
     if categories['development_areas']:
         heading = doc.add_heading("Development Areas", level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph("Both you and others see room for growth - priority focus for development.")
         desc.paragraph_format.keep_with_next = True
-        create_papu_table(doc, categories['development_areas'][:8], 'C65911')
+        create_papu_table(doc, categories['development_areas'][:8], '5F5E5A')
         doc.add_paragraph()
-    
-    # Potential Blind Spots / Hidden Talents (purple header)
+
+    # Potential Blind Spots / Hidden Talents (leather tan header)
     if categories['hidden_talents']:
         heading = doc.add_heading("Potential Blind Spots", level=2)
         heading.paragraph_format.keep_with_next = True
-        desc = doc.add_paragraph("You rate yourself higher than others do - worth exploring with your coach.")
+        desc = doc.add_paragraph(
+            "You rate yourself higher than others do here. This might mean the strength "
+            "isn't landing as clearly as you think, or that it's an area worth a closer look."
+        )
         desc.paragraph_format.keep_with_next = True
-        create_papu_table(doc, categories['hidden_talents'], '7030A0')
+        create_papu_table(doc, categories['hidden_talents'], '9C6148')
         doc.add_paragraph()
     
     # No explicit page break — next section uses page_break_before
 
 
-def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_first_dimension=False):
+# ============================================
+# DIMENSION SECTION PAGINATION ESTIMATE
+# ============================================
+#
+# python-docx has no layout engine - it emits OOXML, and actual pagination only
+# happens when Word (or LibreOffice, for the PDF preview) renders it. There is
+# no way to ask "how much space is left on the current page" directly. These
+# estimates are calibrated against real measurements of the tightened item bar
+# chart (see create_item_bar_chart): a rendered chart is
+# ITEM_CHART_WIDTH_IN * (fig_height / fig_width) tall once cropped by
+# bbox_inches='tight', which empirically comes out to about 0.27in per bar
+# (measured 2026-08-06: 2 bars -> 0.42in, 6 bars -> 1.50in, near-linear).
+# Good enough to decide "force a break or let it flow", not exact to the inch.
+_MEASURED_IN_PER_BAR = 0.27
+_ITEM_TEXT_ROW_OVERHEAD_IN = 0.35   # item text/coverage line + spacing after
+_DIMENSION_HEADING_OVERHEAD_IN = 0.9  # heading + description + spacing
+_COMMENT_BLOCK_HEIGHT_IN = 0.55       # source label + text + rule, per comment
+_COMMENT_HEADING_HEIGHT_IN = 0.3      # "Comments on <dimension>" line
+
+
+def _estimate_item_height_in(item_scores, is_self_only):
+    """Estimate one item's rendered row height (chart or text, whichever taller)."""
+    if is_self_only:
+        return 0.65 + _ITEM_TEXT_ROW_OVERHEAD_IN
+    n_bars = sum(
+        1 for g in ['Self', 'Boss', 'Peers', 'DRs', 'Others']
+        if item_scores.get(g) is not None
+    )
+    if item_scores.get('Combined') is not None:
+        n_bars += 1
+    chart_h = max(0.65, n_bars * _MEASURED_IN_PER_BAR)
+    return chart_h + _ITEM_TEXT_ROW_OVERHEAD_IN
+
+
+def _estimate_dimension_height_in(dim_name, data, comments, is_self_only):
+    """Estimate a whole dimension section's rendered height, items plus comments."""
+    start, end = DIMENSIONS[dim_name]
+    items_total = sum(
+        _estimate_item_height_in(data['by_item'].get(item_num, {}), is_self_only)
+        for item_num in range(start, end + 1)
+    )
+    section_comments = comments.get('by_section', {}).get(dim_name, [])
+    comments_total = 0.0
+    if section_comments:
+        comments_total = _COMMENT_HEADING_HEIGHT_IN + len(section_comments) * _COMMENT_BLOCK_HEIGHT_IN
+    return _DIMENSION_HEADING_OVERHEAD_IN + items_total + comments_total
+
+
+def add_dimension_section(doc, dim_name, data, comments, is_self_only=False,
+                          is_first_dimension=False, force_page_break=True):
     """Add a dimension section with items displayed side-by-side with bar charts."""
     heading = doc.add_heading(dim_name, level=2)
-    # First dimension flows after the "Detailed Feedback" heading; others start on new page
-    if not is_first_dimension:
+    # First dimension flows after the "Detailed Feedback" heading; later ones
+    # only force a break when there isn't much room left on the current page
+    # (see _estimate_dimension_height_in and its caller in generate_report) -
+    # otherwise they flow into whatever space remains, rather than always
+    # jumping to a fresh page regardless of how little of the last one was used.
+    if not is_first_dimension and force_page_break:
         heading.paragraph_format.page_break_before = True
     
     # Dimension description
@@ -1604,7 +1729,7 @@ def add_next_steps(doc):
         "Review your Agreed Strengths - how can you leverage these more deliberately?",
         "Consider the Good News items - are you being too hard on yourself in these areas?",
         "Focus on 2-3 Development Areas - what specific actions could you take?",
-        "Explore any Hidden Talents - is this a visibility issue or a genuine gap?",
+        "Explore any Potential Blind Spots - is this a visibility issue or a genuine gap?",
         "Discuss your results with your coach to create a focused development plan.",
     ]
     
@@ -1653,9 +1778,14 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
 
     if report_type == 'Self-Assessment':
         create_cover_page(doc, leader_name, "Self-Assessment Report", dealership, cohort)
-        
-        # About This Report — styled heading, its own page
+
+        # Contents page leads, with real page numbers once updated in Word —
+        # About This Report follows and no longer needs to repeat the section
+        # list, since Contents already covers that.
+        add_table_of_contents(doc)
+
         about_heading = add_section_heading(doc, "About This Report", font_size=16)
+        about_heading.paragraph_format.page_break_before = True
         doc.add_paragraph(
             "This report captures your own view of your leadership effectiveness across the nine "
             "dimensions of the Compass framework. It is the first of two stages: this "
@@ -1667,23 +1797,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             "Write on this document. There is space throughout to capture what comes out of your "
             "coaching conversation, and it is yours to keep working on."
         )
-        doc.add_paragraph()
-        doc.add_paragraph(
-            "The report is structured as follows:"
-        )
-        sections_list = [
-            "Your Self-Assessment Overview — your dimension scores at a glance with a radar chart",
-            "Detailed Self-Assessment by Dimension — item-level scores with bar charts for each of the nine dimensions",
-            "Your Development Priorities — the areas you named, and space to add more with your coach",
-            "Reflection Questions — prompts to prepare for your coaching conversation, with space to answer them",
-            "What Happens Next — the two stages of the process and where you are in it",
-        ]
-        for item in sections_list:
-            para = doc.add_paragraph(item, style='List Bullet')
-        
-        # Contents page
-        add_table_of_contents(doc)
-        
+
         # Overview — dimension table + radar on one page
         heading = add_section_heading(doc, "Your Self-Assessment Overview", font_size=16)
         heading.paragraph_format.page_break_before = True
@@ -1740,9 +1854,19 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         detail_heading.paragraph_format.page_break_before = True
         detail_heading.paragraph_format.keep_with_next = True
         
+        # Track estimated position on the current page (see
+        # _estimate_dimension_height_in) so later dimensions only force a page
+        # break when little room is actually left, rather than always.
+        page_position_in = 0.5  # the "Detailed..." heading above
         for i, dim_name in enumerate(DIMENSIONS.keys()):
+            estimated_height = _estimate_dimension_height_in(dim_name, data, comments, is_self_only=True)
+            force_break = (i > 0) and (CONTENT_HEIGHT_IN - page_position_in) < (CONTENT_HEIGHT_IN / 2)
             add_dimension_section(doc, dim_name, data, comments, is_self_only=True,
-                                  is_first_dimension=(i == 0))
+                                  is_first_dimension=(i == 0), force_page_break=force_break)
+            start_position = 0.0 if (force_break or i == 0) else page_position_in
+            page_position_in = start_position + estimated_height
+            if page_position_in > CONTENT_HEIGHT_IN:
+                page_position_in %= CONTENT_HEIGHT_IN
 
         # Self-identified development priorities
         add_development_priorities(
@@ -1757,33 +1881,20 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         
     elif report_type == 'Full 360':
         create_cover_page(doc, leader_name, "Feedback Report", dealership, cohort)
-        
-        # About This Report — its own page (cover page already has a page break)
+
+        # Contents page leads, with real page numbers once updated in Word —
+        # About This Report follows and no longer needs to repeat the section
+        # list, since Contents already covers that.
+        add_table_of_contents(doc)
+
         about_heading = add_section_heading(doc, "About This Report", font_size=16)
+        about_heading.paragraph_format.page_break_before = True
         doc.add_paragraph(
             "This 360-degree feedback report brings together perspectives from your line manager, "
             "peers, direct reports, and others, alongside your self-assessment. The comparison "
             "helps identify areas of alignment and potential blind spots."
         )
-        doc.add_paragraph()
-        doc.add_paragraph(
-            "The report is structured as follows:"
-        )
-        sections_list = [
-            "Response Summary & Executive Summary — who responded and your dimension scores at a glance",
-            "Strengths & Development Analysis — where you and others agree, and where perceptions differ",
-            "Detailed Feedback by Dimension — item-level scores with bar charts for each of the nine dimensions",
-            "Overall Qualitative Feedback — what to keep doing, and the one change that would make the biggest difference",
-            "Key Themes in Your Feedback — patterns and consistent messages identified across all your feedback",
-            "Your Development Priorities — the areas you named at self-assessment, how they were actually rated, and space to add more",
-            "Next Steps — guidance for making the most of your feedback",
-        ]
-        for item in sections_list:
-            para = doc.add_paragraph(item, style='List Bullet')
-        
-        # Contents page
-        add_table_of_contents(doc)
-        
+
         # Response Summary + Executive Summary + Radar — all on one page
         add_response_summary(doc, data)
         add_executive_summary(doc, data)
@@ -1797,9 +1908,16 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         # keep_with_next ensures heading stays with first dimension
         detail_heading.paragraph_format.keep_with_next = True
         
+        page_position_in = 0.5  # the "Detailed Feedback by Dimension" heading above
         for i, dim_name in enumerate(DIMENSIONS.keys()):
+            estimated_height = _estimate_dimension_height_in(dim_name, data, comments, is_self_only=False)
+            force_break = (i > 0) and (CONTENT_HEIGHT_IN - page_position_in) < (CONTENT_HEIGHT_IN / 2)
             add_dimension_section(doc, dim_name, data, comments, is_self_only=False,
-                                  is_first_dimension=(i == 0))
+                                  is_first_dimension=(i == 0), force_page_break=force_break)
+            start_position = 0.0 if (force_break or i == 0) else page_position_in
+            page_position_in = start_position + estimated_height
+            if page_position_in > CONTENT_HEIGHT_IN:
+                page_position_in %= CONTENT_HEIGHT_IN
 
         add_overall_comments(doc, comments)
         theme_warning = add_theme_synthesis(doc, leader_name, comments, data)

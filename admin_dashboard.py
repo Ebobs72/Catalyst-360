@@ -44,12 +44,12 @@ def render_admin_dashboard(db):
     
     # Navigation tabs
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Overview", 
-        "👥 Leaders", 
-        "🚀 Leader Portals",
-        "📧 Links & Tracking", 
-        "📄 Reports", 
-        "⚙️ Settings"
+        ":material/bar_chart: Overview",
+        ":material/group: Leaders",
+        ":material/rocket_launch: Leader Portals",
+        ":material/mail: Links & Tracking",
+        ":material/description: Reports",
+        ":material/settings: Settings"
     ])
     
     with tab1:
@@ -75,7 +75,7 @@ def render_settings_tab(db):
     """Render the settings/admin tab."""
     
     settings_subtab1, settings_subtab2, settings_subtab3, settings_subtab4 = st.tabs(
-        ["📁 Cohorts", "📧 Email", "🗄️ Database", "ℹ️ App Info"]
+        [":material/folder: Cohorts", ":material/mail: Email", ":material/database: Database", ":material/info: App Info"]
     )
     
     with settings_subtab1:
@@ -97,11 +97,11 @@ def render_email_settings(db):
     st.subheader("Email Configuration")
     
     if not EMAIL_AVAILABLE:
-        st.error("❌ Email module not available. Check that email_sender.py exists.")
+        st.error("Email module not available. Check that email_sender.py exists.", icon=":material/error:")
         return
     
     if is_email_configured():
-        st.success("✅ Email is configured and ready to send")
+        st.success("Email is configured and ready to send", icon=":material/check_circle:")
         
         st.markdown("""
         **Email features available:**
@@ -128,12 +128,12 @@ def render_email_settings(db):
             )
             
             if success:
-                st.success(f"✅ Test email sent to {test_email}")
+                st.success(f"Test email sent to {test_email}", icon=":material/check_circle:")
             else:
-                st.error(f"❌ Failed: {message}")
+                st.error(f"Failed: {message}", icon=":material/error:")
     
     else:
-        st.warning("⚠️ Email is not configured")
+        st.warning("Email is not configured", icon=":material/warning:")
         
         st.markdown("""
         To enable email sending, add the following to your Streamlit secrets 
@@ -177,7 +177,7 @@ def render_cohort_management(db):
     with col1:
         st.markdown("**Add New Cohort**")
         new_cohort = st.text_input("Cohort Name", placeholder="e.g., April 2026")
-        if st.button("➕ Add Cohort", disabled=not new_cohort):
+        if st.button("Add Cohort", icon=":material/add:", disabled=not new_cohort):
             if new_cohort not in existing_cohorts:
                 # Store cohort in a cohorts table
                 db.add_cohort(new_cohort)
@@ -200,7 +200,7 @@ def render_cohort_management(db):
                 with col_stats:
                     st.caption(f"{len(cohort_leaders)} leaders, {completed} ready")
                 with col_del:
-                    if st.button("🗑️", key=f"del_cohort_{cohort['id']}", help="Delete cohort"):
+                    if st.button("", icon=":material/delete:", key=f"del_cohort_{cohort['id']}", help="Delete cohort"):
                         db.delete_cohort(cohort['id'])
                         st.rerun()
         else:
@@ -242,7 +242,7 @@ def render_database_management(db):
     
     st.subheader("Database Management")
     
-    st.warning("⚠️ These actions cannot be undone. Use with caution.")
+    st.warning("These actions cannot be undone. Use with caution.", icon=":material/warning:")
     
     col1, col2 = st.columns(2)
     
@@ -250,7 +250,7 @@ def render_database_management(db):
         st.markdown("**Clear All Data**")
         st.write("Delete all leaders, raters, and feedback. Reloads demo data on next refresh.")
         
-        if st.button("🗑️ Clear Database", type="secondary"):
+        if st.button("Clear Database", icon=":material/delete:", type="secondary"):
             st.session_state['confirm_clear'] = True
         
         if st.session_state.get('confirm_clear'):
@@ -274,7 +274,7 @@ def render_database_management(db):
         st.markdown("**Export Data**")
         st.write("Download all feedback data as CSV for backup.")
         
-        if st.button("📥 Export All Data"):
+        if st.button("Export All Data", icon=":material/download:"):
             # Get all leaders and their data
             leaders = db.get_all_leaders()
             if leaders:
@@ -336,9 +336,9 @@ def render_app_info(db):
         
         # Email status
         if EMAIL_AVAILABLE and is_email_configured():
-            st.write("**Email:** ✅ Configured")
+            st.write("**Email:** :material/check_circle: Configured")
         else:
-            st.write("**Email:** ❌ Not configured")
+            st.write("**Email:** :material/cancel: Not configured")
 
 
 def render_overview_tab(db):
@@ -385,7 +385,7 @@ def render_overview_tab(db):
                 """)
             
             with col2:
-                if st.button("View →", key=f"view_cohort_{cohort_name}"):
+                if st.button("View", icon=":material/arrow_forward:", key=f"view_cohort_{cohort_name}"):
                     st.session_state['active_cohort_filter'] = cohort_name
                     st.rerun()
             
@@ -418,11 +418,11 @@ def render_overview_tab(db):
         # Back button and cohort header
         col1, col2 = st.columns([1, 4])
         with col1:
-            if st.button("← All Cohorts"):
+            if st.button("All Cohorts", icon=":material/arrow_back:"):
                 st.session_state['active_cohort_filter'] = None
                 st.rerun()
         with col2:
-            st.subheader(f"📁 {cohort_filter}")
+            st.subheader(f":material/folder: {cohort_filter}")
         
         # Stats for this cohort
         total_leaders = len(leaders)
@@ -454,10 +454,10 @@ def render_overview_tab(db):
                 status_text = "No raters assigned"
                 status_type = "info"
             elif completed >= MIN_RESPONSES_FOR_REPORT:
-                status_text = f"✓ Ready for Full 360 ({completed}/{total})"
+                status_text = f":material/check: Ready for Full 360 ({completed}/{total})"
                 status_type = "success"
             elif self_done and completed < MIN_RESPONSES_FOR_REPORT:
-                status_text = f"✓ Self done, awaiting others ({completed}/{total})"
+                status_text = f":material/check: Self done, awaiting others ({completed}/{total})"
                 status_type = "success"
             elif completed > 0:
                 status_text = f"In progress ({completed}/{total})"
@@ -472,7 +472,7 @@ def render_overview_tab(db):
                     dealer_text = f" ({leader['dealership']})" if leader.get('dealership') else ""
                     st.markdown(f"**{leader['name']}**{dealer_text}")
                     year = leader.get('assessment_year', 1)
-                    self_icon = '✓' if self_done else '○'
+                    self_icon = ':material/check:' if self_done else ':material/circle:'
                     st.caption(f"Self: {self_icon} | Year: {year}")
                 with col2:
                     if status_type == "success":
@@ -633,7 +633,7 @@ def render_portal_management_tab(db):
     # Check email configuration
     email_configured = EMAIL_AVAILABLE and is_email_configured()
     if not email_configured:
-        st.warning("⚠️ Email not configured. Go to Settings → Email to set up.")
+        st.warning("Email not configured. Go to Settings :material/arrow_forward: Email to set up.", icon=":material/warning:")
     
     # Get base URL
     base_url = st.text_input(
@@ -691,7 +691,7 @@ def render_portal_management_tab(db):
     st.markdown("---")
     
     # Section 1: Ready for Portal Email
-    st.subheader("📤 Send Portal Invitations")
+    st.subheader(":material/send: Send Portal Invitations")
     
     if ready_for_portal:
         st.success(f"{len(ready_for_portal)} leader(s) have completed self-assessment and are ready for portal email")
@@ -703,13 +703,13 @@ def render_portal_management_tab(db):
                 st.write(f"**{leader['name']}**")
                 st.caption(f"{leader.get('dealership', '')} · {leader.get('cohort', '')}")
             with col2:
-                st.write(f"📧 {leader.get('email', 'No email')}")
+                st.write(f":material/mail: {leader.get('email', 'No email')}")
             with col3:
                 if email_configured and leader.get('email'):
                     if st.button("Send Portal", key=f"send_portal_{leader['id']}"):
                         success, msg = send_portal_invitation(leader, base_url, db)
                         if success:
-                            st.success(f"✅ Sent to {leader['name']}")
+                            st.success(f"Sent to {leader['name']}", icon=":material/check_circle:")
                             st.rerun()
                         else:
                             st.error(f"Failed: {msg}")
@@ -718,13 +718,13 @@ def render_portal_management_tab(db):
         st.markdown("---")
         leaders_with_email = [l for l in ready_for_portal if l.get('email')]
         if email_configured and leaders_with_email:
-            if st.button(f"📤 Send Portal Email to All ({len(leaders_with_email)})", type="primary"):
+            if st.button(f"Send Portal Email to All ({len(leaders_with_email)})", icon=":material/send:", type="primary"):
                 with st.spinner("Sending portal invitations..."):
                     sent, failed, results = send_bulk_portal_invitations(leaders_with_email, base_url, db)
                     if sent > 0:
-                        st.success(f"✅ Sent {sent} portal invitation(s)")
+                        st.success(f"Sent {sent} portal invitation(s)", icon=":material/check_circle:")
                     if failed > 0:
-                        st.warning(f"⚠️ {failed} failed")
+                        st.warning(f"{failed} failed", icon=":material/warning:")
                     st.rerun()
     else:
         st.info("No leaders ready for portal email. They need to complete their self-assessment first.")
@@ -732,7 +732,7 @@ def render_portal_management_tab(db):
     st.markdown("---")
     
     # Section 2: Need to Nominate Raters
-    st.subheader("⚠️ Leaders Who Need to Nominate Raters")
+    st.subheader(":material/warning: Leaders Who Need to Nominate Raters")
     
     if portal_sent_no_raters:
         st.warning(f"{len(portal_sent_no_raters)} leader(s) have received their portal but haven't nominated enough raters")
@@ -750,7 +750,7 @@ def render_portal_management_tab(db):
                     st.caption(f"Portal sent: {str(portal_sent)[:10]}")
             with col4:
                 if email_configured and leader.get('email') and leader.get('portal_token'):
-                    if st.button("🔔 Remind", key=f"remind_nom_{leader['id']}"):
+                    if st.button("Remind", icon=":material/notifications:", key=f"remind_nom_{leader['id']}"):
                         leader['nominated_count'] = leader['other_rater_count']
                         success, msg = send_leader_nomination_reminder(leader, base_url, db)
                         if success:
@@ -762,7 +762,7 @@ def render_portal_management_tab(db):
         st.markdown("---")
         leaders_to_remind = [l for l in portal_sent_no_raters if l.get('email') and l.get('portal_token')]
         if email_configured and leaders_to_remind:
-            if st.button(f"🔔 Send Reminder to All ({len(leaders_to_remind)})"):
+            if st.button(f"Send Reminder to All ({len(leaders_to_remind)})", icon=":material/notifications:"):
                 sent = 0
                 for leader in leaders_to_remind:
                     leader['nominated_count'] = leader['other_rater_count']
@@ -776,7 +776,7 @@ def render_portal_management_tab(db):
     st.markdown("---")
     
     # Section 3: Leaders with Raters Nominated (overview)
-    st.subheader("✅ Leaders with Raters Nominated")
+    st.subheader(":material/check_circle: Leaders with Raters Nominated")
     
     if portal_sent_with_raters:
         for leader in portal_sent_with_raters:
@@ -790,9 +790,9 @@ def render_portal_management_tab(db):
                 st.caption(f"{leader.get('dealership', '')}")
             with col2:
                 if completed == total:
-                    st.success(f"✓ {completed}/{total} responses")
+                    st.success(f"{completed}/{total} responses", icon=":material/check:")
                 else:
-                    st.warning(f"⏳ {completed}/{total} responses")
+                    st.warning(f"{completed}/{total} responses", icon=":material/schedule:")
             with col3:
                 # Link to view portal
                 if leader.get('portal_token'):
@@ -804,7 +804,7 @@ def render_portal_management_tab(db):
     st.markdown("---")
     
     # Section 4: Awaiting Self-Assessment
-    with st.expander(f"📋 Awaiting Self-Assessment ({len(no_self_assessment)})"):
+    with st.expander(f"Awaiting Self-Assessment ({len(no_self_assessment)})", icon=":material/assignment:"):
         if no_self_assessment:
             for leader in no_self_assessment:
                 st.write(f"• {leader['name']} ({leader.get('dealership', 'No retailer')})")
@@ -814,7 +814,7 @@ def render_portal_management_tab(db):
     st.markdown("---")
     
     # Section 5: All Portal Links (for reference)
-    st.subheader("🔗 All Portal Links")
+    st.subheader(":material/link: All Portal Links")
     
     with st.expander("View/Generate Portal Links"):
         st.caption("Generate portal tokens for leaders who don't have one yet, or view existing links.")
@@ -922,9 +922,9 @@ def render_links_tab(db):
     # Email status indicator
     email_configured = EMAIL_AVAILABLE and is_email_configured()
     if email_configured:
-        st.success("📧 Email sending is enabled")
+        st.success("Email sending is enabled", icon=":material/mail:")
     else:
-        st.info("📧 Email not configured — go to Settings → Email to set up")
+        st.info("Email not configured — go to Settings :material/arrow_forward: Email to set up", icon=":material/mail:")
     
     st.markdown("---")
     
@@ -1027,7 +1027,7 @@ def render_links_tab(db):
     else:
         # Email action buttons (if email is configured)
         if email_configured:
-            st.markdown("**📧 Email Actions**")
+            st.markdown(":material/mail: **Email Actions**")
             
             col1, col2, col3 = st.columns(3)
             
@@ -1036,7 +1036,8 @@ def render_links_tab(db):
             incomplete_with_email = [r for r in raters_with_email if not r.get('completed')]
             
             with col1:
-                if st.button(f"📤 Send All Invitations ({len(raters_with_email)})", 
+                if st.button(f"Send All Invitations ({len(raters_with_email)})",
+                            icon=":material/send:",
                             disabled=len(raters_with_email) == 0,
                             help="Send invitation emails to all raters with email addresses"):
                     with st.spinner("Sending invitations..."):
@@ -1047,15 +1048,16 @@ def render_links_tab(db):
                             db
                         )
                         if sent > 0:
-                            st.success(f"✅ Sent {sent} invitation(s)")
+                            st.success(f"Sent {sent} invitation(s)", icon=":material/check_circle:")
                         if failed > 0:
-                            st.warning(f"⚠️ {failed} failed to send")
+                            st.warning(f"{failed} failed to send", icon=":material/warning:")
                             for r in results:
                                 if not r['success']:
                                     st.caption(f"  • {r['rater']}: {r['message']}")
             
             with col2:
-                if st.button(f"🔔 Send Reminders ({len(incomplete_with_email)})", 
+                if st.button(f"Send Reminders ({len(incomplete_with_email)})",
+                            icon=":material/notifications:",
                             disabled=len(incomplete_with_email) == 0,
                             help="Send reminders to incomplete raters with email addresses"):
                     with st.spinner("Sending reminders..."):
@@ -1066,13 +1068,13 @@ def render_links_tab(db):
                             db
                         )
                         if sent > 0:
-                            st.success(f"✅ Sent {sent} reminder(s)")
+                            st.success(f"Sent {sent} reminder(s)", icon=":material/check_circle:")
                         if failed > 0:
-                            st.warning(f"⚠️ {failed} failed to send")
+                            st.warning(f"{failed} failed to send", icon=":material/warning:")
             
             with col3:
                 # Show email log
-                if st.button("📋 View Email Log"):
+                if st.button("View Email Log", icon=":material/assignment:"):
                     st.session_state[f'show_email_log_{selected_leader_id}'] = True
             
             # Email log display
@@ -1084,6 +1086,9 @@ def render_links_tab(db):
                         'Time': e['sent_at'][:16] if e.get('sent_at') else '',
                         'Type': e['email_type'],
                         'To': e['to_email'],
+                        # st.dataframe renders cell values as plain data, not
+                        # markdown, so this must stay a plain character rather
+                        # than a :material/...: shortcode.
                         'Status': '✓' if e['success'] else '✗',
                         'Rater': e.get('rater_name') or '-'
                     } for e in email_log])
@@ -1104,7 +1109,7 @@ def render_links_tab(db):
         # a genuine test of report generation, not a shortcut around it.
         incomplete_raters = [r for r in raters if not r.get('completed')]
         if incomplete_raters:
-            with st.expander(f"🧪 Testing: Simulate Responses ({len(incomplete_raters)} incomplete)"):
+            with st.expander(f"Testing: Simulate Responses ({len(incomplete_raters)} incomplete)", icon=":material/science:"):
                 st.caption(
                     "Fills in plausible ratings and comments for every rater who "
                     "hasn't submitted yet and marks them complete, so you can "
@@ -1135,7 +1140,8 @@ def render_links_tab(db):
         ]
         if completed_other_raters:
             with st.expander(
-                f"🧪 Testing: Reset {len(completed_other_raters)} Response(s) for Retesting"
+                f"Testing: Reset {len(completed_other_raters)} Response(s) for Retesting",
+                icon=":material/science:"
             ):
                 st.caption(
                     "Clears ratings and comments and reopens every non-Self "
@@ -1171,10 +1177,10 @@ def render_links_tab(db):
                 
                 # Determine status
                 if rater['completed']:
-                    status_icon = "✅"
+                    status_icon = ":material/check_circle:"
                     status_text = "Complete"
                 else:
-                    status_icon = "⏳"
+                    status_icon = ":material/schedule:"
                     status_text = "Pending"
                 
                 # Get last email info
@@ -1189,7 +1195,7 @@ def render_links_tab(db):
                 
                 with col2:
                     if has_email:
-                        st.caption(f"📧 {rater['email']}")
+                        st.caption(f":material/mail: {rater['email']}")
                     else:
                         # Allow adding email
                         if st.session_state.get(f'edit_email_{rater["id"]}'):
@@ -1220,22 +1226,22 @@ def render_links_tab(db):
                     if email_configured and has_email and not rater['completed']:
                         btn_col1, btn_col2 = st.columns(2)
                         with btn_col1:
-                            if st.button("📤", key=f"send_inv_{rater['id']}", help="Send invitation"):
+                            if st.button("", icon=":material/send:", key=f"send_inv_{rater['id']}", help="Send invitation"):
                                 success, msg = send_rater_invitation(rater, selected_leader['name'], base_url, db)
                                 if success:
-                                    st.toast(f"✅ Sent to {rater['email']}")
+                                    st.toast(f"Sent to {rater['email']}", icon=":material/check_circle:")
                                 else:
-                                    st.toast(f"❌ Failed: {msg}")
+                                    st.toast(f"Failed: {msg}", icon=":material/error:")
                         with btn_col2:
-                            if st.button("🔔", key=f"send_rem_{rater['id']}", help="Send reminder"):
+                            if st.button("", icon=":material/notifications:", key=f"send_rem_{rater['id']}", help="Send reminder"):
                                 success, msg = send_rater_reminder(rater, selected_leader['name'], base_url, db)
                                 if success:
-                                    st.toast(f"✅ Reminder sent")
+                                    st.toast(f"Reminder sent", icon=":material/check_circle:")
                                 else:
-                                    st.toast(f"❌ Failed: {msg}")
+                                    st.toast(f"Failed: {msg}", icon=":material/error:")
                 
                 with col5:
-                    if st.button("🗑️", key=f"del_rater_{rater['id']}", help="Delete rater"):
+                    if st.button("", icon=":material/delete:", key=f"del_rater_{rater['id']}", help="Delete rater"):
                         db.delete_rater(rater['id'])
                         st.rerun()
                 
@@ -1245,7 +1251,7 @@ def render_links_tab(db):
             st.markdown("---")
     
     # Export/Import section
-    st.subheader("📥 Export / Import Raters")
+    st.subheader(":material/download: Export / Import Raters")
     
     export_col, import_col = st.columns(2)
     
@@ -1270,7 +1276,7 @@ def render_links_tab(db):
             df = pd.DataFrame(link_data)
             csv = df.to_csv(index=False)
             st.download_button(
-                "📋 Download Raters CSV",
+                "Download Raters CSV",
                 csv,
                 f"raters_{selected_leader['name'].replace(' ', '_')}.csv",
                 "text/csv",
@@ -1294,7 +1300,7 @@ def render_links_tab(db):
         })
 
         st.download_button(
-            "📄 Download Template",
+            "Download Template",
             template_df.to_csv(index=False),
             "rater_import_template.csv",
             "text/csv",
@@ -1350,12 +1356,12 @@ def render_links_tab(db):
                                  p['relationship'], p['relationship'])}
                             for p in parsed
                         ])
-                        st.success(f"✓ Found {len(parsed)} raters to import")
+                        st.success(f"Found {len(parsed)} raters to import", icon=":material/check:")
                         st.dataframe(preview.head(10), use_container_width=True)
                         if len(parsed) > 10:
                             st.caption(f"...and {len(parsed) - 10} more")
 
-                        if st.button("✅ Import All Raters", type="primary", use_container_width=True):
+                        if st.button("Import All Raters", icon=":material/check_circle:", type="primary", use_container_width=True):
                             imported = 0
                             errors = []
 
@@ -1375,9 +1381,9 @@ def render_links_tab(db):
                                     errors.append(f"{p['name'] or p['email']}: {str(e)}")
 
                             if imported > 0:
-                                st.success(f"✅ Imported {imported} raters!")
+                                st.success(f"Imported {imported} raters!", icon=":material/check_circle:")
                             if errors:
-                                st.warning(f"⚠️ {len(errors)} errors:")
+                                st.warning(f"{len(errors)} errors:", icon=":material/warning:")
                                 for err in errors[:5]:
                                     st.caption(err)
 
@@ -1396,7 +1402,7 @@ def render_reports_tab(db):
     cohort_filter = st.session_state.get('active_cohort_filter')
     
     if cohort_filter:
-        st.info(f"📁 Filtered by cohort: **{cohort_filter}** (change in Settings → Cohorts)")
+        st.info(f"Filtered by cohort: **{cohort_filter}** (change in Settings :material/arrow_forward: Cohorts)", icon=":material/folder:")
         leaders = db.get_leaders_by_cohort(cohort_filter)
     else:
         leaders = db.get_all_leaders()
@@ -1461,7 +1467,7 @@ def render_reports_tab(db):
 
                             with open(output_path, 'rb') as f:
                                 st.download_button(
-                                    "📥 Download Report",
+                                    "Download Report",
                                     f,
                                     file_name=f"{leader['name'].replace(' ', '_')}_{report_type.replace(' ', '_')}.docx",
                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1503,7 +1509,7 @@ def render_reports_tab(db):
 
                             with open(output_path, 'rb') as f:
                                 st.download_button(
-                                    "📥 Download Report",
+                                    "Download Report",
                                     f,
                                     file_name=f"{leader['name'].replace(' ', '_')}_Self-Assessment.docx",
                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

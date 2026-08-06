@@ -78,23 +78,30 @@ st.markdown("""
         font-weight: 300;
     }
     
+    /* Hairline border, not a shadow — see the item-container/thank-you-container
+       rules below for the same treatment. .leader-card and .stat-box aren't
+       applied anywhere in the app yet (no template currently uses these
+       classes), updated here so they're consistent whenever they are used. */
     .leader-card {
         background: white;
         border-radius: 8px;
         padding: 1.5rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        border: 1px solid #E2E0D8;
         border-left: 4px solid #024731;
         margin-bottom: 1rem;
     }
-    
+
+    /* Supporting/secondary detail gets the bordered treatment; a primary stat
+       number is meant to sit with no card at all (see .stat-number), so this
+       class is for the label/context around it, not the number itself. */
     .stat-box {
         background: white;
         border-radius: 8px;
         padding: 1.2rem;
         text-align: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        border: 1px solid #E2E0D8;
     }
-    
+
     .stat-number {
         font-family: 'Source Sans Pro', sans-serif;
         font-size: 2.5rem;
@@ -124,19 +131,24 @@ st.markdown("""
         color: #999;
     }
     
-    /* Form styling */
+    /* Form styling. Plain background, wordmark carried by type, a thin gold
+       rule underneath — no gradient. */
     .feedback-header {
-        background: linear-gradient(135deg, #024731 0%, #035D40 100%);
-        color: white;
-        padding: 2rem;
-        border-radius: 12px;
+        background: #FFFFFF;
+        color: #024731;
+        padding: 1.5rem 2rem;
+        border-bottom: 2px solid #B8860B;
         margin-bottom: 2rem;
         text-align: center;
     }
-    
+
     .feedback-header h1 {
-        color: white !important;
+        color: #024731 !important;
         margin-bottom: 0.5rem;
+    }
+
+    .feedback-header p {
+        color: #505046;
     }
     
     .dimension-header {
@@ -164,27 +176,69 @@ st.markdown("""
         margin-bottom: 0.8rem;
         line-height: 1.5;
     }
-    
-    /* Radio button styling */
-    .stRadio > div {
+
+    /* Rating scale (st.segmented_control, one per item). Verified against the
+       real rendered DOM rather than guessed: the widget's own selected/
+       unselected data-testid suffix ("...segmented_control" vs
+       "...segmented_controlActive") is what actually distinguishes state —
+       theme.primaryColor in .streamlit/config.toml only gives a light tint on
+       its own, not the solid fill this needed. */
+    div[data-testid="stButtonGroup"] {
+        margin-bottom: 0.5rem;
+    }
+    button[data-testid="stBaseButton-segmented_controlActive"] {
+        background: #024731 !important;
+        border-color: #024731 !important;
+    }
+    button[data-testid="stBaseButton-segmented_controlActive"] * {
+        color: #FFFFFF !important;
+    }
+
+    /* Set apart the last of the six options ("No opportunity to observe") as
+       a smaller, muted, functionally-different answer to the five frequency
+       options before it — a hairline divider, not a numbered pill. */
+    div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child {
+        margin-left: 1.25rem;
+        padding-left: 1.25rem;
+        border-left: 1px solid #DDDDDD;
+    }
+    div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child,
+    div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child * {
+        font-size: 0.85em;
+        color: #777777 !important;
+    }
+    div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child[data-testid="stBaseButton-segmented_controlActive"] * {
+        color: #FFFFFF !important;
+    }
+
+    /* Slim inline progress readout under each item, replacing the old
+       sidebar panel. Thin track, Bentley green fill, small muted count. */
+    .item-progress {
         display: flex;
-        gap: 0.5rem;
+        align-items: center;
+        gap: 0.6rem;
+        margin: 0 0 1.2rem 0;
     }
-    
-    .stRadio label {
-        background: #F5F5F5;
-        padding: 0.5rem 1rem;
-        border-radius: 4px;
-        border: 1px solid #DDD;
-        cursor: pointer;
-        transition: all 0.2s;
+    .item-progress-track {
+        flex: 1;
+        height: 3px;
+        background: #E2E0D8;
+        border-radius: 2px;
+        overflow: hidden;
     }
-    
-    .stRadio label:hover {
-        background: #E8E8E8;
-        border-color: #024731;
+    .item-progress-fill {
+        height: 100%;
+        background: #024731;
+        border-radius: 2px;
+        transition: width 0.2s;
     }
-    
+    .item-progress-text {
+        font-family: 'Source Sans Pro', sans-serif;
+        font-size: 0.78rem;
+        color: #999999;
+        white-space: nowrap;
+    }
+
     /* ============================================
        BUTTONS
        Every rule below sets text colour and background TOGETHER. Setting one
@@ -196,17 +250,19 @@ st.markdown("""
        wrapper and the button, which breaks the direct-child selector.
        ============================================ */
 
-    /* Primary actions — filled Bentley green, white label */
+    /* Primary actions — solid Bentley green, white label. No gradient, no
+       movement or shadow growth on hover — hover only shifts to a slightly
+       darker solid shade. */
     button[data-testid="stBaseButton-primary"],
     button[data-testid="stBaseButton-primaryFormSubmit"] {
-        background: linear-gradient(135deg, #024731 0%, #035D40 100%) !important;
+        background: #024731 !important;
         color: #FFFFFF !important;
         border: 1px solid #024731 !important;
         padding: 0.6rem 2rem;
         font-family: 'Source Sans Pro', sans-serif;
         font-weight: 600;
         letter-spacing: 0.05em;
-        transition: all 0.3s;
+        transition: background-color 0.2s, border-color 0.2s;
     }
     button[data-testid="stBaseButton-primary"] *,
     button[data-testid="stBaseButton-primaryFormSubmit"] * {
@@ -214,17 +270,16 @@ st.markdown("""
     }
     button[data-testid="stBaseButton-primary"]:hover,
     button[data-testid="stBaseButton-primaryFormSubmit"]:hover {
-        background: linear-gradient(135deg, #013825 0%, #024731 100%) !important;
+        background: #013825 !important;
         color: #FFFFFF !important;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(2, 71, 49, 0.3);
     }
     button[data-testid="stBaseButton-primary"]:hover *,
     button[data-testid="stBaseButton-primaryFormSubmit"]:hover * {
         color: #FFFFFF !important;
     }
 
-    /* Secondary actions — white with a green label and green border */
+    /* Secondary actions — white with a green label and green border. Hover
+       only changes the border, no fill/movement/shadow change. */
     button[data-testid="stBaseButton-secondary"],
     button[data-testid="stBaseButton-secondaryFormSubmit"] {
         background: #FFFFFF !important;
@@ -232,7 +287,7 @@ st.markdown("""
         border: 1px solid #024731 !important;
         font-family: 'Source Sans Pro', sans-serif;
         font-weight: 600;
-        transition: all 0.3s;
+        transition: border-color 0.2s, opacity 0.2s;
     }
     button[data-testid="stBaseButton-secondary"] *,
     button[data-testid="stBaseButton-secondaryFormSubmit"] * {
@@ -240,11 +295,10 @@ st.markdown("""
     }
     button[data-testid="stBaseButton-secondary"]:hover,
     button[data-testid="stBaseButton-secondaryFormSubmit"]:hover {
-        background: #F0F5F2 !important;
+        background: #FFFFFF !important;
         color: #024731 !important;
-        border-color: #024731 !important;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(2, 71, 49, 0.15);
+        border-color: #013825 !important;
+        opacity: 0.85;
     }
     button[data-testid="stBaseButton-secondary"]:hover *,
     button[data-testid="stBaseButton-secondaryFormSubmit"]:hover * {
@@ -256,16 +310,15 @@ st.markdown("""
         background: #FFFFFF !important;
         color: #333333 !important;
         border: 1px solid #DDDDDD !important;
+        transition: border-color 0.2s;
     }
     .stDownloadButton button * {
         color: #333333 !important;
     }
     .stDownloadButton button:hover {
-        background: #F5F5F5 !important;
+        background: #FFFFFF !important;
         color: #024731 !important;
         border-color: #024731 !important;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
     .stDownloadButton button:hover * {
         color: #024731 !important;
@@ -279,8 +332,6 @@ st.markdown("""
         background: #F0F0F0 !important;
         color: #666666 !important;
         border-color: #CCCCCC !important;
-        transform: none;
-        box-shadow: none;
     }
     button[data-testid="stBaseButton-primary"]:disabled *,
     button[data-testid="stBaseButton-primaryFormSubmit"]:disabled *,
@@ -288,20 +339,21 @@ st.markdown("""
     button[data-testid="stBaseButton-secondaryFormSubmit"]:disabled * {
         color: #666666 !important;
     }
-    
+
     /* Thank you page */
     .thank-you-container {
         text-align: center;
         padding: 4rem 2rem;
         background: white;
         border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        border: 1px solid #E2E0D8;
         max-width: 600px;
         margin: 2rem auto;
     }
     
     .thank-you-icon {
-        font-size: 4rem;
+        display: flex;
+        justify-content: center;
         margin-bottom: 1rem;
     }
     
@@ -418,7 +470,7 @@ def render_landing_page():
     
     with col2:
         st.markdown("""
-        <div style="background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center;">
+        <div style="background: white; padding: 2rem; border-radius: 12px; border: 1px solid #E2E0D8; text-align: center;">
             <h3 style="margin-bottom: 1rem;">Welcome</h3>
             <p style="color: #666; line-height: 1.8;">
                 This platform supports the 360-degree feedback process for the Bentley Compass Leadership Programme.
@@ -431,9 +483,9 @@ def render_landing_page():
             </p>
         </div>
         """, unsafe_allow_html=True)
-        
+
         # Quick admin access for development
-        with st.expander("🔐 Administrator Access"):
+        with st.expander("Administrator Access", icon=":material/lock:"):
             admin_code = st.text_input("Enter admin code:", type="password")
             if st.button("Access Dashboard"):
                 if admin_code == "compass360":  # Simple auth for now
@@ -475,7 +527,11 @@ def render_thank_you_page(already_completed=False):
     """Render the thank you page after submission."""
     st.markdown("""
     <div class="thank-you-container">
-        <div class="thank-you-icon">✓</div>
+        <div class="thank-you-icon">
+            <svg width="56" height="56" viewBox="0 0 24 24" fill="#024731" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+        </div>
         <h2>Thank You</h2>
         <p style="color: #666; font-size: 1.1rem; line-height: 1.8; margin-top: 1rem;">
             {message}
