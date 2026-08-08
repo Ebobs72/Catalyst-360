@@ -244,59 +244,107 @@ RELATIONSHIP_INPUT_HELP = "Line Manager, Peer, Direct Report, or Other"
 # ============================================
 
 COLOURS = {
-    'bentley_green': '#183319',      # Official Bentley Green - Self, Agreed Strengths header
-    'green_mid': '#3D5F44',          # Line Manager
-    'green_soft': '#5C7F63',         # Peers, Good News header
-    'green_pale': '#7FA087',         # Direct Reports
-    'green_lightest': '#A8C2AC',     # Others
-    'charcoal': '#4D4D4F',           # All Raters - deliberately outside the
-                                      # green family so the aggregate reads as
-                                      # categorically different from any one
-                                      # individual perspective
+    'bentley_green': '#183319',      # Official Bentley Green - Self ONLY, sole
+                                      # ownership, unique, not shared or diluted
+                                      # anywhere else in the document. Also
+                                      # Agreed Strengths header (a PAPU-NANU
+                                      # quadrant colour, a separate decision -
+                                      # see the note below the PAPU-NANU calls).
+    'grey_dark': '#3D3D3D',           # Line Manager
+    'grey_mid': '#6B6B6B',            # Peers
+    'grey_light': '#9A9A9A',          # Direct Reports
+    'grey_lightest': '#C4C4C4',       # Others
+    'charcoal': '#4D4D4F',           # Radar chart All Raters line/markers only
+                                      # (see 'radar_all_raters' below) - no
+                                      # longer the bar-chart All Raters colour
+                                      # as of 2026-08-08, see 'heritage_white'.
     'charcoal_grey': '#5F5E5A',      # Potential Blind Spots header
     'radar_all_raters': '#B2B2B2',   # All Raters FILL on the OVERVIEW RADAR
-                                      # ONLY, not the bar charts, and not the
-                                      # radar's own line/markers either - those
-                                      # stay 'charcoal' so the "All Raters"
-                                      # identity is consistent everywhere the
-                                      # line/legend appears. Confirmed Bentley
-                                      # brand value, lighter than 'charcoal' on
-                                      # purpose: the radar's two series have
-                                      # semi-transparent fills that overlap,
-                                      # and a charcoal fill sat too close to
-                                      # bentley_green's fill in tonal value -
-                                      # the blended overlap read as indistinct
-                                      # from either series alone. Bar charts
-                                      # don't have this problem (bars sit side
-                                      # by side, not stacked transparently), so
-                                      # they keep charcoal for fill too.
-    'heritage_white': '#DCD8C0',     # Development Areas header (dark text on this one)
+                                      # ONLY, not the bar charts. Confirmed
+                                      # Bentley brand value, lighter than
+                                      # 'charcoal' on purpose: the radar's two
+                                      # series have semi-transparent fills that
+                                      # overlap, and a charcoal fill sat too
+                                      # close to bentley_green's fill in tonal
+                                      # value - the blended overlap read as
+                                      # indistinct from either series alone.
+                                      # Bar charts don't stack fills like this,
+                                      # so they don't need this split.
+    'heritage_white': '#DCD8C0',     # All Raters bar colour (item bar charts,
+                                      # self-only bar) AND, separately, the
+                                      # Development Areas PAPU-NANU header -
+                                      # same hex value serving two different
+                                      # concepts, flagged 2026-08-08 and
+                                      # confirmed intentional by the human:
+                                      # it's a real colour in the confirmed
+                                      # palette, so reusing it is fine.
+    'good_news_tint': '#5D705E',      # Good News PAPU-NANU header - a genuine
+                                      # 30% tint of bentley_green (blended
+                                      # toward white), not just "some other
+                                      # green". Replaces the old #5C7F63
+                                      # (formerly 'green_soft', retired below)
+                                      # which was a similar-looking muted green
+                                      # but not mathematically derived from
+                                      # bentley_green at all. Contrast with
+                                      # white header text: 5.31:1, comfortably
+                                      # past the WCAG AA 4.5:1 minimum (the old
+                                      # value was 4.5:1 exactly - right on the
+                                      # edge).
+    'good_news_tint_pale': '#DCE0DC', # Executive Summary "under-rating"
+                                      # (self scores below All Raters, the
+                                      # same direction as Good News) gap cell -
+                                      # an 85% tint of bentley_green, pale
+                                      # enough for the cell's dark body text,
+                                      # calibrated to a similar lightness to
+                                      # the arbitrary Excel green it replaces.
+    'blind_spot_tint_pale': '#EFEFEE', # Executive Summary "over-rating" (self
+                                      # scores above All Raters, the same
+                                      # direction as Potential Blind Spots) gap
+                                      # cell - a 90% tint of charcoal_grey
+                                      # (the Blind Spots header colour), same
+                                      # logic as good_news_tint_pale above:
+                                      # the gap direction that already has a
+                                      # PAPU-NANU identity elsewhere in the
+                                      # report reuses that identity here too,
+                                      # rather than an arbitrary unrelated hue.
     'bentley_cream': '#F5F5DC',      # Bentley cream
     'bentley_charcoal': '#2C2C2C',   # Bentley charcoal
     'light_grey': '#F5F5F5',
     'dark_grey': '#333333',
 }
-# NB: the fixed report palette above (bentley_green/green_mid/green_soft/
-# green_pale/green_lightest/charcoal/charcoal_grey/heritage_white) is the only
-# palette report_generator.py is allowed to use, per the confirmed brand book
-# correction 2026-08-06. #024731 was an estimate made before the real brand
-# book was available - #183319 is the confirmed official Bentley Green. Tan,
-# leather and gold tones (previously 'leather_tan' #9C6148, 'tan_tint'
-# #c9a692, and 'bentley_gold' #B8860B before that) are retired entirely - none
-# of them are in Bentley's confirmed palette.
+# NB: the fixed report palette above is the only palette report_generator.py
+# is allowed to use, per the confirmed brand book correction 2026-08-06.
+# #024731 was an estimate made before the real brand book was available -
+# #183319 is the confirmed official Bentley Green. Tan, leather and gold tones
+# (previously 'leather_tan' #9C6148, 'tan_tint' #c9a692, and 'bentley_gold'
+# #B8860B before that) are retired entirely - none of them are in Bentley's
+# confirmed palette. The green-tint respondent-group family ('green_mid'
+# #3D5F44, 'green_soft' #5C7F63, 'green_pale' #7FA087, 'green_lightest'
+# #A8C2AC) is ALSO retired as of 2026-08-08, per client feedback: those four
+# groups moved to a dark-to-light greyscale progression instead, so that Self
+# is the only thing on the page reading as green at all. #5C7F63 (the old
+# 'green_soft') no longer appears anywhere - the Good News PAPU-NANU header
+# that used to hardcode it directly now uses 'good_news_tint' instead, a
+# genuine tint of bentley_green rather than a similar-looking but unrelated
+# green. The Executive Summary's gap-highlighting colours (previously generic
+# Excel defaults #FFF2CC/#C6EFCE, not part of any confirmed palette at all)
+# are retired the same day for the same reason - see 'good_news_tint_pale'
+# and 'blind_spot_tint_pale' above.
 
 # Group colours for report bar charts and comment labels - fixed brand
-# palette, not to be extended. Each rater group now has its own colour in the
-# green family (Self always the full-strength green, unique to Self); "All
-# Raters" (GROUP_DISPLAY['Combined']) uses 'charcoal' instead, wherever it
-# appears - the radar chart's Combined line, and the item bar charts'
-# Combined bar - not a GROUP_COLOURS entry since it isn't a rater group.
+# palette, not to be extended. Self is the only one in the green family, full
+# strength, exclusive to Self. The four individual rater groups are a
+# dark-to-light greyscale progression as of 2026-08-08 (client feedback -
+# green tints previously used here are retired). "All Raters"
+# (GROUP_DISPLAY['Combined']) is 'heritage_white' on bar charts and 'charcoal'
+# / 'radar_all_raters' on the radar - not a GROUP_COLOURS entry since it isn't
+# a rater group.
 GROUP_COLOURS = {
     'Self': COLOURS['bentley_green'],
-    'Boss': COLOURS['green_mid'],
-    'Peers': COLOURS['green_soft'],
-    'DRs': COLOURS['green_pale'],
-    'Others': COLOURS['green_lightest'],
+    'Boss': COLOURS['grey_dark'],
+    'Peers': COLOURS['grey_mid'],
+    'DRs': COLOURS['grey_light'],
+    'Others': COLOURS['grey_lightest'],
 }
 
 # ============================================

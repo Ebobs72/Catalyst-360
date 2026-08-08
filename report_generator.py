@@ -70,21 +70,46 @@ def _add_logo_if_present(paragraph, width_in):
 # PAGE GEOMETRY
 # ============================================
 #
-# A4 with 1in (2.54cm) margins all round, set on the human's instruction
-# 2026-08-04. python-docx's default template is US LETTER, which would shift the
-# margins when UK readers print it, so `apply_page_geometry` overrides it.
+# A4, set on the human's instruction 2026-08-04. python-docx's default
+# template is US LETTER, which would shift the margins when UK readers print
+# it, so `apply_page_geometry` overrides it.
+#
+# Margins reduced 2026-08-07 from a uniform 1in - checked first whether that
+# figure was a tested/specified constraint (print testing, a known printer
+# compatibility issue, a client spec) and found none: it was set alongside
+# the A4 fix above as a conventional round default, not for any margin-
+# specific reason. 0.5in top/bottom and 0.6in left/right is still a
+# conservative, standard professional-document margin, comfortably within
+# safe printing tolerances on any normal home or office printer - nothing
+# like the sub-0.1in margins seen in the reference document that prompted
+# this. Left/right slightly wider than top/bottom to leave room for
+# hole-punching or binding if these ever get printed and filed.
 #
 # Derive everything from these constants rather than hard-coding inch values, so
 # a future page change does not silently leave tables the wrong width.
 PAGE_WIDTH_IN = 8.27      # A4 = 210mm
 PAGE_HEIGHT_IN = 11.69    # A4 = 297mm
-MARGIN_IN = 1.0
+MARGIN_TOP_BOTTOM_IN = 0.5
+MARGIN_LEFT_RIGHT_IN = 0.6
 
-CONTENT_WIDTH_IN = PAGE_WIDTH_IN - (2 * MARGIN_IN)    # 6.27in
-CONTENT_HEIGHT_IN = PAGE_HEIGHT_IN - (2 * MARGIN_IN)  # 9.69in
+CONTENT_WIDTH_IN = PAGE_WIDTH_IN - (2 * MARGIN_LEFT_RIGHT_IN)    # 7.07in
+CONTENT_HEIGHT_IN = PAGE_HEIGHT_IN - (2 * MARGIN_TOP_BOTTOM_IN)  # 10.69in
 
-# Bar chart inside a half-width item cell, with a little breathing room
-ITEM_CHART_WIDTH_IN = (CONTENT_WIDTH_IN / 2) - 0.2
+# Item bar chart width - FIXED, deliberately NOT derived from CONTENT_WIDTH_IN.
+# It was proportional to content width until 2026-08-07, which seemed harmless
+# (charts filling available space is the right instinct for most elements),
+# but bar charts are raster images with a fixed aspect ratio: widening one
+# widens it proportionally taller too. The 2026-08-07 margin reduction grew
+# CONTENT_WIDTH_IN and, as a side effect, grew every chart's rendered height
+# by the same ~14% - enough on its own to push a 5-item dimension down to 4
+# per page, with zero change to any spacing value. Fixing the width breaks
+# that coupling: the item text column absorbs whatever extra horizontal room
+# a page-geometry change provides instead, and chart height stays predictable
+# regardless of margins. 2.9in is the value verified (see
+# _estimate_five_items_fit below and the 2026-08-07 render check) to keep a
+# worst-case 6-bar item's chart short enough that five of them, the heading,
+# and the description all fit within CONTENT_HEIGHT_IN at current spacing.
+ITEM_CHART_WIDTH_IN = 2.9
 
 # Model used for the AI theme synthesis section.
 #
@@ -127,10 +152,10 @@ def apply_page_geometry(doc):
     for section in doc.sections:
         section.page_width = Inches(PAGE_WIDTH_IN)
         section.page_height = Inches(PAGE_HEIGHT_IN)
-        section.left_margin = Inches(MARGIN_IN)
-        section.right_margin = Inches(MARGIN_IN)
-        section.top_margin = Inches(MARGIN_IN)
-        section.bottom_margin = Inches(MARGIN_IN)
+        section.left_margin = Inches(MARGIN_LEFT_RIGHT_IN)
+        section.right_margin = Inches(MARGIN_LEFT_RIGHT_IN)
+        section.top_margin = Inches(MARGIN_TOP_BOTTOM_IN)
+        section.bottom_margin = Inches(MARGIN_TOP_BOTTOM_IN)
 
 
 # ============================================
@@ -199,13 +224,20 @@ def apply_document_font(doc, font_name=REPORT_FONT):
         for attr in ('w:ascii', 'w:hAnsi', 'w:cs', 'w:eastAsia'):
             rfonts.set(qn(attr), font_name)
 
+# Fixed display order for grouped comments (2026-08-06), matching the human's
+# explicit sequence: Line Manager, Direct Reports, Peers, Others. Self isn't
+# part of that sequence but is a real possible source here too - a
+# per-dimension comment recorded at self-assessment persists into the Full
+# 360's data - so it's placed first rather than silently dropped if present.
+COMMENT_GROUP_ORDER = ['Self', 'Boss', 'DRs', 'Peers', 'Others']
+
 # Colour map for comment source labels (RGB tuples for python-docx), matching
 # the fixed report palette in framework.COLOURS.
 COMMENT_SOURCE_COLOURS = {
-    'Line Manager':   RGBColor(0x3D, 0x5F, 0x44),   # green_mid
-    'Peers':          RGBColor(0x5C, 0x7F, 0x63),   # green_soft
-    'Direct Reports': RGBColor(0x7F, 0xA0, 0x87),   # green_pale
-    'Others':         RGBColor(0xA8, 0xC2, 0xAC),   # green_lightest
+    'Line Manager':   RGBColor(0x3D, 0x3D, 0x3D),   # grey_dark
+    'Peers':          RGBColor(0x6B, 0x6B, 0x6B),   # grey_mid
+    'Direct Reports': RGBColor(0x9A, 0x9A, 0x9A),   # grey_light
+    'Others':         RGBColor(0xC4, 0xC4, 0xC4),   # grey_lightest
     'Self':           RGBColor(0x18, 0x33, 0x19),   # Bentley green
 }
 
@@ -217,9 +249,18 @@ def set_cell_shading(cell, color):
     cell._tc.get_or_add_tcPr().append(shading)
 
 
-def add_section_heading(doc, text, font_size=18):
-    """Add a major section heading with larger font."""
-    heading = doc.add_heading(text, level=1)
+def add_section_heading(doc, text, font_size=18, level=1):
+    """
+    Add a heading with an explicit font size, rather than leaving it to
+    inherit whatever Word's built-in Heading-N style default happens to be.
+
+    Dimension names and the PAPU-NANU quadrant headings (Agreed Strengths,
+    Good News, Development Areas, Potential Blind Spots) go through this at
+    level=2 as of 2026-08-06 - previously raw doc.add_heading(..., level=2)
+    calls with no size override, which rendered at 13pt only because that's
+    Word's template default for Heading 2, not because anyone chose 13pt.
+    """
+    heading = doc.add_heading(text, level=level)
     for run in heading.runs:
         run.font.size = Pt(font_size)
     return heading
@@ -244,11 +285,11 @@ def make_table_borderless(table):
 # CLEAN COMMENT FORMATTING
 # ============================================
 
-def _add_thin_rule(doc, colour='CCCCCC'):
+def _add_thin_rule(doc, colour='CCCCCC', space_pt=2):
     """Add a thin horizontal rule (bottom border on an empty paragraph)."""
     p = doc.add_paragraph()
-    p.paragraph_format.space_before = Pt(2)
-    p.paragraph_format.space_after = Pt(2)
+    p.paragraph_format.space_before = Pt(space_pt)
+    p.paragraph_format.space_after = Pt(space_pt)
     pPr = p._element.get_or_add_pPr()
     pBdr = parse_xml(
         f'<w:pBdr {nsdecls("w")}>'
@@ -334,18 +375,19 @@ def add_priority_capture_table(doc, rows=3):
     return table
 
 
-def _add_comment_block(doc, group_name, comment_text):
+def _add_comment_group_block(doc, group_code, comment_texts):
     """
-    Add a single comment in the clean style:
-    - Source label (bold, coloured) on its own line
-    - Comment text below in normal body text
+    Add one rater-type heading followed by every comment from that group -
+    the heading appears once per group, not once per comment. Individual
+    comments within the group are separated by a lighter divider than the
+    one add_clean_comments uses between groups, so the hierarchy (group >
+    individual comment) is visually clear rather than reading as a flat list.
     """
-    # Resolve display name
-    display_name = GROUP_DISPLAY.get(group_name, group_name)
+    display_name = GROUP_DISPLAY.get(group_code, group_code)
 
     # Source label - keep_with_next stops Word breaking the page right here,
     # which would otherwise strand the label alone at the bottom of a page
-    # with its comment text starting fresh on the next.
+    # with its first comment starting fresh on the next.
     source_para = doc.add_paragraph()
     source_para.paragraph_format.space_before = Pt(8)
     source_para.paragraph_format.space_after = Pt(2)
@@ -357,32 +399,60 @@ def _add_comment_block(doc, group_name, comment_text):
         display_name, RGBColor(0x5F, 0x5E, 0x5A)
     )
 
-    # Comment text
-    comment_para = doc.add_paragraph()
-    comment_para.paragraph_format.space_before = Pt(0)
-    comment_para.paragraph_format.space_after = Pt(6)
-    run = comment_para.add_run(comment_text)
-    run.font.size = Pt(10)
-    run.font.color.rgb = RGBColor(0x2D, 0x2D, 0x2D)
+    for i, comment_text in enumerate(comment_texts):
+        comment_para = doc.add_paragraph()
+        comment_para.paragraph_format.space_before = Pt(0)
+        # Tighter than the previous 6pt: this paragraph's own trailing space
+        # only needs to clear the (now equally tight) divider that follows,
+        # not carry the whole visual gap on its own.
+        comment_para.paragraph_format.space_after = Pt(3)
+        comment_para.paragraph_format.line_spacing = 1.0
+        run = comment_para.add_run(comment_text)
+        run.font.size = Pt(10)
+        run.font.color.rgb = RGBColor(0x2D, 0x2D, 0x2D)
+
+        if i < len(comment_texts) - 1:
+            # Lighter than the CCCCCC rule between groups, and tighter
+            # (space_pt=1 not the default 2) - a quieter, closer divider for
+            # comments that share the same source, versus the more clearly
+            # separated one between different rater-type groups.
+            _add_thin_rule(doc, colour='E8E8E8', space_pt=1)
 
 
 def add_clean_comments(doc, comments_list):
     """
-    Add a set of comments in the clean rule-separated style.
-    comments_list: list of dicts with 'group' and 'text' keys.
+    Add a set of comments grouped by rater type: one heading per group, in
+    the fixed order COMMENT_GROUP_ORDER, with every comment from that group
+    listed beneath it. comments_list: list of dicts with 'group' and 'text'
+    keys - previously rendered one heading per comment, which repeated the
+    same rater-type heading back to back whenever more than one person in a
+    group left a comment.
     """
     if not comments_list:
         return
 
-    # keep_with_next on the opening rule chains it to the first comment's own
-    # label (which in turn keeps itself with its text - see
-    # _add_comment_block), so a page break can't land between the "Comments
-    # on X" heading and the first comment either.
+    grouped = {}
+    for comment in comments_list:
+        grouped.setdefault(comment['group'], []).append(comment['text'])
+
+    # keep_with_next on the opening rule chains it to the first group's own
+    # label (which in turn keeps itself with its first comment - see
+    # _add_comment_group_block), so a page break can't land between the
+    # "Comments on X" heading and the first comment either.
     opening_rule = _add_thin_rule(doc)
     opening_rule.paragraph_format.keep_with_next = True
-    for comment in comments_list:
-        _add_comment_block(doc, comment['group'], comment['text'])
-        _add_thin_rule(doc)
+
+    is_first_group = True
+    for group_code in COMMENT_GROUP_ORDER:
+        comment_texts = grouped.get(group_code)
+        if not comment_texts:
+            continue
+        if not is_first_group:
+            _add_thin_rule(doc)  # heavier divider between groups
+        _add_comment_group_block(doc, group_code, comment_texts)
+        is_first_group = False
+
+    _add_thin_rule(doc)
 
 
 # ============================================
@@ -556,11 +626,14 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
             values.append(val)
             colors.append(GROUP_COLOURS[group])
     
-    # Add combined bar if requested and available
+    # Add combined bar if requested and available. Heritage White as of
+    # 2026-08-08 (was 'charcoal') - the radar chart's All Raters line/fill are
+    # a separate, unrelated decision (COLOURS['charcoal'] /
+    # COLOURS['radar_all_raters']) and are unaffected by this.
     if include_combined and scores.get('Combined') is not None:
         groups.append(GROUP_DISPLAY['Combined'])
         values.append(scores['Combined'])
-        colors.append(COLOURS['charcoal'])
+        colors.append(COLOURS['heritage_white'])
     
     if not values:
         return False
@@ -958,9 +1031,16 @@ def add_executive_summary(doc, data):
         if gap is not None:
             row[3].text = f"{gap:+.1f}"
             if gap > SIGNIFICANT_GAP:
-                set_cell_shading(row[3], 'FFF2CC')  # Yellow for over-rating
+                # Over-rating - same gap direction as Potential Blind Spots
+                # (self rates higher than others), so it reuses that
+                # quadrant's colour identity (a pale tint of charcoal_grey)
+                # rather than an arbitrary unrelated hue.
+                set_cell_shading(row[3], 'EFEFEE')  # blind_spot_tint_pale
             elif gap < -SIGNIFICANT_GAP:
-                set_cell_shading(row[3], 'C6EFCE')  # Green for under-rating
+                # Under-rating - same gap direction as Good News (others
+                # rate higher than self), reusing that quadrant's colour
+                # identity (a pale tint of bentley_green).
+                set_cell_shading(row[3], 'DCE0DC')  # good_news_tint_pale
         else:
             row[3].text = "-"
 
@@ -1087,26 +1167,27 @@ def add_papu_nanu_section(doc, data):
     
     # Agreed Strengths (Bentley green header)
     if categories['agreed_strengths']:
-        heading = doc.add_heading("Agreed Strengths", level=2)
+        heading = add_section_heading(doc, "Agreed Strengths", font_size=13, level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph("You and others agree these are strengths - keep doing these.")
         desc.paragraph_format.keep_with_next = True
         create_papu_table(doc, categories['agreed_strengths'][:8], '183319')
         doc.add_paragraph()
 
-    # Good News (green soft header)
+    # Good News (a genuine tint of Bentley Green, not just "some other green" -
+    # see 'good_news_tint' in framework.COLOURS)
     if categories['good_news']:
-        heading = doc.add_heading("Good News", level=2)
+        heading = add_section_heading(doc, "Good News", font_size=13, level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph("Others rate you higher than you rate yourself - you may be underselling yourself.")
         desc.paragraph_format.keep_with_next = True
-        create_papu_table(doc, categories['good_news'], '5C7F63')
+        create_papu_table(doc, categories['good_news'], '5D705E')
         doc.add_paragraph()
 
     # Development Areas (heritage white header, dark green text - white text
     # would be invisible on this background)
     if categories['development_areas']:
-        heading = doc.add_heading("Development Areas", level=2)
+        heading = add_section_heading(doc, "Development Areas", font_size=13, level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph("Both you and others see room for growth - priority focus for development.")
         desc.paragraph_format.keep_with_next = True
@@ -1118,7 +1199,7 @@ def add_papu_nanu_section(doc, data):
 
     # Potential Blind Spots / Hidden Talents (charcoal grey header)
     if categories['hidden_talents']:
-        heading = doc.add_heading("Potential Blind Spots", level=2)
+        heading = add_section_heading(doc, "Potential Blind Spots", font_size=13, level=2)
         heading.paragraph_format.keep_with_next = True
         desc = doc.add_paragraph(
             "You rate yourself higher than others do here. This might mean the strength "
@@ -1133,7 +1214,12 @@ def add_papu_nanu_section(doc, data):
 
 def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_first_dimension=False):
     """Add a dimension section with items displayed side-by-side with bar charts."""
-    heading = doc.add_heading(dim_name, level=2)
+    heading = add_section_heading(doc, dim_name, font_size=13, level=2)
+    # Word's Heading 2 style carries its own 10pt space_before, which is
+    # redundant here since this heading always starts at the very top of a
+    # fresh page anyway (page_break_before below) - the page's own top
+    # margin already provides that buffer.
+    heading.paragraph_format.space_before = Pt(0)
     # Every dimension always starts on a fresh page (except the first, which
     # flows straight after the "Detailed Feedback" heading). A space-aware
     # heuristic was tried instead - only forcing a break when little room was
@@ -1143,15 +1229,22 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
     # reliable rule per the human's instruction 2026-08-06.
     if not is_first_dimension:
         heading.paragraph_format.page_break_before = True
-    
-    # Dimension description
+
+    # Dimension description. Tight space_after instead of the Normal default
+    # (10pt) plus a whole extra blank paragraph after it (~23pt combined) -
+    # one-time saving per dimension, small next to the per-item savings below
+    # but free, since nothing readable shrinks. line_spacing=1.0 overrides
+    # the document default (1.15 "auto"), shaving a proportional amount off
+    # every wrapped line rather than just the paragraph's before/after -
+    # matters most here since some dimension descriptions run to 3-4 lines.
     desc = doc.add_paragraph()
+    desc.paragraph_format.space_before = Pt(0)
+    desc.paragraph_format.space_after = Pt(6)
+    desc.paragraph_format.line_spacing = 1.0
     run = desc.add_run(DIMENSION_DESCRIPTIONS[dim_name])
     run.font.italic = True
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-    
-    doc.add_paragraph()
-    
+
     start, end = DIMENSIONS[dim_name]
     
     # Each item: side-by-side borderless table (text left, bar chart right)
@@ -1170,8 +1263,32 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
         make_table_borderless(layout_table)
         layout_table.autofit = False
 
-        item_col_widths = content_columns(1, 1)
+        # Chart column is the fixed ITEM_CHART_WIDTH_IN (see its definition -
+        # deliberately not proportional, so chart height stays constant
+        # regardless of page geometry); text column takes whatever's left of
+        # CONTENT_WIDTH_IN, so a wider page gives the text more room to
+        # wrap into fewer lines rather than stretching the chart taller.
+        item_col_widths = [
+            Inches(CONTENT_WIDTH_IN - ITEM_CHART_WIDTH_IN),
+            Inches(ITEM_CHART_WIDTH_IN),
+        ]
 
+        # Prevent a single item's row (text + chart) from ever splitting
+        # across a page boundary - a defensive backstop, not the primary
+        # mechanism (that's getting the sizing right below), but real Word
+        # text-wrapping can still vary slightly from what's calculated here.
+        tr = layout_table.rows[0]._tr
+        trPr = tr.get_or_add_trPr()
+        cant_split = OxmlElement('w:cantSplit')
+        trPr.append(cant_split)
+
+        # Every paragraph in this block gets an explicit, tight space_before/
+        # after instead of inheriting Normal's defaults (0pt before, 10pt
+        # after) - fitting five items per dimension page is a spacing
+        # problem, not a font-size one (see the 2026-08-06 font audit: item
+        # text and comment body are already tied for smallest visible text
+        # in the document bar the 8/9pt captions, so there's little headroom
+        # left to shrink text further without hurting legibility).
         text_cell = layout_table.rows[0].cells[0]
         text_cell.width = item_col_widths[0]
         text_para = text_cell.paragraphs[0]
@@ -1180,6 +1297,9 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
         text_para.runs[0].font.size = Pt(10)
         if len(text_para.runs) > 1:
             text_para.runs[1].font.size = Pt(10)
+        text_para.paragraph_format.space_before = Pt(0)
+        text_para.paragraph_format.space_after = Pt(2)
+        text_para.paragraph_format.line_spacing = 1.0
         text_para.paragraph_format.keep_with_next = True
 
         # Whole-item coverage — never per-group (see anonymity design principle)
@@ -1192,6 +1312,9 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
             coverage_run.font.size = Pt(8)
             coverage_run.font.italic = True
             coverage_run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+            coverage_para.paragraph_format.space_before = Pt(0)
+            coverage_para.paragraph_format.space_after = Pt(2)
+            coverage_para.paragraph_format.line_spacing = 1.0
             coverage_para.paragraph_format.keep_with_next = True
 
         chart_cell = layout_table.rows[0].cells[1]
@@ -1205,10 +1328,25 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
 
             chart_para = chart_cell.paragraphs[0]
             chart_para.add_run().add_picture(tmp.name, width=Inches(ITEM_CHART_WIDTH_IN))
+            chart_para.paragraph_format.space_before = Pt(0)
+            # 0 not 2: the spacer paragraph immediately after this cell's
+            # table carries the whole gap to the next item on its own now
+            # (see below) - having both add space_after was double-counting
+            # the same visual gap.
+            chart_para.paragraph_format.space_after = Pt(0)
             chart_para.paragraph_format.keep_together = True
             os.unlink(tmp.name)
 
-        doc.add_paragraph()
+        # Spacer between this item's table and the next - tight space_after
+        # rather than the Normal default (10pt plus the paragraph's own line
+        # height), so five of these per dimension don't add up to real
+        # wasted space. Still a real (non-empty-looking) paragraph, not
+        # removed outright, so item boundaries stay unambiguous at the XML
+        # level the way coverage_para etc. already rely on.
+        spacer = doc.add_paragraph()
+        spacer.paragraph_format.space_before = Pt(0)
+        spacer.paragraph_format.space_after = Pt(3)
+        spacer.paragraph_format.line_spacing = 1.0
 
     # --- CLEAN COMMENTS (replaces old table style) ---
     # The Self-Assessment report must only ever show the leader's own comment,
@@ -1221,6 +1359,14 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
         section_comments = [c for c in section_comments if c.get('group') == 'Self']
     if section_comments:
         comment_heading = doc.add_paragraph()
+        # Deliberate, unconditional break - comments always start on a fresh
+        # page, whether there's 2 short comments or 20 long ones. Structural
+        # consistency (the same element always behaving the same way) is the
+        # goal here, not using up whatever space happens to be left after the
+        # five items above - that's what made the previous space-aware
+        # heuristic for dimension breaks unpredictable, and this deliberately
+        # avoids repeating that mistake in a new spot.
+        comment_heading.paragraph_format.page_break_before = True
         comment_heading.paragraph_format.keep_with_next = True
         run = comment_heading.add_run(f"Comments on {dim_name}")
         run.bold = True
