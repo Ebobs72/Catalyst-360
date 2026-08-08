@@ -254,30 +254,41 @@ COLOURS = {
     'grey_mid': '#6B6B6B',            # Peers
     'grey_light': '#9A9A9A',          # Direct Reports
     'grey_lightest': '#C4C4C4',       # Others
-    'charcoal': '#4D4D4F',           # Radar chart All Raters line/markers only
-                                      # (see 'radar_all_raters' below) - no
-                                      # longer the bar-chart All Raters colour
-                                      # as of 2026-08-08, see 'heritage_white'.
+    'charcoal': '#4D4D4F',           # No longer used for "All Raters" - kept
+                                      # only as a general-purpose dark grey,
+                                      # not tied to any one meaning.
     'charcoal_grey': '#5F5E5A',      # Potential Blind Spots header
-    'radar_all_raters': '#B2B2B2',   # All Raters FILL on the OVERVIEW RADAR
-                                      # ONLY, not the bar charts. Confirmed
-                                      # Bentley brand value, lighter than
-                                      # 'charcoal' on purpose: the radar's two
-                                      # series have semi-transparent fills that
-                                      # overlap, and a charcoal fill sat too
-                                      # close to bentley_green's fill in tonal
-                                      # value - the blended overlap read as
-                                      # indistinct from either series alone.
-                                      # Bar charts don't stack fills like this,
-                                      # so they don't need this split.
     'heritage_white': '#DCD8C0',     # All Raters bar colour (item bar charts,
-                                      # self-only bar) AND, separately, the
+                                      # self-only bar), the radar chart's All
+                                      # Raters FILL, AND, separately, the
                                       # Development Areas PAPU-NANU header -
-                                      # same hex value serving two different
+                                      # same hex value serving multiple
                                       # concepts, flagged 2026-08-08 and
                                       # confirmed intentional by the human:
                                       # it's a real colour in the confirmed
                                       # palette, so reusing it is fine.
+    'heritage_white_deep': '#BBB8A3', # Radar chart's All Raters LINE/markers
+                                      # only - a deepened variant of
+                                      # heritage_white (also used, coincidentally
+                                      # via the same hex, as 'gap_over_rating'
+                                      # in the Executive Summary - kept as a
+                                      # separate named constant so the two can
+                                      # vary independently later, not coupled
+                                      # just because they share a value today).
+                                      # heritage_white itself is far too light
+                                      # to use at full opacity for a thin line:
+                                      # tested at only 1.44:1 contrast against
+                                      # the white chart background (this
+                                      # deepened version reaches 2.0:1) - still
+                                      # short of the ~3:1 WCAG guideline for
+                                      # graphical elements, but the human's
+                                      # explicit call is that matching the All
+                                      # Raters bar identity matters more here
+                                      # than maximising line contrast, given
+                                      # the FILL (a much larger, more legible
+                                      # area) already carries genuine
+                                      # heritage_white and is what most
+                                      # visibly makes that identity match.
     'good_news_tint': '#5D705E',      # Good News PAPU-NANU header - a genuine
                                       # 30% tint of bentley_green (blended
                                       # toward white), not just "some other
@@ -349,9 +360,10 @@ COLOURS = {
 # strength, exclusive to Self. The four individual rater groups are a
 # dark-to-light greyscale progression as of 2026-08-08 (client feedback -
 # green tints previously used here are retired). "All Raters"
-# (GROUP_DISPLAY['Combined']) is 'heritage_white' on bar charts and 'charcoal'
-# / 'radar_all_raters' on the radar - not a GROUP_COLOURS entry since it isn't
-# a rater group.
+# (GROUP_DISPLAY['Combined']) is 'heritage_white' everywhere it appears (item
+# bar charts and the radar chart's fill; the radar's line/markers use the
+# deepened 'heritage_white_deep' for visibility) - not a GROUP_COLOURS entry
+# since it isn't a rater group.
 GROUP_COLOURS = {
     'Self': COLOURS['bentley_green'],
     'Boss': COLOURS['grey_dark'],

@@ -555,20 +555,28 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
             color=COLOURS['bentley_green'], markersize=10)
     ax.fill(angles, self_values, alpha=0.25, color=COLOURS['bentley_green'])
     
-    # Plot Combined scores if available. Line/markers use 'charcoal' - the
-    # SAME colour as "All Raters" on the bar charts elsewhere in the report,
-    # so the identity is consistent wherever the legend/line appears. Only the
-    # FILL uses the lighter 'radar_all_raters' grey: this chart's two series
-    # have semi-transparent fills that overlap, and a charcoal fill sat too
-    # close to bentley_green's fill in tonal value, so the overlap zone
-    # blended into indistinguishable from either series alone. The bar charts
-    # don't stack fills like this, so they don't need this split.
+    # Plot Combined scores if available. FILL uses 'heritage_white' - matches
+    # the "All Raters" bar chart colour exactly, and is what actually
+    # delivers the visual identity match, since the large shaded region is
+    # what a reader associates with a colour. Composited-luminance maths
+    # confirms it doesn't reintroduce the overlap-muddiness problem this
+    # chart's two stacked semi-transparent fills had before (Self-only vs
+    # All-Raters-only luminance gap is 0.168 with heritage_white, wider than
+    # the old grey fill's 0.132). LINE/markers use 'heritage_white_deep', not
+    # the base heritage_white: a full-opacity heritage_white line measures
+    # only 1.44:1 contrast against the white chart background, effectively
+    # invisible, and even the deepened variant only reaches 2.0:1 (short of
+    # the ~3:1 WCAG guideline for graphical elements) - but matching the All
+    # Raters bar identity matters more here than maximising line contrast,
+    # per the human's explicit call 2026-08-08, given the fill above already
+    # carries genuine heritage_white and is what most visibly makes the
+    # identity match.
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
         ax.plot(angles, combined_values, 'o-', linewidth=3, label='All Raters',
-                color=COLOURS['charcoal'], markersize=10)
-        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['radar_all_raters'])
+                color=COLOURS['heritage_white_deep'], markersize=10)
+        ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['heritage_white'])
     
     # Configure the chart
     ax.set_ylim(0, 5)
@@ -626,10 +634,9 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
             values.append(val)
             colors.append(GROUP_COLOURS[group])
     
-    # Add combined bar if requested and available. Heritage White as of
-    # 2026-08-08 (was 'charcoal') - the radar chart's All Raters line/fill are
-    # a separate, unrelated decision (COLOURS['charcoal'] /
-    # COLOURS['radar_all_raters']) and are unaffected by this.
+    # Add combined bar if requested and available. Heritage White, matching
+    # the radar chart's All Raters fill (see create_radar_chart) - both now
+    # use the same colour identity.
     if include_combined and scores.get('Combined') is not None:
         groups.append(GROUP_DISPLAY['Combined'])
         values.append(scores['Combined'])
