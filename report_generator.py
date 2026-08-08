@@ -918,8 +918,7 @@ def add_response_summary(doc, data):
     heading.paragraph_format.page_break_before = True
     
     response_counts = data.get('response_counts', {})
-    hidden_groups = data.get('hidden_groups', [])
-    
+
     table = doc.add_table(rows=1, cols=2)
     table.style = 'Table Grid'
     table.autofit = False
@@ -956,39 +955,33 @@ def add_response_summary(doc, data):
     row[1].width = widths[1]
     row[1].paragraphs[0].runs[0].bold = True
     row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # Anonymity notes. Two different things can happen and they are not the same,
-    # so they get separate sentences rather than one vague catch-all.
-    from framework import ANONYMITY_THRESHOLD
 
-    notes = []
-    if hidden_groups:
-        notes.append(
-            f"To protect anonymity, respondent groups with fewer than "
-            f"{ANONYMITY_THRESHOLD} responses have been combined into 'Others'. "
-            f"Groups combined: "
-            f"{', '.join(GROUP_DISPLAY.get(g, g) for g in hidden_groups)}."
-        )
 
-    suppressed_groups = data.get('suppressed_groups') or []
-    suppressed_count = data.get('suppressed_count', 0)
-    if suppressed_groups:
-        people = "one response" if suppressed_count == 1 else f"{suppressed_count} responses"
-        notes.append(
-            f"{people.capitalize()} could not be reported without identifying the "
-            f"individuals concerned, because too few people responded in that group "
-            f"and there was no larger group to combine them with. That feedback has "
-            f"therefore been left out of the scores and comments in this report. "
-            f"Groups affected: "
-            f"{', '.join(GROUP_DISPLAY.get(g, g) for g in suppressed_groups)}."
-        )
+def add_fold_transparency_note(doc, data):
+    """Generic disclosure that group-folding occurred, with no counts or group
+    names. Fires for any tier of the cascade in database.py's
+    get_leader_feedback_data (tier 1: Peers/DRs into Others; tier 2: Others
+    into Peers/DRs; suppression, dormant fallback) via data['anonymity_applied'].
+    This is now the SOLE fold-disclosure text in the report — the older
+    per-group notes that used to live in add_response_summary (naming which
+    groups were combined, or how many responses were suppressed) were removed
+    2026-08-08 because keeping both alongside this generic one would name
+    exactly what the generic wording is meant to hide. Silent when
+    data['anonymity_applied'] is False, i.e. nothing folded.
+    """
+    if not data.get('anonymity_applied'):
+        return
 
-    for note_text in notes:
-        note = doc.add_paragraph()
-        run = note.add_run(f"Note: {note_text}" if len(notes) == 1 else note_text)
-        run.font.size = Pt(9)
-        run.font.italic = True
-        run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+    note = doc.add_paragraph()
+    run = note.add_run(
+        "To protect anonymity, one or more respondent groups with too few "
+        "responses to report individually have been combined with another "
+        "group. Where this applies, the affected group label in this report "
+        "reflects combined responses rather than a single respondent category."
+    )
+    run.font.size = Pt(9)
+    run.font.italic = True
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
 
 def add_executive_summary(doc, data):
@@ -2039,6 +2032,7 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
 
         # Response Summary + Executive Summary + Radar — all on one page
         add_response_summary(doc, data)
+        add_fold_transparency_note(doc, data)
         add_executive_summary(doc, data)
         
         add_papu_nanu_section(doc, data)

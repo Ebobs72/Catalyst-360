@@ -1229,7 +1229,13 @@ class Database:
             'hidden_groups': hidden_groups,
             'suppressed_groups': suppressed_groups,
             'suppressed_count': others_count if others_suppressed else 0,
-            'anonymity_applied': len(hidden_groups) > 0 or bool(suppressed_groups)
+            'others_fold_target': others_fold_target,
+            # True whenever ANY tier of the fold cascade actually fired — tier 1
+            # (hidden_groups non-empty), tier 2 (others_fold_target set), or the
+            # dormant suppression fallback. Checking hidden_groups alone missed
+            # the tier-2-only case (Others thin on its own while Peers/DRs are
+            # both healthy), which folds silently with hidden_groups still empty.
+            'anonymity_applied': len(hidden_groups) > 0 or bool(suppressed_groups) or bool(others_fold_target)
         }
         
         # Get comments

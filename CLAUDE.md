@@ -144,31 +144,61 @@ Concretely:
   stricter MIN_SPLIT suppression or forced comment-pooling that an earlier draft
   contained — the human explicitly relaxed to group-level display above the floor.
 
-### The thin-'Others' hole (BUG FOUND AND FIXED 2026-08-04)
+### The thin-'Others' hole, and the fold cascade that now resolves it
 Raised by the human: if only one or two people are nominated as 'Others' they are
 identifiable, because no other group folds into them. It was worse than that — the
 code was PUBLISHING A GROUP OF ONE, breaking the hard floor above.
 
 - Cause: sub-threshold Peers and DRs fold into Others, which is safe because
-  merging hides the split. 'Others' has nothing to fold into, and it was
+  merging hides the split. 'Others' had nothing to fold into, and it was
   whitelisted as always-visible in THREE places (`response_counts` seeded from raw
   Others, `g == 'Others'` in the Combined loop, and `'Others'` in the
   by_dimension allow-list). The `hidden_groups` marking for Others had no effect.
-- Fix in `get_leader_feedback_data`: if Others is still below ANONYMITY_THRESHOLD
-  after absorbing folded groups, it is SUPPRESSED — dropped from response_counts,
-  from per-item and per-dimension scores, from Combined, and its comments are
-  skipped. Exposed as `data['suppressed_groups']` and `data['suppressed_count']`.
-- IT MUST COME OUT OF COMBINED, not just the per-group display. Combined is the
-  mean of the group means, so if every other group is shown then a suppressed
-  group's mean is recoverable by subtraction. Verified: with Others suppressed the
-  Combined equals the value it would have had if those people had never responded.
-  Suppression that leaves the number derivable is not suppression.
-- Comments from a suppressed group are held back too. Showing them even unlabelled
-  would tell the leader they came from those two or three people, since every
-  other comment carries its group label.
-- The report says so rather than silently dropping feedback: `add_response_summary`
-  now emits a second note naming the affected groups and how many responses were
-  set aside.
+- First fix (2026-08-04): if Others was still below ANONYMITY_THRESHOLD after
+  absorbing folded groups, it was SUPPRESSED entirely — dropped from
+  response_counts, scores, Combined, and comments. This closed the hard-floor
+  breach but threw the feedback away.
+- SUPERSEDED THE NEXT DAY (2026-08-05, commit `1737e2d`) by a proper two-tier
+  cascade in `get_leader_feedback_data`, refined by `f4d8cac` (corrected
+  portal/Guidelines copy that still described the old "left out entirely"
+  behaviour) and `b021cf7` (extended the at-risk nudge to Peers/DRs). This is
+  the CURRENT behaviour:
+  - **Tier 1**: Peers/DRs below `ANONYMITY_THRESHOLD` fold into Others.
+  - **Tier 2**: if Others is still thin after absorbing tier 1, it folds the
+    other way — into whichever of Peers/DRs is still standing on its own
+    (Peers preferred, DRs as fallback). This is what actually recovers the
+    feedback that used to be suppressed.
+  - **Suppression** (the 2026-08-04 fix) remains in the code as a defensive
+    fallback for the case where tier 2 finds nowhere to fold into — i.e.
+    neither Peers nor DRs survives on its own. The code comment above it notes
+    this is mathematically unreachable today, given `MIN_RESPONSES_FOR_REPORT`
+    (5) and Boss's 2-person cap guaranteeing at least 3 non-Boss responses
+    always exist by report time. Kept as insurance, not as the expected path.
+  - Whichever tier fires, it MUST come out of Combined too, not just the
+    per-group display — Combined is the mean of the group means, so a folded
+    or suppressed group's contribution has to be genuinely merged in (tier 1/2)
+    or genuinely removed (suppression), never left in a state where it's
+    recoverable by subtraction.
+  - Comments from a suppressed group are held back too (tier 1/2 folding
+    already carries comments into the target group's pool, so this only
+    applies to the dormant suppression path). Showing them even unlabelled
+    would tell the leader they came from those two or three people, since
+    every other comment carries its group label.
+  - Verified 2026-08-08 with two constructed scenarios: Peers, DRs, and Others
+    all individually below threshold but summing to clear it (tier 1 folds all
+    three into a single Others bucket, as expected — tier 2 and suppression do
+    not fire); and Others thin alone with Peers/DRs both healthy (tier 2 fires,
+    folding Others into Peers — this is the case `hidden_groups` alone doesn't
+    flag, which is why `data['anonymity_applied']` now also checks
+    `others_fold_target`, not just `hidden_groups`/`suppressed_groups`).
+- Report-facing disclosure: `add_fold_transparency_note` in
+  `report_generator.py` (added 2026-08-08) prints a single generic sentence
+  between the Response Summary table and the Executive Summary whenever
+  `data['anonymity_applied']` is true, for either tier. Deliberately reveals no
+  counts and names no groups (per the human's instruction — the alternative
+  is the older per-group notes still inside `add_response_summary`, which DO
+  name the specific groups folded; that naming has not been removed but now
+  sits alongside the generic note, which is worth revisiting for consistency).
 - PREVENTION, which is the better fix: `RATER_REQUIREMENTS['Others']` gained
   `min_if_any: ANONYMITY_THRESHOLD`. Others is all-or-nothing — nominate none, or
   nominate at least 3. Nominating 1-2 warns in the portal (soft warning, no hard
