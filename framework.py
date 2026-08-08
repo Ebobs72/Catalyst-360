@@ -290,23 +290,36 @@ COLOURS = {
                                       # past the WCAG AA 4.5:1 minimum (the old
                                       # value was 4.5:1 exactly - right on the
                                       # edge).
-    'good_news_tint_pale': '#DCE0DC', # Executive Summary "under-rating"
-                                      # (self scores below All Raters, the
-                                      # same direction as Good News) gap cell -
-                                      # an 85% tint of bentley_green, pale
-                                      # enough for the cell's dark body text,
-                                      # calibrated to a similar lightness to
-                                      # the arbitrary Excel green it replaces.
-    'blind_spot_tint_pale': '#EFEFEE', # Executive Summary "over-rating" (self
-                                      # scores above All Raters, the same
-                                      # direction as Potential Blind Spots) gap
-                                      # cell - a 90% tint of charcoal_grey
-                                      # (the Blind Spots header colour), same
-                                      # logic as good_news_tint_pale above:
-                                      # the gap direction that already has a
-                                      # PAPU-NANU identity elsewhere in the
-                                      # report reuses that identity here too,
-                                      # rather than an arbitrary unrelated hue.
+    'gap_under_rating': '#BAC2BA',    # Executive Summary "under-rating" gap
+                                      # cell ONLY (self scores below All
+                                      # Raters, i.e. by_dimension['Gap'] < 0 -
+                                      # confirmed against database.py, Gap =
+                                      # Self - Combined, so negative genuinely
+                                      # means self rated lower). A 70% tint of
+                                      # bentley_green. Isolated from the
+                                      # PAPU-NANU system deliberately - Good
+                                      # News represents the same gap direction
+                                      # but is a separate colour decision (see
+                                      # 'good_news_tint' above); this table is
+                                      # scanned quickly in a live coaching
+                                      # conversation, so 2026-08-08 moved it
+                                      # from an 85% tint (too subtle to read
+                                      # at a glance) to this more present 70%.
+    'gap_over_rating': '#BBB8A3',     # Executive Summary "over-rating" gap
+                                      # cell ONLY (Gap > 0, self rated higher).
+                                      # A deepened variant of heritage_white
+                                      # (scaled darker, not the base value
+                                      # used elsewhere for All Raters bars/
+                                      # Development Areas), same 2026-08-08
+                                      # reasoning as gap_under_rating - more
+                                      # presence for a quickly-scanned table.
+                                      # Earlier passes tried the base
+                                      # heritage_white value, and before that
+                                      # a pale tint of charcoal_grey tying it
+                                      # to Potential Blind Spots' identity -
+                                      # both superseded, not a PAPU-NANU
+                                      # colour despite representing the same
+                                      # gap direction as that quadrant.
     'bentley_cream': '#F5F5DC',      # Bentley cream
     'bentley_charcoal': '#2C2C2C',   # Bentley charcoal
     'light_grey': '#F5F5F5',

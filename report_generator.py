@@ -1031,16 +1031,19 @@ def add_executive_summary(doc, data):
         if gap is not None:
             row[3].text = f"{gap:+.1f}"
             if gap > SIGNIFICANT_GAP:
-                # Over-rating - same gap direction as Potential Blind Spots
-                # (self rates higher than others), so it reuses that
-                # quadrant's colour identity (a pale tint of charcoal_grey)
-                # rather than an arbitrary unrelated hue.
-                set_cell_shading(row[3], 'EFEFEE')  # blind_spot_tint_pale
+                # Over-rating (self rates higher than others). Direction
+                # confirmed against by_dimension['Gap'] = Self - Combined in
+                # database.py (2026-08-08) - positive gap genuinely means
+                # self > others here, not inverted. Deeper Heritage White
+                # (COLOURS['gap_over_rating']), not the base heritage_white -
+                # this table is scanned quickly in a live coaching
+                # conversation, so more presence than the pale version wins.
+                set_cell_shading(row[3], 'BBB8A3')  # gap_over_rating
             elif gap < -SIGNIFICANT_GAP:
-                # Under-rating - same gap direction as Good News (others
-                # rate higher than self), reusing that quadrant's colour
-                # identity (a pale tint of bentley_green).
-                set_cell_shading(row[3], 'DCE0DC')  # good_news_tint_pale
+                # Under-rating (others rate higher than self). 70% tint of
+                # bentley_green (COLOURS['gap_under_rating']), same reasoning
+                # as above - more saturated than the original pale pass.
+                set_cell_shading(row[3], 'BAC2BA')  # gap_under_rating
         else:
             row[3].text = "-"
 
