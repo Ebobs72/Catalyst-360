@@ -7,6 +7,7 @@ Works with Microsoft 365 / Outlook, Gmail, or any SMTP provider.
 Tracks all sent emails in the database.
 """
 
+import os
 import smtplib
 import ssl
 from email.mime.text import MIMEText
@@ -64,27 +65,42 @@ def get_app_base_url():
 
 
 def get_smtp_config():
-    """Get SMTP configuration from Streamlit secrets."""
+    """
+    Get SMTP configuration - environment variables first, falling back to
+    Streamlit secrets per field. Same os.environ-first, st.secrets-fallback
+    pattern as report_generator._get_api_key(), extended across SMTP's six
+    fields so a deployment (e.g. Render) can supply them as plain env vars
+    without needing a secrets.toml at all. Resolution is per-field, not
+    per-source - one field can come from the environment while another
+    falls back to secrets, so a partially-migrated setup still works.
+    """
     try:
         email_config = st.secrets.get("email", {})
-        smtp_server = email_config.get("smtp_server", "")
-        smtp_port = email_config.get("smtp_port", 587)
-        username = email_config.get("username", "")
-        password = email_config.get("password", "")
-        sender_email = email_config.get("sender_email", username)
-        sender_name = email_config.get("sender_name", "Bentley Compass 360")
-        
-        if smtp_server and username and password:
-            return {
-                'smtp_server': smtp_server,
-                'smtp_port': int(smtp_port),
-                'username': username,
-                'password': password,
-                'sender_email': sender_email,
-                'sender_name': sender_name
-            }
     except Exception:
-        pass
+        email_config = {}
+
+    def resolve(env_name, secrets_key, default=""):
+        env_value = os.environ.get(env_name)
+        if env_value:
+            return env_value
+        return email_config.get(secrets_key, default)
+
+    smtp_server = resolve("SMTP_SERVER", "smtp_server")
+    smtp_port = resolve("SMTP_PORT", "smtp_port", 587)
+    username = resolve("SMTP_USERNAME", "username")
+    password = resolve("SMTP_PASSWORD", "password")
+    sender_email = resolve("SMTP_SENDER_EMAIL", "sender_email", username)
+    sender_name = resolve("SMTP_SENDER_NAME", "sender_name", "Bentley Compass 360")
+
+    if smtp_server and username and password:
+        return {
+            'smtp_server': smtp_server,
+            'smtp_port': int(smtp_port),
+            'username': username,
+            'password': password,
+            'sender_email': sender_email,
+            'sender_name': sender_name
+        }
     return None
 
 
