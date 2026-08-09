@@ -649,13 +649,44 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
     values = values[::-1]
     colors = colors[::-1]
     
-    # Per-group vertical allocation tightened from 0.5in to 0.4in (and the
-    # floor from 0.8in to 0.65in) so more items fit on a page - aiming for
-    # about four per page in the dimension sections rather than three.
-    fig, ax = plt.subplots(figsize=(4.5, max(0.65, len(groups) * 0.4)))
+    # Per-group vertical allocation tightened again from 0.4in to 0.32in.
+    # The "5 items always fit on one page" guarantee (see add_dimension_section
+    # and the w:cantSplit on each item row) was only ever verified against data
+    # where some groups had folded into Others, i.e. 3-4 bars per item. A real,
+    # fully unfolded item (Self + Boss + Peers + DRs + Others + Combined, 6 bars)
+    # is taller, and on the FIRST dimension's page - which also carries the
+    # "Detailed Feedback by Dimension" heading the other dimensions don't have -
+    # that extra height was enough to push the 5th item onto a page of its own.
+    # Confirmed on a real 6-bar report: Leading Self fit only 4 of 5 items before
+    # this change.
+    #
+    # Floor raised from 0.65in to 0.8in when doing this - NOT left alone. The
+    # floor only ever bound the 1-bar case under the old 0.4 multiplier
+    # (1*0.4=0.4in, floored to 0.65in); a 2-bar item sat at 0.8in, safely above
+    # the floor, so the floor's own value was never actually exercised at 2
+    # bars. Dropping the multiplier to 0.32 put 2-bar items AT the old 0.65in
+    # floor for the first time (2*0.32=0.64in) - and 0.65in turned out to be too
+    # short for 2 bars plus their value labels: rendered and found the two
+    # labels overlapping. Raising the floor to 0.8in restores the 2-bar case to
+    # its previous, working height exactly; a 1-bar item now gets slightly more
+    # room than before (0.65in -> 0.8in), which only ever makes that sparser
+    # case easier to read, not harder.
+    #
+    # CORRECTION: shrinking the slot from 0.4in to 0.32in without touching
+    # `height` below cut the bar itself, not just the gap - at height=0.4 the
+    # bar is a fixed 40% of whatever the slot is (0.16in old, 0.128in new),
+    # so both bar and gap shrank by the same 20%. The actual instruction was
+    # to leave bar depth alone and take the whole cut out of the whitespace
+    # between bars. Raised height 0.4 -> 0.5 to compensate: 0.5 * 0.32in =
+    # 0.16in, the SAME bar thickness as before the slot was ever reduced. The
+    # gap absorbs all of it instead: 0.6*0.4in=0.24in -> 0.5*0.32in=0.16in,
+    # a 33% cut to whitespace only. Total slot height (and therefore the page-
+    # fit fix) is unchanged by this - height only redistributes space within
+    # the slot, it doesn't add to it.
+    fig, ax = plt.subplots(figsize=(4.5, max(0.8, len(groups) * 0.32)))
 
     y_pos = np.arange(len(groups))
-    bars = ax.barh(y_pos, values, color=colors, height=0.4)
+    bars = ax.barh(y_pos, values, color=colors, height=0.5)
     
     ax.set_yticks(y_pos)
     ax.set_yticklabels(groups, fontsize=10, fontweight='bold')
