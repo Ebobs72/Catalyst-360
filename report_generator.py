@@ -946,8 +946,7 @@ def add_table_of_contents(doc):
 def add_response_summary(doc, data):
     """Add response summary table."""
     heading = add_section_heading(doc, "Response Summary", font_size=14)
-    heading.paragraph_format.page_break_before = True
-    
+
     response_counts = data.get('response_counts', {})
 
     table = doc.add_table(rows=1, cols=2)
