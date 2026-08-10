@@ -20,6 +20,7 @@ matplotlib.use('Agg')
 from datetime import datetime
 import tempfile
 import os
+import uuid
 import sys
 import time
 import textwrap
@@ -2107,8 +2108,20 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         create_cover_page(doc, leader_name, "Progress Report", dealership, cohort)
         doc.add_paragraph("Progress report generation coming soon...")
     
-    # Save
-    filename = f"{leader_name.replace(' ', '_')}_{report_type.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.docx"
+    # Save. The old filename (name_type_YYYYMMDD.docx, date only, no time or
+    # unique component) collided whenever the same leader+report type was
+    # generated more than once on the same calendar day - trivially easy to
+    # trigger with a double-click on "Generate" before the first request
+    # finishes, since REPORTS_DIR is one shared folder on the server, not
+    # per-session. Two concurrent doc.save() calls to the identical path can
+    # corrupt each other mid-write, and admin_dashboard.py's subsequent
+    # open(output_path, 'rb') can catch the file in that truncated state -
+    # this is what produced a real download link pointing at a near-empty
+    # file. A uuid suffix makes every generation's path unique regardless of
+    # leader, type, or timing, so concurrent/repeated generations can never
+    # collide.
+    unique_id = uuid.uuid4().hex[:8]
+    filename = f"{leader_name.replace(' ', '_')}_{report_type.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}_{unique_id}.docx"
     output_path = REPORTS_DIR / filename
     doc.save(output_path)
 
