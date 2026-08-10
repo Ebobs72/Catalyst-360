@@ -715,8 +715,15 @@ def create_self_only_bar(score, output_path):
     """Create horizontal bar chart for self-assessment only."""
     fig, ax = plt.subplots(figsize=(4.5, 0.65))
 
+    # height raised 0.4 -> 0.6: measured at 0.4 this bar embeds at only
+    # ~0.036in (2.6pt) thick once placed in the document at ITEM_CHART_WIDTH_IN
+    # - visibly a thin line, and noticeably thinner than the Full 360 item
+    # charts' bars (~0.078in/5.6pt in the densest 6-bar case). The figure's
+    # total height (0.65in) is untouched, so this costs nothing towards the
+    # "5 items per page" layout - height only redistributes the SAME fixed
+    # vertical space from margin into bar, it doesn't add any.
     if score is not None:
-        ax.barh([0], [score], color=COLOURS['bentley_green'], height=0.4)
+        ax.barh([0], [score], color=COLOURS['bentley_green'], height=0.6)
         # Place score at fixed right-aligned position
         ax.text(5.7, 0, f'{score:.1f}', va='center', ha='right', fontsize=12, fontweight='bold')
     
@@ -1392,14 +1399,25 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
         section_comments = [c for c in section_comments if c.get('group') == 'Self']
     if section_comments:
         comment_heading = doc.add_paragraph()
-        # Deliberate, unconditional break - comments always start on a fresh
-        # page, whether there's 2 short comments or 20 long ones. Structural
+        # Deliberate, unconditional break for the FULL 360 case - comments
+        # always start on a fresh page there, whether there's 2 short comments
+        # or 20 long ones from five different rater groups. Structural
         # consistency (the same element always behaving the same way) is the
-        # goal here, not using up whatever space happens to be left after the
-        # five items above - that's what made the previous space-aware
-        # heuristic for dimension breaks unpredictable, and this deliberately
-        # avoids repeating that mistake in a new spot.
-        comment_heading.paragraph_format.page_break_before = True
+        # goal, not using up whatever space happens to be left after the five
+        # items above - that's what made the previous space-aware heuristic
+        # for dimension breaks unpredictable, and this deliberately avoids
+        # repeating that mistake in a new spot.
+        #
+        # The Self-Assessment case is different enough to warrant a different
+        # rule: there is ALWAYS at most one comment (the leader's own; see the
+        # filter above), never an unbounded mix from several groups, so the
+        # volume this has to absorb is bounded and small. Forcing a fresh page
+        # for one short paragraph wastes it outright. No break here lets Word
+        # place it on the same page as the five items whenever it genuinely
+        # fits - not an estimate, just the natural flow - and only spill to a
+        # new page when it doesn't.
+        if not is_self_only:
+            comment_heading.paragraph_format.page_break_before = True
         comment_heading.paragraph_format.keep_with_next = True
         run = comment_heading.add_run(f"Comments on {dim_name}")
         run.bold = True
