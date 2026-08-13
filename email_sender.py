@@ -48,13 +48,26 @@ DEFAULT_BASE_URL = "https://catalyst-360-arbncruhflmazjemep8uzh.streamlit.app"
 
 def get_app_base_url():
     """
-    Base URL for rater and portal links, read from Streamlit secrets so each
-    deployment points at itself.
+    Base URL for rater and portal links, so each deployment points at itself.
 
-    Configure per environment as:
+    Checks APP_BASE_URL in the environment first, then Streamlit secrets,
+    matching the same os.environ-first pattern already used for
+    ANTHROPIC_API_KEY and the SMTP settings - Render (and most non-Streamlit-
+    Cloud hosts) has no st.secrets at all, so that path silently never
+    resolved there, and every link fell through to DEFAULT_BASE_URL (the LIVE
+    app) regardless of what a [app] base_url entry said in a secrets.toml
+    nobody deployed there had.
+
+    Configure per environment as either:
+        APP_BASE_URL=https://compass-360.onrender.com   (env var - Render)
+    or:
         [app]
-        base_url = "https://bentley-compass-360-sandbox.streamlit.app"
+        base_url = "https://bentley-compass-360-sandbox.streamlit.app"   (Streamlit Cloud secrets)
     """
+    env_url = os.environ.get("APP_BASE_URL")
+    if env_url:
+        return env_url.rstrip('/')
+
     try:
         url = st.secrets.get("app", {}).get("base_url")
         if url:
