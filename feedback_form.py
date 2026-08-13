@@ -16,7 +16,8 @@ from framework import (
     DEVELOPMENT_PRIORITY_COUNT, DEVELOPMENT_PRIORITY_INTRO,
     DEVELOPMENT_PRIORITY_PROMPT, DEVELOPMENT_PRIORITY_MINIMUM,
     DEVELOPMENT_PRIORITY_ACTION_MIN_CHARS,
-    get_item_text, get_prompt_text, get_logo_data_uri
+    get_item_text, get_prompt_text, get_logo_data_uri,
+    SUPPORTED_LOCALES, RTL_LOCALES, dimension_slug
 )
 
 TOTAL_ITEMS = 45
@@ -32,6 +33,15 @@ TOTAL_ITEMS = 45
 # theme, not custom CSS here.
 SCALE_OPTIONS = [SCALE_FREQUENCY[i] for i in (1, 2, 3, 4, 5, 0)]
 SCALE_LABEL_TO_VALUE = {v: str(k) for k, v in SCALE_FREQUENCY.items()}
+
+# translations string_key suffixes for the rating scale (ui_rating_{suffix}).
+# st.segmented_control's stored value IS the displayed label text, so once
+# this label is translated, reversing it back to a stored code ("0"-"5") has
+# to go through a LOCALE-AWARE map, not the English-only SCALE_LABEL_TO_VALUE
+# above - see the scale_labels_by_code/scale_label_to_value_localized build in
+# render_feedback_form. Getting this wrong silently drops ratings, so it's
+# handled explicitly rather than left to the English map's .get(..., "") default.
+SCALE_KEY_SUFFIX = {1: 'rarely', 2: 'occasionally', 3: 'sometimes', 4: 'often', 5: 'consistently', 0: 'no_opportunity'}
 
 
 def _count_answered_ratings(draft_ratings=None):
@@ -53,8 +63,17 @@ def _count_answered_ratings(draft_ratings=None):
     return count
 
 
-def _collect_current_answers():
-    """Gather all current ratings and comments from session state."""
+def _collect_current_answers(label_to_value=None):
+    """Gather all current ratings and comments from session state.
+
+    label_to_value maps the CURRENTLY DISPLAYED scale label back to its
+    stored code ("0"-"5"). Defaults to the English map, but every real call
+    site inside render_feedback_form passes the rater's locale-aware map
+    instead: once the rating scale labels are translated, the widget's stored
+    value IS the translated label, and the English-only default would fail to
+    find it and silently drop the rating as "" rather than raise.
+    """
+    label_to_value = label_to_value or SCALE_LABEL_TO_VALUE
     ratings = {}
     comments = {}
 
@@ -65,7 +84,7 @@ def _collect_current_answers():
     for item_num in range(1, TOTAL_ITEMS + 1):
         label = st.session_state.get(f"rating_{item_num}")
         if label:
-            ratings[item_num] = SCALE_LABEL_TO_VALUE.get(label, "")
+            ratings[item_num] = label_to_value.get(label, "")
 
     # Dimension comments
     for dim_name in DIMENSIONS.keys():
@@ -139,8 +158,95 @@ def _auto_save():
         pass  # Silent fail — don't disrupt the rater's experience
 
 
+def _t(db, key, locale, fallback):
+    """Shorthand for db.get_translation - returns fallback (the current
+    English string, already hardcoded at every call site) until a real
+    translation row exists for `locale`. Safe to call with locale=None."""
+    return db.get_translation(key, locale, fallback_text=fallback)
+
+
+def _active_locale(rater_info):
+    """The rater's effective locale for this render.
+
+    A locale just picked in THIS run lives in st.session_state (see
+    render_locale_picker) and takes priority; otherwise raters.locale from the
+    database is authoritative - it's what a returning rater's fresh
+    get_rater_by_token() lookup already carries, so the picker correctly never
+    re-appears for them.
+    """
+    return st.session_state.get('rater_locale') or rater_info.get('locale')
+
+
+def render_locale_picker(db, rater_info):
+    """One-time language choice, shown before any survey content whenever the
+    rater has no locale on file yet (raters.locale IS NULL and nothing has
+    been picked in this session either).
+
+    This screen's own copy is deliberately NOT run through get_translation -
+    there is no locale to translate it into until the rater has made a
+    choice - so it stays English plus each option's own native-script name,
+    which every rater can recognise regardless of what they read.
+    """
+    leader_name = rater_info['leader_name']
+    relationship = rater_info['relationship']
+    is_self = relationship == 'Self'
+
+    logo_uri = get_logo_data_uri()
+    logo_html = f'<img src="{logo_uri}" class="feedback-header-logo">' if logo_uri else ''
+    st.markdown(f"""
+    <div class="feedback-header">
+        {logo_html}
+        <h1 style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
+        <p style="font-size: 1.1rem; opacity: 0.9; margin: 0;">
+            {'Self-Assessment' if is_self else f'Feedback for <strong>{leader_name}</strong>'}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="background: #F8F9FA; padding: 1.2rem; border-radius: 8px; margin: 1.5rem 0; border-left: 4px solid #183319;">
+        <p style="margin: 0; color: #333; line-height: 1.6;">
+            <strong>Choose your language</strong><br>
+            Select the language you would like to use to complete this form. You will only be
+            asked once, so please choose the language you are most comfortable reading and
+            writing in.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    codes = list(SUPPORTED_LOCALES.keys())
+    labels = list(SUPPORTED_LOCALES.values())
+    default_index = codes.index('en')
+
+    choice_label = st.radio(
+        "Language",
+        options=labels,
+        index=default_index,
+        label_visibility="collapsed",
+        key="locale_picker_choice",
+    )
+
+    if st.button("Continue", type="primary", icon=":material/arrow_forward:", use_container_width=True):
+        code = codes[labels.index(choice_label)]
+        db.set_rater_locale(rater_info['id'], code)
+        st.session_state['rater_locale'] = code
+        st.rerun()
+
+
 def render_feedback_form(db, rater_info):
     """Render the feedback form for a rater."""
+
+    # --- Locale gate: shown once, before any survey content, until the rater
+    # has picked a language (raters.locale is set either on their row already
+    # or, on the very run they just picked, in session_state). Returning
+    # raters never see this again because get_rater_by_token() re-fetches
+    # rater_info fresh on every page load, already carrying whatever they
+    # chose last time.
+    if rater_info.get('locale') is None and st.session_state.get('rater_locale') is None:
+        render_locale_picker(db, rater_info)
+        return
+
+    locale = _active_locale(rater_info)
     
     leader_name = rater_info['leader_name']
     relationship = rater_info['relationship']
@@ -159,18 +265,43 @@ def render_feedback_form(db, rater_info):
         st.session_state.draft_loaded = True
         st.session_state.draft_saved_at = draft_saved_at
     
+    # RTL layout for Arabic - scoped to the form content area only. Numbers,
+    # Q-numbering, and the 1-5 rating scale are force-kept LTR per the i18n
+    # build instructions (section 5): mirroring those would misread as
+    # different numbers, not just flip direction.
+    if locale in RTL_LOCALES:
+        st.markdown("""
+        <style>
+        div[data-testid="stForm"] { direction: rtl; text-align: right; }
+        div[data-testid="stForm"] .item-container span:first-child {
+            direction: ltr; unicode-bidi: embed; display: inline-block;
+        }
+        div[data-testid="stForm"] [data-testid="stButtonGroup"] {
+            direction: ltr;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
     # Header
     logo_uri = get_logo_data_uri()
     logo_html = f'<img src="{logo_uri}" class="feedback-header-logo">' if logo_uri else ''
+    self_label = _t(db, 'ui_header_self_label', locale, 'Self-Assessment')
+    # leader_name is bolded BEFORE interpolation, not searched-and-replaced
+    # afterwards, so the markup travels with the {leader_name} placeholder
+    # wherever a translation puts it, rather than relying on the translated
+    # sentence containing the exact same substring the fallback does.
+    feedback_for_label = _t(db, 'ui_header_feedback_for', locale, 'Feedback for {leader_name}').format(leader_name=f"<strong>{leader_name}</strong>")
+    relationship_label = _t(db, f'ui_relationship_{relationship.lower()}', locale, GROUP_DISPLAY.get(relationship, relationship))
+    providing_as_label = _t(db, 'ui_header_providing_as', locale, 'Providing feedback as: {relationship}').format(relationship=relationship_label)
     st.markdown(f"""
     <div class="feedback-header">
         {logo_html}
         <h1 style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
         <p style="font-size: 1.1rem; opacity: 0.9; margin: 0;">
-            {'Self-Assessment' if is_self else f'Feedback for <strong>{leader_name}</strong>'}
+            {self_label if is_self else feedback_for_label}
         </p>
         <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 0.5rem;">
-            {f'Providing feedback as: {GROUP_DISPLAY.get(relationship, relationship)}' if not is_self else 'Bentley Compass Leadership Programme'}
+            {providing_as_label if not is_self else 'Bentley Compass Leadership Programme'}
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -178,72 +309,118 @@ def render_feedback_form(db, rater_info):
     # Resume banner
     if has_draft and draft_saved_at:
         st.info(
-            f"**Welcome back!** Your previous answers have been restored. "
-            f"You can continue from where you left off.",
+            _t(db, 'ui_resume_banner', locale,
+               "**Welcome back!** Your previous answers have been restored. "
+               "You can continue from where you left off."),
             icon=":material/history:"
         )
-    
+
     # Instructions
     if is_self:
-        st.markdown("""
+        instructions_self = _t(
+            db, 'ui_instructions_self', locale,
+            "<strong>About this self-assessment</strong><br>"
+            "Please rate yourself honestly on each statement below. Your self-assessment will be compared "
+            "with feedback from others to identify areas of alignment and potential blind spots. "
+            "There are no right or wrong answers – the value comes from honest reflection."
+        )
+        st.markdown(f"""
         <div style="background: #F8F9FA; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #183319;">
             <p style="margin: 0; color: #333; line-height: 1.6;">
-                <strong>About this self-assessment</strong><br>
-                Please rate yourself honestly on each statement below. Your self-assessment will be compared 
-                with feedback from others to identify areas of alignment and potential blind spots. 
-                There are no right or wrong answers – the value comes from honest reflection.
+                {instructions_self}
             </p>
         </div>
         """, unsafe_allow_html=True)
     else:
+        instructions_other = [
+            _t(db, 'ui_instructions_other_1', locale,
+               "Thank you for taking the time to complete this questionnaire. The results will be shared with "
+               "{leader_name} as part of the Bentley Compass Leadership Development Programme."
+               ).format(leader_name=f"<strong>{leader_name}</strong>"),
+            _t(db, 'ui_instructions_other_2', locale,
+               "This 360 feedback instrument provides leaders with a rounded view of their leadership effectiveness, "
+               "covering both functional leadership competencies and behavioural self-awareness."),
+            _t(db, 'ui_instructions_other_3', locale,
+               "Please take some time to complete this form, and note that all responses will be treated with "
+               "complete confidentiality. If you are part of a group response to this questionnaire, your individual "
+               "answers will be aggregated into overall scores and will not be individually identifiable."),
+            # These two keep their emphasis inline (as the original did) rather
+            # than bolding the whole sentence, so the fallback renders pixel-
+            # identical to today. A translator needs to keep the <strong> tags
+            # in place around the equivalent clause - flagged as a rough edge
+            # of this foundation pass, not solved generally here.
+            _t(db, 'ui_instructions_other_4', locale,
+               "Any comments you make will be anonymised to the group title you respond from – "
+               "<strong>unless you are the direct line manager of the individual.</strong>"),
+            _t(db, 'ui_instructions_other_5', locale,
+               "Rate how often you have observed each behaviour. If you have not had an opportunity to "
+               "observe someone behaving in that way, please choose <strong>\"No opportunity to observe\"</strong> "
+               "rather than guessing."),
+            _t(db, 'ui_instructions_other_6', locale,
+               "Your progress is saved automatically. You can close this window at any time "
+               "and return to this link to continue where you left off."),
+        ]
         st.markdown(f"""
         <div style="background: #F8F9FA; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #183319;">
             <p style="margin: 0; color: #333; line-height: 1.6;">
-                Thank you for taking the time to complete this questionnaire. The results will be shared with 
-                <strong>{leader_name}</strong> as part of the Bentley Compass Leadership Development Programme.
+                {instructions_other[0]}
             </p>
             <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
-                This 360 feedback instrument provides leaders with a rounded view of their leadership effectiveness, 
-                covering both functional leadership competencies and behavioural self-awareness.
+                {instructions_other[1]}
             </p>
             <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
-                Please take some time to complete this form, and note that all responses will be treated with 
-                complete confidentiality. If you are part of a group response to this questionnaire, your individual 
-                answers will be aggregated into overall scores and will not be individually identifiable.
+                {instructions_other[2]}
             </p>
             <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
-                Any comments you make will be anonymised to the group title you respond from – 
-                <strong>unless you are the direct line manager of the individual.</strong>
+                {instructions_other[3]}
             </p>
             <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
-                Rate how often you have observed each behaviour. If you have not had an opportunity to
-                observe someone behaving in that way, please choose <strong>"No opportunity to observe"</strong>
-                rather than guessing.
+                {instructions_other[4]}
             </p>
             <p style="margin: 1rem 0 0 0; color: #183319; line-height: 1.6;">
-                <strong>Your progress is saved automatically.</strong> You can close this window at any time
-                and return to this link to continue where you left off.
+                <strong>{instructions_other[5]}</strong>
             </p>
         </div>
         """, unsafe_allow_html=True)
 
+    # Rating scale labels, translated. The segmented control's stored VALUE is
+    # this label text, so the reverse map back to a stored code has to use
+    # these SAME translated labels too (see _collect_current_answers) - built
+    # once here and reused for every item below and at both the Save and
+    # Submit handlers further down.
+    scale_labels_by_code = {
+        code: _t(db, f'ui_rating_{SCALE_KEY_SUFFIX[code]}', locale, SCALE_FREQUENCY[code])
+        for code in (1, 2, 3, 4, 5, 0)
+    }
+    scale_options_localized = [scale_labels_by_code[c] for c in (1, 2, 3, 4, 5, 0)]
+    scale_label_to_value_localized = {v: str(k) for k, v in scale_labels_by_code.items()}
+
     # --- FORM (using st.form for clean submission, with draft pre-population) ---
     # Note: We use st.form for the actual widgets, but auto-save happens via
     # a separate mechanism outside the form since on_change doesn't fire inside forms.
-    
+
     with st.form("feedback_form"):
         # Iterate through dimensions
         for dim_name, (start_item, end_item) in DIMENSIONS.items():
-            st.markdown(f'<div class="dimension-header">{dim_name}</div>', unsafe_allow_html=True)
-            
+            slug = dimension_slug(dim_name)
+            # dim_name itself stays the English key used for session_state,
+            # draft storage, and DB lookups throughout - only the DISPLAYED
+            # heading/description text is translated.
+            dim_display_name = _t(db, f'dimension_{slug}_name', locale, dim_name)
+            dim_display_desc = _t(db, f'dimension_{slug}_desc', locale, DIMENSION_DESCRIPTIONS[dim_name])
+
+            st.markdown(f'<div class="dimension-header">{dim_display_name}</div>', unsafe_allow_html=True)
+
             st.markdown(f"""
             <p style="color: #666; font-size: 0.95rem; margin-bottom: 1rem; font-style: italic;">
-                {DIMENSION_DESCRIPTIONS[dim_name]}
+                {dim_display_desc}
             </p>
             """, unsafe_allow_html=True)
-            
+
             for item_num in range(start_item, end_item + 1):
-                item_text = get_item_text(item_num, relationship)
+                fallback_item_text = get_item_text(item_num, relationship)
+                item_key = f"item_{item_num}_{'self' if relationship == 'Self' else 'other'}"
+                item_text = _t(db, item_key, locale, fallback_item_text)
 
                 st.markdown(f"""
                 <div class="item-container">
@@ -254,17 +431,17 @@ def render_feedback_form(db, rater_info):
 
                 # Pre-populate from draft if available. draft_ratings holds the
                 # stored code ("0"-"5"); the widget itself works in label text,
-                # so look up the matching label to preselect.
+                # so look up the matching (locale-aware) label to preselect.
                 default_label = None
                 if has_draft and draft_ratings and item_num in draft_ratings:
                     try:
-                        default_label = SCALE_FREQUENCY.get(int(draft_ratings[item_num]))
+                        default_label = scale_labels_by_code.get(int(draft_ratings[item_num]))
                     except (TypeError, ValueError):
                         default_label = None
 
                 st.segmented_control(
                     f"Rating for Q{item_num}",
-                    options=SCALE_OPTIONS,
+                    options=scale_options_localized,
                     default=default_label,
                     key=f"rating_{item_num}",
                     label_visibility="collapsed"
@@ -273,43 +450,57 @@ def render_feedback_form(db, rater_info):
                 # Slim inline progress readout, replacing the old sidebar panel
                 answered = _count_answered_ratings(draft_ratings)
                 pct = answered / TOTAL_ITEMS * 100
+                progress_text = _t(db, 'ui_progress_of', locale, "{answered} of {total}").format(
+                    answered=answered, total=TOTAL_ITEMS
+                )
                 st.markdown(f"""
                 <div class="item-progress">
                     <div class="item-progress-track">
                         <div class="item-progress-fill" style="width: {pct:.1f}%;"></div>
                     </div>
-                    <span class="item-progress-text">{answered} of {TOTAL_ITEMS}</span>
+                    <span class="item-progress-text">{progress_text}</span>
                 </div>
                 """, unsafe_allow_html=True)
-            
+
             # Comment for this dimension
+            comment_prompt_key = 'ui_dimension_comment_prompt_self' if is_self else 'ui_dimension_comment_prompt_other'
+            comment_prompt_fallback = (
+                "Optional: Any specific comments about yourself regarding {dimension}?" if is_self
+                else "Optional: Any specific comments about {leader_name} regarding {dimension}?"
+            )
+            comment_prompt = _t(db, comment_prompt_key, locale, comment_prompt_fallback).format(
+                dimension=dim_display_name, leader_name=leader_name
+            )
             st.markdown(f"""
             <p style="margin-top: 1rem; margin-bottom: 0.5rem; color: #555; font-size: 0.9rem;">
-                <em>Optional: Any specific comments about {leader_name if not is_self else 'yourself'} regarding {dim_name}?</em>
+                <em>{comment_prompt}</em>
             </p>
             """, unsafe_allow_html=True)
-            
+
             default_comment = ""
             if has_draft and draft_comments and dim_name in draft_comments:
                 default_comment = draft_comments[dim_name]
-            
+
             st.text_area(
                 f"Comments for {dim_name}",
                 value=default_comment,
                 key=f"comment_{dim_name}",
                 height=80,
                 label_visibility="collapsed",
-                placeholder="Share specific examples or observations..."
+                placeholder=_t(db, 'ui_dimension_comment_placeholder', locale, "Share specific examples or observations...")
             )
             
             st.markdown("<hr style='margin: 2rem 0; border: none; border-top: 1px solid #E0E0E0;'>", unsafe_allow_html=True)
         
         # Overall comments — two open prompts (not scored)
-        st.markdown('<div class="dimension-header">Overall Feedback</div>', unsafe_allow_html=True)
+        overall_feedback_header = _t(db, 'ui_overall_feedback_header', locale, "Overall Feedback")
+        st.markdown(f'<div class="dimension-header">{overall_feedback_header}</div>', unsafe_allow_html=True)
 
+        keep_form = 'self' if is_self else 'other'
+        keep_prompt = _t(db, f'prompt_keep_{keep_form}', locale, get_prompt_text('keep', relationship))
         st.markdown(f"""
         <p style="margin-top: 1rem; margin-bottom: 0.5rem; color: #333;">
-            <strong>{get_prompt_text('keep', relationship)}</strong>
+            <strong>{keep_prompt}</strong>
         </p>
         """, unsafe_allow_html=True)
 
@@ -323,12 +514,13 @@ def render_feedback_form(db, rater_info):
             key="comment_keep",
             height=100,
             label_visibility="collapsed",
-            placeholder="Describe the leadership qualities and behaviours that are most effective..."
+            placeholder=_t(db, 'ui_keep_placeholder', locale, "Describe the leadership qualities and behaviours that are most effective...")
         )
 
+        change_prompt = _t(db, f'prompt_change_{keep_form}', locale, get_prompt_text('change', relationship))
         st.markdown(f"""
         <p style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: #333;">
-            <strong>{get_prompt_text('change', relationship)}</strong>
+            <strong>{change_prompt}</strong>
         </p>
         """, unsafe_allow_html=True)
 
@@ -342,7 +534,7 @@ def render_feedback_form(db, rater_info):
             key="comment_change",
             height=100,
             label_visibility="collapsed",
-            placeholder="Suggest the one change that would make the biggest difference..."
+            placeholder=_t(db, 'ui_change_placeholder', locale, "Suggest the one change that would make the biggest difference...")
         )
 
         # --- Development priorities (self-assessment only) ---
@@ -351,11 +543,13 @@ def render_feedback_form(db, rater_info):
         # never see this: it is the leader's own development intent.
         if is_self:
             st.markdown("<hr style='margin: 2rem 0; border: none; border-top: 1px solid #E0E0E0;'>", unsafe_allow_html=True)
-            st.markdown('<div class="dimension-header">Your Development Priorities</div>', unsafe_allow_html=True)
+            priorities_header = _t(db, 'ui_priorities_header', locale, "Your Development Priorities")
+            st.markdown(f'<div class="dimension-header">{priorities_header}</div>', unsafe_allow_html=True)
 
+            priorities_intro = _t(db, 'ui_priorities_intro', locale, DEVELOPMENT_PRIORITY_INTRO)
             st.markdown(f"""
             <p style="margin-top: 1rem; margin-bottom: 1rem; color: #333; line-height: 1.6;">
-                {DEVELOPMENT_PRIORITY_INTRO}
+                {priorities_intro}
             </p>
             """, unsafe_allow_html=True)
 
@@ -363,6 +557,12 @@ def render_feedback_form(db, rater_info):
             by_rank = {p['rank']: p for p in existing_priorities}
 
             dimension_options = [""] + list(DIMENSIONS.keys())
+            select_placeholder = _t(db, 'ui_priority_select_placeholder', locale, "Select a dimension...")
+            priority_optional_note = _t(
+                db, 'ui_priority_optional_note', locale,
+                "(optional, but if you choose a dimension please say what you'll do)"
+            )
+            priority_label_template = _t(db, 'ui_priority_label', locale, "Priority {rank}")
 
             for rank in range(1, DEVELOPMENT_PRIORITY_COUNT + 1):
                 saved = by_rank.get(rank, {})
@@ -370,13 +570,11 @@ def render_feedback_form(db, rater_info):
                 required_label = (
                     ' <span style="color: #C00000;">*</span>'
                     if rank <= DEVELOPMENT_PRIORITY_MINIMUM
-                    else ' <span style="color: #999; font-weight: 400;">'
-                         '(optional, but if you choose a dimension please say '
-                         'what you\'ll do)</span>'
+                    else f' <span style="color: #999; font-weight: 400;">{priority_optional_note}</span>'
                 )
                 st.markdown(f"""
                 <p style="margin-top: 1.2rem; margin-bottom: 0.3rem; color: #183319; font-weight: 600;">
-                    Priority {rank}{required_label}
+                    {priority_label_template.format(rank=rank)}{required_label}
                 </p>
                 """, unsafe_allow_html=True)
 
@@ -384,11 +582,17 @@ def render_feedback_form(db, rater_info):
                 if saved.get('dimension') in dimension_options:
                     default_idx = dimension_options.index(saved['dimension'])
 
+                # format_func only changes what's DISPLAYED - the option VALUE
+                # stored in session_state (and later saved as the priority's
+                # dimension) stays the English dim_name, since that's the key
+                # DIMENSIONS/report_generator.py match against elsewhere.
                 st.selectbox(
                     f"Dimension for priority {rank}",
                     options=dimension_options,
                     index=default_idx,
-                    format_func=lambda x: x if x else "Select a dimension...",
+                    format_func=lambda x: (
+                        _t(db, f'dimension_{dimension_slug(x)}_name', locale, x) if x else select_placeholder
+                    ),
                     key=f"priority_dim_{rank}",
                     label_visibility="collapsed"
                 )
@@ -399,7 +603,7 @@ def render_feedback_form(db, rater_info):
                     key=f"priority_actions_{rank}",
                     height=80,
                     label_visibility="collapsed",
-                    placeholder="Be specific: which behaviours, and what will you do differently?"
+                    placeholder=_t(db, 'ui_priority_actions_placeholder', locale, "Be specific: which behaviours, and what will you do differently?")
                 )
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -409,22 +613,22 @@ def render_feedback_form(db, rater_info):
         
         with col_save:
             save_clicked = st.form_submit_button(
-                "Save & Continue Later",
+                _t(db, 'ui_button_save', locale, "Save & Continue Later"),
                 icon=":material/save:",
                 use_container_width=True
             )
 
         with col_submit:
             submit_clicked = st.form_submit_button(
-                "Submit Feedback",
+                _t(db, 'ui_button_submit', locale, "Submit Feedback"),
                 icon=":material/check_circle:",
                 use_container_width=True,
                 type="primary"
             )
-        
+
         # --- Handle Save & Continue Later ---
         if save_clicked:
-            ratings, comments = _collect_current_answers()
+            ratings, comments = _collect_current_answers(label_to_value=scale_label_to_value_localized)
             try:
                 db.save_draft(rater_id, ratings, comments)
                 # Priorities live on the leader row, not in the rater draft, so
@@ -436,18 +640,20 @@ def render_feedback_form(db, rater_info):
                 answered = len(ratings)
                 total = TOTAL_ITEMS
                 st.success(
-                    f"**Progress saved!** ({answered} of {total} items answered)\n\n"
-                    f"You can safely close this window. When you're ready to continue, "
-                    f"just use the same link — your answers will be waiting for you.",
+                    _t(db, 'ui_save_success', locale,
+                       "**Progress saved!** ({answered} of {total} items answered)\n\n"
+                       "You can safely close this window. When you're ready to continue, "
+                       "just use the same link — your answers will be waiting for you."
+                       ).format(answered=answered, total=total),
                     icon=":material/check_circle:"
                 )
             except Exception as e:
-                st.error(f"Could not save progress: {str(e)}")
-        
+                st.error(_t(db, 'ui_save_error_prefix', locale, "Could not save progress: {detail}").format(detail=str(e)))
+
         # --- Handle Submit ---
         if submit_clicked:
             # Collect all answers
-            ratings, comments = _collect_current_answers()
+            ratings, comments = _collect_current_answers(label_to_value=scale_label_to_value_localized)
             priorities = _collect_priorities() if is_self else []
 
             # Validate - check that all items have been rated
@@ -465,6 +671,8 @@ def render_feedback_form(db, rater_info):
                 _priorities_missing_actions(priorities) if is_self else []
             )
 
+            progress_saved_note = _t(db, 'ui_note_progress_saved', locale, "Your progress has been saved — you won't lose your answers.")
+
             if missing:
                 # Save what they have so far even though submission failed
                 try:
@@ -474,11 +682,12 @@ def render_feedback_form(db, rater_info):
                 except Exception:
                     pass
 
+                missing_list = ', '.join(f"Q{n}" for n in missing[:5]) + ('...' if len(missing) > 5 else '')
                 st.error(
-                    f"Please provide a rating for all items before submitting. "
-                    f"Missing: Q{', Q'.join(map(str, missing[:5]))}"
-                    f"{'...' if len(missing) > 5 else ''}\n\n"
-                    f"Your progress has been saved — you won't lose your answers."
+                    _t(db, 'ui_error_missing_items', locale,
+                       "Please provide a rating for all items before submitting. "
+                       "Missing: {missing_list}").format(missing_list=missing_list)
+                    + "\n\n" + progress_saved_note
                 )
             elif too_few_priorities:
                 # The leader must commit to at least one area to work on
@@ -489,11 +698,12 @@ def render_feedback_form(db, rater_info):
                     pass
 
                 st.error(
-                    f"Please choose at least one development priority before "
-                    f"submitting. Pick the dimension you most want to work on and "
-                    f"say what you intend to do differently. If it helps, build on "
-                    f"what you wrote in the closing questions above.\n\n"
-                    f"Your progress has been saved — you won't lose your answers."
+                    _t(db, 'ui_error_too_few_priorities', locale,
+                       "Please choose at least one development priority before "
+                       "submitting. Pick the dimension you most want to work on and "
+                       "say what you intend to do differently. If it helps, build on "
+                       "what you wrote in the closing questions above.")
+                    + "\n\n" + progress_saved_note
                 )
             elif duplicate_dims:
                 # Ranking the same dimension twice is meaningless, so block it
@@ -503,11 +713,15 @@ def render_feedback_form(db, rater_info):
                 except Exception:
                     pass
 
+                duplicate_list = ', '.join(
+                    _t(db, f'dimension_{dimension_slug(d)}_name', locale, d) for d in duplicate_dims
+                )
                 st.error(
-                    f"Please choose a different dimension for each development "
-                    f"priority. Currently chosen more than once: "
-                    f"{', '.join(duplicate_dims)}.\n\n"
-                    f"Your progress has been saved — you won't lose your answers."
+                    _t(db, 'ui_error_duplicate_priorities', locale,
+                       "Please choose a different dimension for each development "
+                       "priority. Currently chosen more than once: {duplicate_list}."
+                       ).format(duplicate_list=duplicate_list)
+                    + "\n\n" + progress_saved_note
                 )
             elif priorities_without_actions:
                 # A chosen dimension with no actions carries nothing into the
@@ -518,15 +732,23 @@ def render_feedback_form(db, rater_info):
                 except Exception:
                     pass
 
+                # Pluralisation ("Priority"/"Priorities") is English-specific
+                # grammar - a simple suffix swap doesn't generalise to most of
+                # the six target languages. Left as-is for this foundation
+                # pass (no translation content is being written yet); a real
+                # translator will need to restructure this sentence for their
+                # language rather than translate the {plural} token literally.
                 ranks = ', '.join(str(r) for r in priorities_without_actions)
                 plural = 'ies' if len(priorities_without_actions) > 1 else 'y'
                 st.error(
-                    f"Please say what you intend to do for each priority you've "
-                    f"chosen. Missing specifics for Priorit{plural} {ranks}.\n\n"
-                    f"Name the behaviours you want to change and the actions you'll "
-                    f"take. If you'd rather not commit to one of these areas yet, "
-                    f"set its dimension back to \"Select a dimension...\".\n\n"
-                    f"Your progress has been saved — you won't lose your answers."
+                    _t(db, 'ui_error_priorities_missing_actions', locale,
+                       "Please say what you intend to do for each priority you've "
+                       "chosen. Missing specifics for Priorit{plural} {ranks}.\n\n"
+                       "Name the behaviours you want to change and the actions you'll "
+                       "take. If you'd rather not commit to one of these areas yet, "
+                       "set its dimension back to \"{select_placeholder}\"."
+                       ).format(plural=plural, ranks=ranks, select_placeholder=select_placeholder)
+                    + "\n\n" + progress_saved_note
                 )
             else:
                 # Process ratings for final submission — values are "0" (no
@@ -552,14 +774,16 @@ def render_feedback_form(db, rater_info):
 
                     db.submit_feedback(rater_id, processed_ratings, processed_comments)
 
-                    st.success("Thank you! Your feedback has been submitted successfully.")
+                    st.success(_t(db, 'ui_success_submitted', locale, "Thank you! Your feedback has been submitted successfully."))
                     st.balloons()
-                    
+
                     st.query_params["submitted"] = "true"
                     st.rerun()
-                    
+
                 except Exception as e:
-                    st.error(f"An error occurred while submitting your feedback. Please try again. ({str(e)})")
+                    st.error(_t(db, 'ui_submit_error', locale,
+                                "An error occurred while submitting your feedback. Please try again. ({detail})"
+                                ).format(detail=str(e)))
     
     # --- Auto-save on page unload (JavaScript injection) ---
     # This sends current form data to Streamlit before the browser tab closes
@@ -580,10 +804,12 @@ def render_feedback_form(db, rater_info):
     # This keeps just the save/draft timestamp, which the inline bar doesn't show.
     with st.sidebar:
         if st.session_state.get('last_saved'):
-            st.markdown(f"<p style='color: #999; font-size: 0.8rem;'>Last saved: {st.session_state.last_saved}</p>", 
+            last_saved_text = _t(db, 'ui_last_saved', locale, "Last saved: {time}").format(time=st.session_state.last_saved)
+            st.markdown(f"<p style='color: #999; font-size: 0.8rem;'>{last_saved_text}</p>",
                        unsafe_allow_html=True)
         elif has_draft and draft_saved_at:
-            st.markdown(f"<p style='color: #999; font-size: 0.8rem;'>Draft from: {str(draft_saved_at)[:16]}</p>", 
+            draft_from_text = _t(db, 'ui_draft_from', locale, "Draft from: {time}").format(time=str(draft_saved_at)[:16])
+            st.markdown(f"<p style='color: #999; font-size: 0.8rem;'>{draft_from_text}</p>",
                        unsafe_allow_html=True)
 
 

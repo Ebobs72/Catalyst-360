@@ -127,6 +127,38 @@ def get_prompt_text(prompt_key, relationship):
     return OPEN_PROMPTS[prompt_key]["self" if relationship == "Self" else "other"]
 
 # ============================================
+# i18n FOUNDATION (round-two rater nomination, October cohort)
+# ============================================
+# Locale codes stored on raters.locale and used as the `locale` argument to
+# db.get_translation(). None/NULL and 'en' are both treated as English at
+# every read site - 'en' is what's stored when a rater actively picks English
+# on the locale screen, None is a rater who hasn't picked anything yet.
+# Traditional (not Simplified) Chinese, per the Taipei dealership in the
+# October cohort - 'zh-Hant' names the script, not a region, deliberately,
+# since a rater's working language isn't inferable from where their
+# dealership sits (see the build instructions this was speced against).
+SUPPORTED_LOCALES = {
+    'en': 'English',
+    'ar': 'العربية',
+    'de': 'Deutsch',
+    'fr': 'Français',
+    'nl': 'Nederlands',
+    'vi': 'Tiếng Việt',
+    'zh-Hant': '繁體中文',
+}
+
+RTL_LOCALES = {'ar'}
+
+
+def dimension_slug(dim_name):
+    """Stable, human-readable slug for a dimension name, e.g. 'Leading Self'
+    -> 'leading_self', used to build translations string_keys
+    (dimension_{slug}_name / dimension_{slug}_desc). Derived from the name
+    itself rather than hand-maintained per dimension, so a renamed or added
+    dimension can't silently drift out of sync with its own slug."""
+    return re.sub(r'[^a-z0-9]+', '_', dim_name.lower()).strip('_')
+
+# ============================================
 # DIMENSION DESCRIPTIONS
 # ============================================
 

@@ -146,24 +146,71 @@ def _send_email(to_email, to_name, subject, html_content):
 # EMAIL TEMPLATES
 # ============================================
 
-def _get_rater_invitation_html(leader_name, relationship, assessment_url):
-    """Generate HTML for rater invitation email."""
-    
-    relationship_clause = {
+def _translated(db, locale, key, fallback_text):
+    """Shorthand for db.get_translation, safe to call with db=None (some
+    callers - e.g. admin_dashboard.py's test-email preview - don't have a
+    locale in scope at all, and should just get the current English copy)."""
+    if db is None:
+        return fallback_text
+    return db.get_translation(key, locale, fallback_text=fallback_text)
+
+
+def _get_rater_invitation_html(leader_name, relationship, assessment_url, db=None, locale=None):
+    """Generate HTML for rater invitation email.
+
+    db/locale are optional - the email a rater receives should go out in
+    whatever locale is on their raters row at send time (see
+    send_rater_invitation), but this function still needs to work for
+    existing callers that don't have a locale in scope (the admin test-email
+    preview), which just get the English fallback throughout.
+    """
+    relationship_clause_key = {
+        'Boss': 'email_relationship_clause_boss',
+        'Peers': 'email_relationship_clause_peers',
+        'DRs': 'email_relationship_clause_drs',
+    }.get(relationship)
+    relationship_clause_fallback = {
         'Boss': 'in your capacity as their line manager',
         'Peers': 'as a peer',
         'DRs': 'as a direct report',
         'Others': ''
     }.get(relationship, '')
+    relationship_clause = (
+        _translated(db, locale, relationship_clause_key, relationship_clause_fallback)
+        if relationship_clause_key else ''
+    )
 
     if relationship == 'Self':
-        intro = f"As part of the Bentley Compass Leadership Programme, you are invited to complete your leadership self-assessment. Please complete it before Module 1, where you will talk your report through with your coach."
-        cta_text = "Complete Self-Assessment"
+        intro = _translated(
+            db, locale, 'email_rater_invitation_intro_self',
+            "As part of the Bentley Compass Leadership Programme, you are invited to complete your "
+            "leadership self-assessment. Please complete it before Module 1, where you will talk your "
+            "report through with your coach."
+        )
+        cta_text = _translated(db, locale, 'email_rater_invitation_cta_self', "Complete Self-Assessment")
     else:
         suffix = f", {relationship_clause}" if relationship_clause else ""
-        intro = f"You have been invited to provide 360-degree feedback for <strong>{leader_name}</strong> as part of the Bentley Compass Leadership Programme{suffix}."
-        cta_text = "Provide Feedback"
-    
+        intro = _translated(
+            db, locale, 'email_rater_invitation_intro_other',
+            "You have been invited to provide 360-degree feedback for {leader_name} as part of the "
+            "Bentley Compass Leadership Programme{suffix}."
+        ).format(leader_name=f"<strong>{leader_name}</strong>", suffix=suffix)
+        cta_text = _translated(db, locale, 'email_rater_invitation_cta_other', "Provide Feedback")
+
+    body_note = _translated(
+        db, locale, 'email_rater_invitation_body_note',
+        "Your feedback is valuable and will be treated confidentially. The assessment takes "
+        "approximately 15-20 minutes to complete."
+    )
+    link_note = _translated(
+        db, locale, 'email_link_fallback_note',
+        "If the button doesn't work, copy and paste this link into your browser:"
+    )
+    footer_note = _translated(
+        db, locale, 'email_footer_automated_note',
+        "This is an automated message from Bentley Compass 360.<br>Please do not reply to this email."
+    )
+
     logo_html = _email_logo_html()
     return f"""
 <!DOCTYPE html>
@@ -199,16 +246,16 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url):
                             </p>
                             
                             <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 30px 0;">
-                                Your feedback is valuable and will be treated confidentially. The assessment takes approximately 15-20 minutes to complete.
+                                {body_note}
                             </p>
-                            
+
                             <!-- CTA Button -->
                             <table width="100%" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td align="center" style="padding: 20px 0;">
-                                        <a href="{assessment_url}" 
-                                           style="display: inline-block; background: #183319; 
-                                                  color: #ffffff; text-decoration: none; padding: 16px 40px; 
+                                        <a href="{assessment_url}"
+                                           style="display: inline-block; background: #183319;
+                                                  color: #ffffff; text-decoration: none; padding: 16px 40px;
                                                   border-radius: 6px; font-size: 16px; font-weight: 600;
                                                   letter-spacing: 0.5px;">
                                             {cta_text}
@@ -216,20 +263,19 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url):
                                     </td>
                                 </tr>
                             </table>
-                            
+
                             <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
-                                If the button doesn't work, copy and paste this link into your browser:<br>
+                                {link_note}<br>
                                 <a href="{assessment_url}" style="color: #183319; word-break: break-all;">{assessment_url}</a>
                             </p>
                         </td>
                     </tr>
-                    
+
                     <!-- Footer -->
                     <tr>
                         <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
                             <p style="color: #999; font-size: 12px; margin: 0;">
-                                This is an automated message from Bentley Compass 360.<br>
-                                Please do not reply to this email.
+                                {footer_note}
                             </p>
                         </td>
                     </tr>
@@ -243,14 +289,38 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url):
 """
 
 
-def _get_reminder_html(leader_name, relationship, assessment_url):
-    """Generate HTML for reminder email."""
-    
+def _get_reminder_html(leader_name, relationship, assessment_url, db=None, locale=None):
+    """Generate HTML for reminder email. db/locale optional - see
+    _get_rater_invitation_html for why."""
+
     if relationship == 'Self':
-        intro = f"This is a friendly reminder to complete your leadership self-assessment for the Bentley Compass Leadership Programme, ahead of Module 1."
+        intro = _translated(
+            db, locale, 'email_rater_reminder_intro_self',
+            "This is a friendly reminder to complete your leadership self-assessment for the "
+            "Bentley Compass Leadership Programme, ahead of Module 1."
+        )
     else:
-        intro = f"This is a friendly reminder to provide your 360-degree feedback for <strong>{leader_name}</strong>."
-    
+        intro = _translated(
+            db, locale, 'email_rater_reminder_intro_other',
+            "This is a friendly reminder to provide your 360-degree feedback for {leader_name}."
+        ).format(leader_name=f"<strong>{leader_name}</strong>")
+
+    reminder_header = _translated(db, locale, 'email_reminder_header', "FRIENDLY REMINDER")
+    body_note = _translated(
+        db, locale, 'email_rater_reminder_body_note',
+        "Your input is important and helps support leadership development. The assessment takes "
+        "approximately 15-20 minutes."
+    )
+    cta_text = _translated(db, locale, 'email_rater_reminder_cta', "Complete Now")
+    link_note = _translated(
+        db, locale, 'email_link_fallback_note',
+        "If the button doesn't work, copy and paste this link into your browser:"
+    )
+    footer_note = _translated(
+        db, locale, 'email_footer_automated_note',
+        "This is an automated message from Bentley Compass 360.<br>Please do not reply to this email."
+    )
+
     logo_html = _email_logo_html()
     return f"""
 <!DOCTYPE html>
@@ -270,53 +340,52 @@ def _get_reminder_html(leader_name, relationship, assessment_url):
                         <td style="background: #4D4D4F; padding: 30px 40px; text-align: center;">
                             {logo_html}
                             <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
-                                FRIENDLY REMINDER
+                                {reminder_header}
                             </h1>
                             <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px;">
                                 Bentley Compass 360
                             </p>
                         </td>
                     </tr>
-                    
+
                     <!-- Body -->
                     <tr>
                         <td style="padding: 40px;">
                             <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
                                 {intro}
                             </p>
-                            
+
                             <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 30px 0;">
-                                Your input is important and helps support leadership development. The assessment takes approximately 15-20 minutes.
+                                {body_note}
                             </p>
-                            
+
                             <!-- CTA Button -->
                             <table width="100%" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td align="center" style="padding: 20px 0;">
-                                        <a href="{assessment_url}" 
-                                           style="display: inline-block; background: #183319; 
-                                                  color: #ffffff; text-decoration: none; padding: 16px 40px; 
+                                        <a href="{assessment_url}"
+                                           style="display: inline-block; background: #183319;
+                                                  color: #ffffff; text-decoration: none; padding: 16px 40px;
                                                   border-radius: 6px; font-size: 16px; font-weight: 600;
                                                   letter-spacing: 0.5px;">
-                                            Complete Now
+                                            {cta_text}
                                         </a>
                                     </td>
                                 </tr>
                             </table>
-                            
+
                             <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
-                                If the button doesn't work, copy and paste this link into your browser:<br>
+                                {link_note}<br>
                                 <a href="{assessment_url}" style="color: #183319; word-break: break-all;">{assessment_url}</a>
                             </p>
                         </td>
                     </tr>
-                    
+
                     <!-- Footer -->
                     <tr>
                         <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
                             <p style="color: #999; font-size: 12px; margin: 0;">
-                                This is an automated message from Bentley Compass 360.<br>
-                                Please do not reply to this email.
+                                {footer_note}
                             </p>
                         </td>
                     </tr>
@@ -436,15 +505,24 @@ def send_rater_invitation(rater, leader_name, base_url, db):
     """
     if not rater.get('email'):
         return False, "No email address"
-    
+
+    # Goes out in whatever locale is on this rater's row at send time. Almost
+    # always None/English here, since the locale picker only appears on the
+    # rater's first visit to the FORM, after the invitation has already been
+    # sent - see the i18n build instructions, section 6.
+    locale = rater.get('locale')
+
     assessment_url = f"{base_url}?t={rater['token']}"
-    
+
     if rater['relationship'] == 'Self':
-        subject = "Complete Your Leadership Self-Assessment — Bentley Compass"
+        subject = _translated(db, locale, 'email_rater_invitation_subject_self',
+                               "Complete Your Leadership Self-Assessment — Bentley Compass")
     else:
-        subject = f"360 Feedback Request for {leader_name} — Bentley Compass"
-    
-    html = _get_rater_invitation_html(leader_name, rater['relationship'], assessment_url)
+        subject = _translated(db, locale, 'email_rater_invitation_subject_other',
+                               "360 Feedback Request for {leader_name} — Bentley Compass"
+                               ).format(leader_name=leader_name)
+
+    html = _get_rater_invitation_html(leader_name, rater['relationship'], assessment_url, db=db, locale=locale)
     
     success, message = _send_email(
         rater['email'],
@@ -494,13 +572,19 @@ def send_rater_reminder(rater, leader_name, base_url, db):
         except (ValueError, TypeError):
             pass
 
+    locale = rater.get('locale')
+
     assessment_url = f"{base_url}?t={rater['token']}"
-    
-    subject = f"Reminder: 360 Feedback for {leader_name} — Bentley Compass"
+
     if rater['relationship'] == 'Self':
-        subject = "Reminder: Complete Your Leadership Self-Assessment — Bentley Compass"
-    
-    html = _get_reminder_html(leader_name, rater['relationship'], assessment_url)
+        subject = _translated(db, locale, 'email_rater_reminder_subject_self',
+                               "Reminder: Complete Your Leadership Self-Assessment — Bentley Compass")
+    else:
+        subject = _translated(db, locale, 'email_rater_reminder_subject_other',
+                               "Reminder: 360 Feedback for {leader_name} — Bentley Compass"
+                               ).format(leader_name=leader_name)
+
+    html = _get_reminder_html(leader_name, rater['relationship'], assessment_url, db=db, locale=locale)
     
     success, message = _send_email(
         rater['email'],

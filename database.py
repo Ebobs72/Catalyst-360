@@ -266,14 +266,38 @@ class Database:
                 FOREIGN KEY (leader_id) REFERENCES leaders(id)
             )
         """)
-        
+
+        # i18n foundation (round-two rater nomination, October cohort): stores
+        # translated strings keyed by string_key + locale, looked up at render
+        # time via get_translation(). Not used for scores - only item text, UI
+        # copy, and email copy get translated. A missing row for a given
+        # key/locale is not an error: get_translation() falls back to the
+        # current English string, which is what ships until real translations
+        # are commissioned. See CLAUDE.md/the i18n build instructions for the
+        # full string_key conventions.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS translations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                string_key TEXT NOT NULL,
+                locale TEXT NOT NULL,
+                string_value TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(string_key, locale)
+            )
+        """)
+
         conn.commit()
         conn.close()
-        
+
         # Migration: Add draft columns to raters table for existing databases
         self._safe_add_column("raters", "draft_ratings", "TEXT")
         self._safe_add_column("raters", "draft_comments", "TEXT")
         self._safe_add_column("raters", "draft_saved_at", "TIMESTAMP")
+        # Rater's chosen UI/form language (e.g. 'en', 'ar', 'de'...). NULL until
+        # they actively pick one on first visit to the feedback form - treated
+        # identically to 'en' at every read site (see get_translation), never
+        # backfilled for existing rows.
+        self._safe_add_column("raters", "locale", "TEXT")
     
     # ==========================================
     # LEADER MANAGEMENT
@@ -810,7 +834,40 @@ class Database:
         conn.commit()
         conn.close()
         return True
-    
+
+    # ==========================================
+    # TRANSLATIONS (i18n)
+    # ==========================================
+
+    def get_translation(self, string_key, locale, fallback_text=""):
+        """Return the translated string, or fallback_text if none exists.
+
+        Falls back (never raises, never returns a blank string) when locale is
+        None, 'en', or there's simply no row yet for this key/locale - which is
+        the expected state for every key until real translations are
+        commissioned. fallback_text is always the current English string
+        already hardcoded at the call site, so a report/form with zero
+        translation rows renders identically to today's English version.
+        """
+        if not locale or locale == 'en':
+            return fallback_text
+
+        row = self._fetchone(
+            "SELECT string_value FROM translations WHERE string_key = ? AND locale = ?",
+            (string_key, locale),
+        )
+        if row is None or not row['string_value']:
+            return fallback_text
+        return row['string_value']
+
+    def set_rater_locale(self, rater_id, locale):
+        """Update raters.locale - the language a rater chose for the form."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE raters SET locale = ? WHERE id = ?", (locale, rater_id))
+        conn.commit()
+        conn.close()
+
     # ==========================================
     # DRAFT SAVE & RESUME
     # ==========================================
