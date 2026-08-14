@@ -124,6 +124,30 @@ on `sandbox` precisely because it never reaches Mark until that merge.
   are correctly structured as a `[turso]` section with `url` and `token` keys.
 - Streamlit Community Cloud throttles CPU after repeated failed builds. Minimise
   rebuilds; make batched, correct edits rather than many small trial commits.
+- LOCAL DEV STREAMLIT VERSION MUST MATCH `requirements.txt` (currently
+  `streamlit==1.60.0`), not whatever happens to be on the machine already.
+  Found 2026-08-14: a whole session's CSS work had been tested exclusively
+  against a local install of 1.53.1, and one fix (the leader portal's
+  Relationship dropdown background) silently didn't apply on the deployed
+  sandbox, because Streamlit swapped `st.selectbox`'s internal implementation
+  between those versions - 1.53.1 renders it via BaseWeb
+  (`[data-baseweb="select"]`), 1.60.0 via React Aria (`.react-aria-ComboBox`,
+  `[role="group"]`), completely different DOM. A CSS selector written and
+  verified against the wrong version can look perfectly correct locally and
+  do nothing at all once deployed, with no error anywhere to surface it.
+  Confirmed by loading the actual deployed Render sandbox directly and
+  inspecting its DOM, then reproducing the same gap locally in an isolated
+  venv pinned to 1.60.0 (`.venv_test_1_60/`, gitignored, built from
+  `requirements.txt` minus `libsql` - Turso isn't needed for CSS/layout
+  verification, and `libsql` needs `cmake` to build from source on this Mac,
+  which isn't installed; the sqlite3 fallback already documented above
+  covers this fine). DELIBERATELY NOT applied to the system-wide Python
+  install - that's shared with whatever else runs on this Mac, so it stays
+  isolated in this project-local venv. Use it (`source
+  .venv_test_1_60/bin/activate`) for any future widget-adjacent CSS work,
+  not the system Python's 1.53.1, and when in doubt about whether a fix
+  actually applies, check the deployed sandbox directly rather than
+  trusting local-only verification.
 
 ---
 
@@ -522,6 +546,242 @@ SILENTLY if either is missing:
 - Verified by computing WCAG contrast ratios on every rendered button across the
   landing page, rater form, leader portal and admin dashboard: 46 buttons, worst
   ratio 5.04:1, none below the 4.5:1 AA threshold, most at 10.78:1.
+
+### Feedback form is paginated, not single-scroll (`feedback_form.py`)
+Both the Full 360 rater form and the Self-Assessment render one page at a time,
+built by `_build_pages(is_self)`: one page per dimension (5 items + its comment
+box), then Overall Feedback, then Development Priorities (self-assessment
+only), then a final Review page. Review is always last — the edit-jump-back
+logic below relies on that.
+
+- Each dimension page validates all 5 items are rated before its "Continue"
+  will advance, blocking with a message naming the missing question numbers.
+  Overall Feedback and Development Priorities' keep/change and actions text
+  have their own validation (priorities: minimum count, no duplicate
+  dimension, actions text required whenever a dimension is chosen — see the
+  development-priorities subsection above, unchanged by pagination).
+- The Review page lists every section with an **Edit** button that jumps back
+  to that page (`st.session_state['return_to_review']` + `form_page_idx`);
+  clicking Continue from an edited page returns to Review instead of
+  continuing forward, via `_advance_from`.
+- The progress bar shows a **percentage** of the 45 items answered, not
+  "X of 45" — chosen specifically so it reads without needing to translate
+  "of" (see the i18n subsection below).
+- Save-and-resume lands on the first INCOMPLETE dimension (`_resume_page_index`),
+  or the first trailing page if every dimension is done — not necessarily
+  page 1. Purely derived from the saved draft, so a same-session rerun and a
+  genuine browser-close-and-reopen days later behave identically.
+- GOTCHA, ALREADY FIXED, DON'T REINTRODUCE: `st.session_state` does not
+  reliably retain a widget's value once that widget stops being
+  re-instantiated on a later page — each dimension page only creates its own
+  5 `rating_N`/`comment_X` widgets, not every dimension's. `_collect_current_answers`
+  therefore takes `base_ratings`/`base_comments` (the draft already loaded
+  once at the top of `render_feedback_form`) and merges the CURRENT page's
+  fresh session_state on top, rather than trusting session_state alone to
+  have accumulated everything from every page visited so far. Every call site
+  (Save, Continue, and the Review page's own display) passes these through.
+  Confirmed empirically by checking the actual saved draft in the database
+  after several page transitions, not assumed.
+- Every button-creating call in the file (`st.button`/`st.form_submit_button`)
+  is wired through `_t()`/`get_translation()` with one deliberate exception:
+  the locale picker's own "Continue", which has no locale yet to translate
+  into at the point it renders. Re-audited 2026-08-14 against the paginated
+  structure specifically (11 button calls total across dimension/overall/
+  priorities/review pages) — no oversights found.
+
+### Survey pages are Heritage White, matching the report (`app.py`, `feedback_form.py`)
+The rater form and self-assessment now read as part of the same document
+family as the Word report, not a generic Streamlit form:
+
+- Each page's outer card fills with Heritage White — `framework.py`'s
+  `COLOURS['heritage_white']`, `#DCD8C0`. This is the SAME confirmed brand
+  value already used across the report (radar chart fill, item bar charts,
+  the Development Areas PAPU-NANU header), reused as-is, not a separate tint
+  chosen for the survey. Scoped via `st.container(key="compass_survey_form")`
+  wrapping each `st.form("feedback_form_page")` call, and the leader portal's
+  own `portal_add_rater_form`/`portal_upload_raters` containers use the SAME
+  white-card CSS pattern under their own separate keys — deliberately scoped
+  per-container (rather than a bare `div[data-testid="stForm"]` rule) because
+  an unscoped rule would silently reach every other `st.form` in the app,
+  including admin_dashboard.py's add-leader/add-rater/quick-add forms, which
+  were never meant to change.
+- Individual question boxes (`st.container(key=f"item_box_{item_num}")`),
+  text areas, the instructions box, the language-picker box, and the
+  "Welcome back" resume banner are white cards sitting on top of that fill —
+  the same white-card-with-green-left-accent language throughout, including
+  the resume banner, which was recoloured off Streamlit's default blue.
+- Body text sitting directly on the Heritage White background (not inside a
+  white sub-box) was deliberately darkened from the values used on plain
+  white/pale-grey backgrounds elsewhere (`#666`→`#4D4D4D`, `#999`→`#595959`)
+  to hold WCAG AA contrast against the tan. If you add new text directly on
+  the survey-form background, check contrast against `#DCD8C0`, not against
+  white.
+- The rating scale's last option is split by relationship: the Full 360 rater
+  form keeps "No opportunity to observe" (`ui_rating_no_opportunity_other`);
+  the self-assessment reads "No opportunity to demonstrate"
+  (`ui_rating_no_opportunity_self`) — a leader rating themselves has
+  opportunity to demonstrate a behaviour, not to observe it. The other five
+  scale words are unaffected, since they read the same either way.
+
+### i18n foundation — scaffold only, ZERO live translations (`database.py`, `framework.py`, `feedback_form.py`, `email_sender.py`)
+Built for the round-two (October cohort) rater nomination work. Ships with no
+real translation content — every string still renders in English today, by
+design, until the item set and rating scale are finalised.
+
+- `translations` table (`string_key`, `locale`, `string_value`); `raters.locale`
+  column. `get_translation()`/`_t()` short-circuits to the hardcoded English
+  fallback whenever `locale` is `None` or `'en'` — the expected path for every
+  rater until translations are actually commissioned, at zero DB cost.
+- A locale picker (`render_locale_picker`) is shown once, on a rater's first
+  visit, before any survey content — `raters.locale` being set is what skips
+  it on every later visit, including a same-session resume, since
+  `get_rater_by_token()` re-fetches `rater_info` fresh on every page load.
+- Arabic (`RTL_LOCALES`) gets a full RTL layout scoped to the form only
+  (`_render_rtl_css`): `direction: rtl` on `div[data-testid="stForm"]`.
+  Numbers, Q-numbering, and the 1-5 rating scale are deliberately forced back
+  to LTR within that RTL layout — mirroring a two-digit question number would
+  misread as a different number, not just flip direction. Because every page
+  type (dimension, Review) wraps its content in the same `st.form`, this
+  selector always has something to match regardless of which page is showing.
+  THREE separate selectors currently do this LTR-forcing, one per page's
+  actual Q-number markup — check all three if the item/review markup ever
+  changes again:
+  - `.item-container span:first-child` — the `.item-container` CSS class
+    (app.py) is currently unused by any live markup (both the dimension page
+    and the Review page have since moved off it, see below); kept in the
+    selector list defensively rather than removed, in case something starts
+    using that class again.
+  - `.review-item-question span:first-child` — the Review page's item rows.
+  - `div[class*="st-key-item_box_"] span:first-child` — the LIVE dimension
+    page's item rows. ADDED 2026-08-14: the dimension page's per-item markup
+    moved from a `.item-container` div to the `st.container(key=f"item_box_{n}")`
+    wrapper during the Heritage-White pass above, and the RTL selector was
+    never updated to follow it — so the Q-number silently stopped being
+    forced LTR on that specific page type (confirmed via computed style on a
+    live Arabic-locale dimension page: `direction` was `rtl` before this fix).
+    The lesson: this selector list is keyed to specific CSS classes/keys in
+    the item markup, not to a stable concept — if that markup is restructured
+    again, re-check this list against actual computed style on every page
+    type, don't assume it still applies just because the RTL mechanism itself
+    is unchanged.
+  - The rating scale (`st.segmented_control`, via `[data-testid="stButtonGroup"]`)
+    is forced LTR the same way and was NOT affected by the item-markup change,
+    since it's matched by widget testid, not by the item wrapper's class.
+- Locale persists correctly through a mid-flow save-and-resume, including
+  landing on a partially-completed dimension mid-way through (not page 1),
+  with the resumed page already in the correct RTL layout — verified
+  2026-08-14 with a real interactive test (not synthetic draft injection):
+  Arabic selected, dimension 1 and 2 completed and dimension 3 left
+  partially answered, tab closed and reopened via a fresh session. No flash
+  of English/LTR is reachable in principle either, since locale is read from
+  the rater's row synchronously at the top of `render_feedback_form`, before
+  any page content (including the RTL `<style>` block itself) is generated —
+  unlike a client-side language switch, there is no separately-rendered
+  English pass to flash before Arabic corrects it.
+- EVERY `<p>` AND `<textarea>` NEEDS `unicode-bidi: plaintext` inside the RTL
+  form, found the same day a human actually looked at a rendered Arabic-locale
+  page rather than just checking computed styles: with zero real translations
+  shipped, every paragraph and every comment-box placeholder is still plain
+  English, and a forced `direction: rtl` on the ancestor visually relocates
+  TRAILING PUNCTUATION to the start of the line - "Check everything below
+  before submitting. You can still change anything." rendered as ".Check
+  everything...anything" (period moved to the front, none at the end). The
+  underlying text was never wrong; only its bidi-resolved visual order was.
+  `unicode-bidi: plaintext` makes the browser derive each element's own base
+  direction from its actual first strong character rather than inheriting the
+  forced one, so English fallback text lays out correctly today AND a real
+  Arabic paragraph will correctly switch to RTL on its own once dropped in
+  later, with no further change needed either way. THE PLACEHOLDER NEEDED ITS
+  OWN separate rule (`textarea::placeholder`) - `::placeholder` does not
+  inherit `unicode-bidi` from the textarea it belongs to
+  (`getComputedStyle(textarea, '::placeholder')` showed `isolate`, not
+  `plaintext`, even after the textarea itself was fixed), so the placeholder
+  kept the bug on its own until given the identical rule directly.
+- LOCAL DEV STREAMLIT VERSION MUST MATCH `requirements.txt` for ANY CSS
+  targeting a specific widget's internal markup (item boxes, form
+  containers, the survey's Heritage White fill, and especially
+  `st.selectbox` are all in this category) — see the environment gotchas
+  in section 3 for the full story and the isolated venv this now has to be
+  tested against.
+
+### Leader portal: sending an invitation is a separate, deliberate action from adding a rater (`leader_portal.py`, `database.py`, `email_sender.py`)
+Adding a rater — the single "Add a Rater" form or a CSV import — only writes
+the record. It does NOT send that person's invitation email at the same time.
+
+- The "People You've Nominated" list shows a nudge whenever anyone is waiting
+  to be invited ("N people are ready to be invited, check names/emails/
+  relationships below carefully — once you send, invitations go out
+  immediately and can't be recalled"), and a single **"Send Invitations"**
+  button that fires every pending one in one action. This button surfaces the
+  same way regardless of whether raters arrived one at a time or via CSV —
+  it's driven by `database.get_raters_pending_invitation(leader_id)`, a query
+  against `email_log` (anyone without a logged successful `'invitation'` send),
+  not by which form was used to add them.
+- WHY: a typo in a name, email, or relationship entered a moment earlier used
+  to be mailed out immediately and irreversibly. Decoupling adding from
+  sending gives a genuine review window — and a natural place to use the
+  existing email/relationship correction tools — before anything goes out.
+- A row whose invitation attempt genuinely FAILED (an address rejected at
+  send time, not merely not-yet-sent) gets a small warning icon next to its
+  Edit button, driven by `database.get_failed_invitation_emails(leader_id)`.
+  This is deliberately narrower than a full sent/pending status per row —
+  showing status for every row would duplicate the aggregate banner in the
+  common all-succeeded case, and edges toward the same "response status per
+  person" territory the roster was built to avoid (this is invitation status,
+  not response status, so it doesn't actually conflict with that principle,
+  but the roster's design bar for showing anything per-row is deliberately
+  high). It exists specifically because a bulk send can partially fail, and
+  without it there's no way to tell WHICH of several pending people needs a
+  fixed address versus just a resend.
+- The leader is also emailed directly the moment a send fails outright
+  (`email_sender.send_invitation_failure_notice`), so they find out even if
+  they close the portal tab before seeing the in-app warning. This ONLY
+  covers failures the app detects synchronously (an address rejected during
+  the SMTP transaction itself, via `_send_email`'s `SMTPRecipientsRefused`
+  handling). A message accepted at send time that bounces LATER is invisible
+  to the app entirely — that bounce is a separate email sent by the
+  recipient's mail server straight back to the sending mailbox, with no hook
+  into this application at all. Closing that gap needs a bounce-aware
+  transactional email provider (Postmark/SendGrid/SES, via a webhook), which
+  is flagged as deliberate future work, not attempted.
+- The "Relationship to you" dropdown on the Add a Rater form has NO default —
+  it starts blank (`index=None`, a placeholder), and submitting without a
+  choice is blocked with "Please select a relationship". A prior real mistake
+  was adding too many Bosses via a leftover selection from adding the
+  previous rater; forcing a deliberate choice every time is cheaper than
+  relying on someone to notice and change it.
+- TWO BUGS FOUND AND FIXED WHILE BUILDING THIS, both worth knowing about if
+  similar symptoms reappear:
+  - `get_raters_pending_invitation` must filter `email IS NOT NULL`. Without
+    it, legacy rater rows with no email at all (which can never be sent, and
+    don't even appear in the leader's visible roster, since
+    `get_nomination_roster`'s own backfill requires a name or email) inflated
+    the pending count with something the leader had no way to see or resolve.
+  - `delete_rater` (admin dashboard → Links & Tracking tab) must clear
+    `email_log` before deleting the `raters` row. `email_log.rater_id` carries
+    a `FOREIGN KEY` to `raters(id)` with no cascade, so anyone who'd ever had
+    even one email logged against them — an invitation attempt, a reminder,
+    success or failure — could not be deleted; Turso raised `FOREIGN KEY
+    constraint failed`. Reproduced against a real row with foreign keys
+    enforced before confirming the fix.
+- `delete_rater`'s existing guard (refuses to delete anyone with a non-NULL
+  `completed_at`, returning `False` rather than deleting) was re-verified
+  2026-08-14 specifically against a completed-and-SEVERED rater (name/email
+  already nulled, `email_log.to_email` already `[severed]`): the guard still
+  holds — the row, its ratings, and its comments are left completely
+  untouched. This is intentional, not incidental: once someone has responded,
+  their ratings/comments are folded into the leader's aggregate group scores,
+  so silently allowing a delete here would quietly shrink a response count
+  and shift reported averages after the fact — exactly the kind of change
+  that must never happen invisibly. KNOWN GAP, NOT YET FIXED: the admin
+  dashboard's delete button (`admin_dashboard.py`, Links & Tracking tab)
+  renders unconditionally for every rater and never checks `delete_rater`'s
+  return value — clicking delete on a completed/severed rater currently just
+  reruns the page with no error and no indication anything was refused. The
+  DB-level protection holds either way, but an admin has no feedback that the
+  click did nothing. Left as-is pending a decision on the intended UI
+  behaviour, per the same "don't quietly change the one part of the system
+  built around irreversible protection" caution as the guard itself.
 
 ---
 

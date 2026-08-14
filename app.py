@@ -245,7 +245,17 @@ st.markdown("""
     div[class*="st-key-portal_add_rater_form"] div[data-testid="stTextInputRootElement"] {
         border: 1px solid #E0E0E0;
     }
-    div[class*="st-key-portal_add_rater_form"] div[data-baseweb="select"] > div {
+    /* Two selectors for the same widget, deliberately: st.selectbox's internal
+       markup changed between Streamlit versions (BaseWeb's [data-baseweb=
+       "select"] on 1.53.x, a React Aria [role="group"] on 1.60.0, which is
+       what's actually pinned in requirements.txt for deployment). Found
+       2026-08-14 when this rule tested white locally but stayed pale grey on
+       the deployed sandbox - local dev was running 1.53.1, unrelated to
+       what's deployed. A selector that doesn't match on a given version is
+       harmless, so keeping both here means this doesn't silently break again
+       the next time Streamlit changes a widget's internals either way. */
+    div[class*="st-key-portal_add_rater_form"] div[data-baseweb="select"] > div,
+    div[class*="st-key-portal_add_rater_form"] [data-testid="stSelectbox"] [role="group"] {
         background-color: white;
     }
 

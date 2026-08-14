@@ -273,13 +273,66 @@ def _render_rtl_css(locale):
     build instructions (section 5): mirroring those would misread as
     different numbers, not just flip direction. Every page (including Review)
     wraps its content in st.form specifically so this selector always has
-    something to match, regardless of which page is showing."""
+    something to match, regardless of which page is showing.
+
+    div[class*="st-key-item_box_"] span:first-child covers the LIVE dimension
+    page's Q-number. Re-verified 2026-08-14 during a post-pagination RTL
+    audit: the dimension page's per-item markup moved from a .item-container
+    div to this st.container(key=...) wrapper during the same session's
+    Heritage-White formatting pass, and this selector was never updated to
+    follow it - so the Q-number silently stopped being forced LTR on that
+    page type specifically (confirmed via computed style: direction was
+    rtl/unicode-bidi normal before this fix, on Q1 of a live Arabic-locale
+    dimension page). The Review page's own .review-item-question selector
+    was unaffected, since that markup wasn't touched by the same rename.
+
+    unicode-bidi: plaintext on every <p> - found 2026-08-14 (same audit):
+    with zero real translations shipped yet, every paragraph inside this
+    RTL-direction container is still plain English (LTR-script) text, and a
+    forced `direction: rtl` on the ancestor visually relocates trailing
+    punctuation to the paragraph's start - "Check everything below before
+    submitting. You can still change anything." rendered as ".Check
+    everything... anything" (period moved to the front, none at the end).
+    The underlying text was never wrong (confirmed via textContent), only
+    its bidi-resolved visual order. `unicode-bidi: plaintext` tells the
+    browser to derive EACH paragraph's own base direction from its actual
+    first strong character, rather than inheriting the forced direction -
+    so English fallback text (first char is Latin) correctly lays out LTR
+    with punctuation in the expected place, and the SAME rule will correctly
+    switch a paragraph to RTL on its own once real Arabic text is dropped
+    in later, with no further code change needed either way. Does not
+    affect the explicitly-forced-LTR spans above (Q-numbers, rating scale),
+    which set direction/unicode-bidi more specifically on themselves.
+
+    Same plaintext fix on textarea - the comment boxes' PLACEHOLDER text
+    showed the identical trailing-punctuation-jumps-to-the-front symptom
+    ("Describe the leadership qualities...effective..." rendered as
+    "...Describe...effective"), confirmed via computed style: the textarea
+    inherits direction: rtl same as everything else. Applying the same rule
+    here also correctly handles whatever a rater actually TYPES into the
+    box later, English or Arabic, not just the placeholder.
+
+    THE PLACEHOLDER NEEDED ITS OWN RULE, and this is the one place plaintext
+    on the host element wasn't enough: getComputedStyle(textarea, '::placeholder')
+    showed unicode-bidi: isolate, direction: rtl - the ::placeholder
+    pseudo-element does not inherit unicode-bidi from the textarea it
+    belongs to, so the placeholder kept the bug even after the textarea
+    itself was fixed. Found by checking computed style directly rather than
+    assuming the textarea rule would cover it."""
     if locale in RTL_LOCALES:
         st.markdown("""
         <style>
         div[data-testid="stForm"] { direction: rtl; text-align: right; }
+        div[data-testid="stForm"] p,
+        div[data-testid="stForm"] textarea {
+            unicode-bidi: plaintext;
+        }
+        div[data-testid="stForm"] textarea::placeholder {
+            unicode-bidi: plaintext;
+        }
         div[data-testid="stForm"] .item-container span:first-child,
-        div[data-testid="stForm"] .review-item-question span:first-child {
+        div[data-testid="stForm"] .review-item-question span:first-child,
+        div[data-testid="stForm"] div[class*="st-key-item_box_"] span:first-child {
             direction: ltr; unicode-bidi: embed; display: inline-block;
         }
         div[data-testid="stForm"] [data-testid="stButtonGroup"] {
