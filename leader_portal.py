@@ -24,6 +24,7 @@ try:
         is_email_configured,
         send_rater_invitation,
         send_rater_reminder,
+        send_invitation_failure_notice,
         get_app_base_url
     )
     EMAIL_AVAILABLE = True
@@ -213,7 +214,7 @@ def render_nomination_section(db, leader_info, existing_raters):
                     all_requirements_met = False
 
             st.markdown(f"""
-            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid #E0E0E0;">
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid #E0E0E0; margin-bottom: 1.5rem;">
                 <div style="font-size: 1.5rem;">{status_icon}</div>
                 <div style="font-weight: 600; color: #183319;">{RELATIONSHIP_TYPES.get(cat, cat)}</div>
                 <div style="color: {status_color}; font-size: 0.9rem;">{status_text}</div>
@@ -265,12 +266,14 @@ def render_nomination_section(db, leader_info, existing_raters):
     col1, col2 = st.columns(2)
     
     with col1:
-        with st.form("add_rater_form", clear_on_submit=True):
+        with st.container(key="portal_add_rater_form"), st.form("add_rater_form", clear_on_submit=True):
             rater_name = st.text_input("Name *", placeholder="e.g., John Smith")
             rater_email = st.text_input("Email *", placeholder="e.g., john.smith@company.com")
             relationship = st.selectbox(
                 "Relationship to you *",
                 options=['Boss', 'Peers', 'DRs', 'Others'],
+                index=None,
+                placeholder="Select a relationship...",
                 format_func=lambda x: {
                     'Boss': 'Line Manager / Boss',
                     'Peers': 'Peer / Colleague at same level',
@@ -278,45 +281,47 @@ def render_nomination_section(db, leader_info, existing_raters):
                     'Others': 'Other (stakeholder, customer, matrix)'
                 }.get(x, x)
             )
-            
-            # Check if category is at max
-            at_max = rater_counts.get(relationship, 0) >= RATER_REQUIREMENTS[relationship]['max']
-            
+
+            # Check if category is at max. relationship is None until the leader
+            # actually picks one (no default - see the error below for why), so
+            # this has to be guarded rather than indexing RATER_REQUIREMENTS
+            # straight off a key that might not exist yet.
+            at_max = relationship is not None and rater_counts.get(relationship, 0) >= RATER_REQUIREMENTS[relationship]['max']
+
             submitted = st.form_submit_button("Add Rater", disabled=at_max)
-            
+
             if at_max:
                 st.caption(f"Maximum {RATER_REQUIREMENTS[relationship]['max']} {relationship} raters reached")
-            
+
             if submitted:
                 if not rater_name or not rater_email:
                     st.error("Please enter both name and email")
                 elif '@' not in rater_email:
                     st.error("Please enter a valid email address")
+                elif not relationship:
+                    # No default on purpose - a stray leftover selection was how
+                    # a leader ended up with too many Bosses nominated in an
+                    # earlier test. Forcing a deliberate choice each time is
+                    # cheaper than relying on someone to notice and change it.
+                    st.error("Please select a relationship")
                 else:
                     # Add the rater, and record the nomination on the leader's
-                    # own roster so it survives identity severing
+                    # own roster so it survives identity severing. Deliberately
+                    # does NOT send the invitation here - see
+                    # render_pending_invitations below for why: a typo in the
+                    # name, email or relationship just entered would otherwise
+                    # be mailed out immediately with no chance to catch it.
                     rater_id, token = db.add_rater(leader_id, relationship, rater_name, rater_email)
                     db.add_to_nomination_roster(leader_id, rater_name, rater_email, relationship)
 
-                    # Send invitation email if configured
-                    if EMAIL_AVAILABLE and is_email_configured():
-                        rater = db.get_rater(rater_id)
-                        success, msg = send_rater_invitation(
-                            rater, 
-                            leader_info['name'], 
-                            base_url, 
-                            db
-                        )
-                        if success:
-                            st.success(f"Added {rater_name} and sent invitation email", icon=":material/check:")
-                        else:
-                            st.warning(f"Added {rater_name} but email failed: {msg}", icon=":material/check:")
-                    else:
-                        st.success(f"Added {rater_name}", icon=":material/check:")
-                    
+                    st.success(
+                        f"Added {rater_name}. Check the details below, then send "
+                        f"their invitation when you're ready.",
+                        icon=":material/check:"
+                    )
                     st.rerun()
     
-    with col2:
+    with col2, st.container(key="portal_upload_raters", border=True):
         st.markdown("**Or upload multiple raters**")
 
         # Template shows every relationship in plain English, one row each, so the
@@ -379,23 +384,22 @@ def render_nomination_section(db, leader_info, existing_raters):
                     if st.button("Import All", type="primary", use_container_width=True):
                         imported = 0
                         for r in rows:
-                            rater_id, token = db.add_rater(
+                            # Doesn't send an invitation here either, for the
+                            # same reason as the single Add a Rater form: a
+                            # typo the preview above didn't catch would
+                            # otherwise mail out immediately and irreversibly.
+                            db.add_rater(
                                 leader_id, r['relationship'], r['name'], r['email']
                             )
                             db.add_to_nomination_roster(
                                 leader_id, r['name'], r['email'], r['relationship']
                             )
-
-                            if EMAIL_AVAILABLE and is_email_configured():
-                                rater = db.get_rater(rater_id)
-                                send_rater_invitation(
-                                    rater, leader_info['name'], base_url, db
-                                )
-
                             imported += 1
 
-                        st.success(f"Imported {imported} "
-                                   f"{'person' if imported == 1 else 'people'}")
+                        st.success(
+                            f"Imported {imported} {'person' if imported == 1 else 'people'}. "
+                            f"Check the details below, then send invitations when you're ready."
+                        )
                         st.session_state['rater_csv_upload_count'] = \
                             st.session_state.get('rater_csv_upload_count', 0) + 1
                         st.rerun()
@@ -444,6 +448,24 @@ def render_nominated_list(db, leader_info, base_url):
         "that is the context they answered in. To remove someone, for example if they've "
         "left the business, contact your programme coordinator."
     )
+
+    # Invitations are a deliberate, separate action from adding someone (see
+    # the Add a Rater form and CSV import above) - this is the review point
+    # before anything actually goes out.
+    pending = db.get_raters_pending_invitation(leader_info['id']) if EMAIL_AVAILABLE else []
+    if pending:
+        count_text = "1 person is" if len(pending) == 1 else f"{len(pending)} people are"
+        st.info(
+            f"{count_text} ready to be invited. Please check the names, email addresses "
+            f"and relationships below carefully - once you send, invitations go out "
+            f"immediately and can't be recalled."
+        )
+
+    # Rows whose last invitation attempt failed get a warning marker next to
+    # the edit button below - the aggregate "X sent, Y failed" message after a
+    # bulk send gives no way to tell WHICH of several pending people actually
+    # needs a fixed email versus just a resend, so this closes that gap.
+    failed_emails = db.get_failed_invitation_emails(leader_info['id']) if EMAIL_AVAILABLE else set()
 
     # Counts come from the raters rows rather than the roster, because that is what
     # the report actually groups by, and severed rows still carry their relationship.
@@ -509,16 +531,55 @@ def render_nominated_list(db, leader_info, base_url):
                             st.toast("Nomination updated.")
                             st.rerun()
             else:
-                col1, col2, col3 = st.columns([3, 3, 1])
+                failed = current_email.strip().lower() in failed_emails
+                col1, col2, col3, col4 = st.columns([3, 2.6, 0.4, 1])
                 with col1:
                     st.write(entry.get('name') or "Unknown")
                 with col2:
                     st.caption(current_email or "No email address")
                 with col3:
+                    if failed:
+                        st.markdown(
+                            '<span title="Invitation failed to send - check the '
+                            'email address, then resend" style="color: #B00020; '
+                            'font-size: 1.2rem;">&#9888;</span>',
+                            unsafe_allow_html=True
+                        )
+                with col4:
                     if st.button("", icon=":material/edit:", key=f"edit_{idx}",
                                  help="Correct this person's email or relationship"):
                         st.session_state[editing_key] = True
                         st.rerun()
+
+    if pending:
+        st.markdown("")
+        if st.button(
+            f"Send Invitation{'s' if len(pending) != 1 else ''} ({len(pending)} pending)",
+            type="primary", use_container_width=True, key="send_pending_invitations"
+        ):
+            if not is_email_configured():
+                st.error("Email isn't configured for this deployment - invitations can't be sent right now.")
+            else:
+                sent, failed_entries = 0, []
+                for rater in pending:
+                    success, _ = send_rater_invitation(rater, leader_info['name'], base_url, db)
+                    if success:
+                        sent += 1
+                    else:
+                        failed_entries.append({'name': rater.get('name'), 'email': rater.get('email')})
+
+                if failed_entries:
+                    failed = len(failed_entries)
+                    st.warning(f"Sent {sent} invitation{'s' if sent != 1 else ''}. "
+                               f"{failed} failed to send - check back or contact your programme coordinator.")
+                    # Also email the leader directly, in case they close this
+                    # tab before seeing the warning above - see
+                    # send_invitation_failure_notice's docstring for what this
+                    # does and doesn't cover.
+                    send_invitation_failure_notice(leader_info, failed_entries, base_url, db)
+                else:
+                    st.success(f"Sent {sent} invitation{'s' if sent != 1 else ''}.")
+                st.rerun()
 
 
 def _parse_rater_csv(import_df, existing_raters):

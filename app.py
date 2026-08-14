@@ -181,13 +181,161 @@ st.markdown("""
         margin-bottom: 0.8rem;
         border: 1px solid #E0E0E0;
     }
-    
+
+    /* The whole feedback form card (dimension header, description, item
+       boxes, comment box, buttons) - Heritage White per the report's Bentley
+       brand palette (framework.py COLOURS['heritage_white'], #DCD8C0), so
+       the survey pages read as part of the same document family as the
+       report. The form itself has a transparent background by default (the
+       pale card look in the old screenshots was just the page background
+       showing through its border), so this sets a real fill for the first
+       time rather than overriding one.
+       Scoped to the "compass_survey_form" container key (wrapping just the
+       rater/self-assessment st.form calls in feedback_form.py) rather than
+       the bare stForm testid - stForm has no key-based class of its own, and
+       an unscoped rule here would silently reach every other st.form in the
+       app (leader_portal.py's Add a Rater, admin_dashboard.py's add-leader/
+       add-rater/quick-add forms), none of which were part of this request. */
+    div[class*="st-key-compass_survey_form"] div[data-testid="stForm"] {
+        background: #DCD8C0;
+        border: 1px solid #C9C4A8;
+    }
+
+    /* "Welcome back" resume banner (st.info) - recoloured from Streamlit's
+       default blue to match the instructions box's white-card-with-green-
+       accent family, so it reads as part of this page rather than a generic
+       system alert. Scoped to the info variant only via stAlertContentInfo -
+       success/error/warning alerts keep their default colours (red for
+       errors is universal and deliberately left alone). */
+    .stAlertContainer:has([data-testid="stAlertContentInfo"]) {
+        background: white;
+        border: 1px solid #E0E0E0;
+        border-left: 4px solid #183319;
+    }
+    .stAlertContainer:has([data-testid="stAlertContentInfo"]) [data-testid="stAlertContentInfo"],
+    .stAlertContainer:has([data-testid="stAlertContentInfo"]) [data-testid="stAlertContentInfo"] * {
+        color: #183319;
+    }
+
+    /* Text areas (comment boxes, keep/change, priority actions) default to
+       Streamlit's own pale grey fill (#F0F2F6) - switched to white so they
+       read as the same kind of card as the question boxes, not a different
+       control style, against the Heritage White form background. Scoped the
+       same way as the form background above, for the same reason. */
+    div[class*="st-key-compass_survey_form"] div[data-testid="stTextAreaRootElement"],
+    div[class*="st-key-compass_survey_form"] div[data-testid="stTextAreaRootElement"] div {
+        background-color: white;
+    }
+    div[class*="st-key-compass_survey_form"] div[data-testid="stTextAreaRootElement"] {
+        border: 1px solid #E0E0E0;
+    }
+
+    /* Leader portal's "Add a Rater" fields (Name, Email, Relationship) -
+       same pale-grey-to-white treatment as the survey's text areas above,
+       scoped to this one form via its container key so it doesn't reach the
+       admin dashboard's own add-leader/add-rater/quick-add forms, which
+       weren't part of this request. The relationship dropdown's fill has no
+       stable testid of its own (BaseWeb's select renders it as a plain div),
+       so it's matched structurally as the direct child of [data-baseweb=
+       "select"] instead. */
+    div[class*="st-key-portal_add_rater_form"] div[data-testid="stTextInputRootElement"],
+    div[class*="st-key-portal_add_rater_form"] div[data-testid="stTextInputRootElement"] div {
+        background-color: white;
+    }
+    div[class*="st-key-portal_add_rater_form"] div[data-testid="stTextInputRootElement"] {
+        border: 1px solid #E0E0E0;
+    }
+    div[class*="st-key-portal_add_rater_form"] div[data-baseweb="select"] > div {
+        background-color: white;
+    }
+
+    /* "Or upload multiple raters" box - stretched to the same depth as its
+       neighbouring "Add a Rater" form. The two columns already stretch to
+       equal height (Streamlit's own flex row does that), but a bordered
+       st.container only fills that height at the outer stColumn level - its
+       own inner wrapper (stLayoutWrapper) still shrinks to fit its content,
+       leaving empty space below the visible border. Reaching that wrapper
+       needs :has(), since it carries no key or class of its own to select by. */
+    div[data-testid="stLayoutWrapper"]:has(> div[class*="st-key-portal_upload_raters"]) {
+        height: 100%;
+    }
+    div[class*="st-key-portal_upload_raters"] {
+        height: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Upload CSV dropzone - same pale-grey-to-white treatment as the other
+       fields in this section, scoped to this one uploader. */
+    div[class*="st-key-portal_upload_raters"] [data-testid="stFileUploaderDropzone"] {
+        background-color: white;
+        border: 1px solid #E0E0E0;
+    }
+
+    /* Per-item rating box on the live dimension page (question + segmented
+       control together) - reverted to white so it reads as a distinct card
+       against the Heritage White form background surrounding it. */
+    div[class*="st-key-item_box_"] {
+        background: white;
+        padding: 1rem 1.2rem 0.6rem 1.2rem;
+        border-radius: 6px;
+        margin-bottom: 0.8rem;
+        border: 1px solid #E0E0E0;
+    }
+
+    /* Review page's "Edit" buttons only (key="edit_<page_idx>"), matched to
+       the dimension-header bar's own rendered height (measured 58.87px at
+       font-size 1.3rem + 0.8rem vertical padding) so the two line up top
+       and bottom, not just top. Scoped to this key prefix rather than all
+       secondary buttons, which must keep their own height elsewhere. */
+    div[class*="st-key-edit_"] button[data-testid="stBaseButton-secondaryFormSubmit"] {
+        height: 58.87px;
+    }
+    /* The element-container itself (matched above) shrinks to fit the button
+       and has no spare width to justify within, so the right-align has to go
+       on its parent column block, which does hold the column's full width.
+       That block is already flex-direction:column (Streamlit's default), so
+       the cross-axis property is align-items, not justify-content. :has()
+       reaches "up" to find the vertical block wrapping our specific edit
+       button, without affecting any other column layout. */
+    div[data-testid="stVerticalBlock"]:has(> div[class*="st-key-edit_"]) {
+        align-items: flex-end;
+    }
+
     .item-text {
         font-family: 'Source Sans Pro', sans-serif;
         font-size: 1rem;
         color: #333;
         margin-bottom: 0.8rem;
         line-height: 1.5;
+    }
+
+    /* Review page item rows only. Fixed-width right-hand column for the
+       rating label so it lands in a straight vertical line regardless of
+       question length, instead of trailing at the end of variable-length
+       question text. */
+    .review-item-row {
+        display: flex;
+        align-items: baseline;
+        gap: 1rem;
+        background: white;
+        padding: 1rem 1.2rem;
+        border-radius: 6px;
+        margin-bottom: 0.8rem;
+        border: 1px solid #E0E0E0;
+    }
+    .review-item-question {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .review-item-question .item-text {
+        margin-bottom: 0;
+    }
+    .review-item-rating {
+        flex: 0 0 160px;
+        text-align: right;
+        font-weight: 700;
+        color: #183319;
+        white-space: nowrap;
     }
 
     /* Rating scale (st.segmented_control, one per item). Verified against the
@@ -208,8 +356,14 @@ st.markdown("""
     }
 
     /* Set apart the last of the six options ("No opportunity to observe") as
-       a smaller, muted, functionally-different answer to the five frequency
-       options before it — a hairline divider, not a numbered pill. */
+       a muted, functionally-different answer to the five frequency options
+       before it — a hairline divider and muted colour, not a numbered pill.
+       Font-size was also reduced to 0.85em here originally, but that read as
+       just "the text is too small" on the actual button rather than as a
+       deliberate distinction (the button itself is still full-size, so a
+       smaller label alone looked like an inconsistency, not a design
+       choice) - dropped back to full size; the divider and colour alone
+       already carry the "set apart" signal. */
     div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child {
         margin-left: 1.25rem;
         padding-left: 1.25rem;
@@ -217,38 +371,40 @@ st.markdown("""
     }
     div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child,
     div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child * {
-        font-size: 0.85em;
         color: #777777 !important;
     }
     div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child[data-testid="stBaseButton-segmented_controlActive"] * {
         color: #FFFFFF !important;
     }
 
-    /* Slim inline progress readout under each item, replacing the old
-       sidebar panel. Thin track, Bentley green fill, small muted count. */
+    /* One prominent progress readout per page (since the paginated redesign,
+       not a slim per-item readout repeated 45 times as originally built) -
+       thicker track and a larger, bolder percentage than that earlier,
+       easy-to-miss version. */
     .item-progress {
         display: flex;
         align-items: center;
-        gap: 0.6rem;
+        gap: 0.8rem;
         margin: 0 0 1.2rem 0;
     }
     .item-progress-track {
         flex: 1;
-        height: 3px;
+        height: 10px;
         background: #E2E0D8;
-        border-radius: 2px;
+        border-radius: 5px;
         overflow: hidden;
     }
     .item-progress-fill {
         height: 100%;
         background: #183319;
-        border-radius: 2px;
+        border-radius: 5px;
         transition: width 0.2s;
     }
     .item-progress-text {
         font-family: 'Source Sans Pro', sans-serif;
-        font-size: 0.78rem;
-        color: #999999;
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #183319;
         white-space: nowrap;
     }
 
@@ -298,6 +454,12 @@ st.markdown("""
         background: #FFFFFF !important;
         color: #183319 !important;
         border: 1px solid #183319 !important;
+        /* Matches the primary button's padding above - Streamlit's own
+           default secondary padding (4px 12px) is noticeably shorter than
+           its default primary padding (9.6px 32px), so a secondary and
+           primary button side by side (e.g. "Save & Continue Later" next to
+           "Continue") rendered at visibly different heights without this. */
+        padding: 0.6rem 2rem;
         font-family: 'Source Sans Pro', sans-serif;
         font-weight: 600;
         transition: border-color 0.2s, opacity 0.2s;

@@ -1046,6 +1046,65 @@ class Database:
             LIMIT 1
         """, (rater_id,))
     
+    def get_raters_pending_invitation(self, leader_id):
+        """
+        Raters for this leader who haven't yet been sent an invitation email.
+
+        Adding a rater (single form or CSV import) no longer sends the
+        invitation itself - that's a separate, deliberate action the leader
+        triggers after reviewing the roster, so a typo'd name/email/
+        relationship can be caught and corrected first rather than mailed out
+        immediately. Excludes Self (never invited via this path) and anyone
+        who has already completed their response (can't happen without a
+        prior invitation in practice, but excluded defensively either way).
+
+        Also requires a non-null email. Found via testing: a handful of old
+        rows on this leader predate the roster/name/email being required
+        together, so they carry no email at all - send_rater_invitation can
+        never do anything with those, and they don't appear in
+        get_nomination_roster either (its own backfill requires a name or
+        email), so without this filter they inflated the pending count with
+        raters the leader has no way to see or act on.
+        """
+        return self._fetchall("""
+            SELECT * FROM raters
+            WHERE leader_id = ?
+              AND relationship != 'Self'
+              AND completed_at IS NULL
+              AND email IS NOT NULL
+              AND id NOT IN (
+                  SELECT rater_id FROM email_log
+                  WHERE email_type = 'invitation' AND success = 1 AND rater_id IS NOT NULL
+              )
+            ORDER BY created_at
+        """, (leader_id,))
+
+    def get_failed_invitation_emails(self, leader_id):
+        """
+        Email addresses among this leader's raters that failed to send on
+        their last invitation attempt and have never succeeded since.
+
+        Used to flag a specific row as needing attention on the portal's
+        nomination list, distinct from a row that just hasn't been sent yet -
+        a bulk send can partially fail, and without this there's no way to
+        tell which of several pending people actually needs a fixed email
+        address rather than just a resend. Matched on email (email_log.to_email)
+        rather than rater_id, since that's what the roster itself is keyed on.
+        """
+        rows = self._fetchall("""
+            SELECT DISTINCT el.to_email
+            FROM email_log el
+            JOIN raters r ON r.id = el.rater_id
+            WHERE r.leader_id = ?
+              AND el.email_type = 'invitation'
+              AND el.success = 0
+              AND el.rater_id NOT IN (
+                  SELECT rater_id FROM email_log
+                  WHERE email_type = 'invitation' AND success = 1 AND rater_id IS NOT NULL
+              )
+        """, (leader_id,))
+        return {row['to_email'].strip().lower() for row in rows if row.get('to_email')}
+
     def get_email_stats_for_leader(self, leader_id):
         """Get email statistics for a leader's assessment."""
         return self._fetchone("""

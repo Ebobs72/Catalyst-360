@@ -988,6 +988,169 @@ def send_portal_invitation(leader, base_url, db):
     return success, message
 
 
+def _get_invitation_failure_html(leader_name, failed_entries, portal_url):
+    """Generate HTML for the immediate invitation-failure notice to a leader."""
+
+    rows_html = "".join(
+        f"""
+                                <tr>
+                                    <td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #333; font-size: 14px;">{e.get('name') or 'Unknown'}</td>
+                                    <td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #666; font-size: 14px;">{e.get('email') or 'No email address'}</td>
+                                </tr>"""
+        for e in failed_entries
+    )
+    who = "the following person's" if len(failed_entries) == 1 else "the following people's"
+
+    logo_html = _email_logo_html()
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 20px 0;">
+        <tr>
+            <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: #B00020; padding: 30px 40px; text-align: center;">
+                            {logo_html}
+                            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                                SOME INVITATIONS DIDN'T SEND
+                            </h1>
+                            <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px;">
+                                Bentley Compass 360
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding: 40px;">
+                            <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                Dear {leader_name},
+                            </p>
+
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                                You recently sent feedback invitations, but {who} invitation could not be delivered:
+                            </p>
+
+                            <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 20px 0;">
+                                <tr>
+                                    <td style="padding: 8px 0; border-bottom: 2px solid #183319; color: #183319; font-size: 13px; font-weight: 600;">Name</td>
+                                    <td style="padding: 8px 0; border-bottom: 2px solid #183319; color: #183319; font-size: 13px; font-weight: 600;">Email address</td>
+                                </tr>{rows_html}
+                            </table>
+
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 30px 0;">
+                                This is usually a mistyped or invalid email address. Please check and correct it on your portal, then send their invitation again.
+                            </p>
+
+                            <!-- CTA Button -->
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td align="center" style="padding: 20px 0;">
+                                        <a href="{portal_url}"
+                                           style="display: inline-block; background: #183319;
+                                                  color: #ffffff; text-decoration: none; padding: 16px 40px;
+                                                  border-radius: 6px; font-size: 16px; font-weight: 600;
+                                                  letter-spacing: 0.5px;">
+                                            Go to Your Portal
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
+                                If the button doesn't work, copy and paste this link into your browser:<br>
+                                <a href="{portal_url}" style="color: #183319; word-break: break-all;">{portal_url}</a>
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
+                            <p style="color: #999; font-size: 12px; margin: 0;">
+                                This is an automated message from Bentley Compass 360.<br>
+                                If you have any questions, please contact your programme coordinator.
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
+def send_invitation_failure_notice(leader, failed_entries, base_url, db):
+    """
+    Notify the leader directly, by email, that one or more invitations they
+    just triggered failed to send.
+
+    Closes the gap where a leader adds raters, clicks Send, and closes the
+    tab before seeing the in-app warning - the portal's own failed-row icon
+    (see database.get_failed_invitation_emails) still catches it on their
+    next visit, but this reaches them even if they never come back on their
+    own initiative.
+
+    Only covers failures our own SMTP call detects immediately (an address
+    rejected at send time - see _send_email's SMTPRecipientsRefused handling).
+    A message accepted at send time that bounces later is invisible to the
+    app entirely, since the bounce is a separate email sent by the
+    recipient's mail server straight back to the sending mailbox, with no
+    hook into this application. Closing THAT gap needs a bounce-aware
+    transactional email provider (e.g. Postmark/SendGrid/SES via webhook),
+    not this function - a deliberate later piece of work, not attempted here.
+
+    Args:
+        leader: Leader dict with id, name, email, portal_token
+        failed_entries: list of dicts with 'name' and 'email', for raters
+            whose invitation attempt failed in this batch
+        base_url: Base URL for the app
+        db: Database instance for logging
+
+    Returns:
+        (success: bool, message: str)
+    """
+    if not leader.get('email') or not failed_entries:
+        return False, "No leader email or nothing failed"
+
+    if not leader.get('portal_token'):
+        return False, "No portal token"
+
+    portal_url = f"{base_url}?portal={leader['portal_token']}"
+
+    subject = "Some invitations couldn't be sent — Bentley Compass 360"
+    html = _get_invitation_failure_html(leader['name'], failed_entries, portal_url)
+
+    success, message = _send_email(
+        leader['email'],
+        leader['name'],
+        subject,
+        html
+    )
+
+    if db:
+        db.log_email(
+            leader_id=leader['id'],
+            email_type='invitation_failure_notice',
+            to_email=leader['email'],
+            success=success,
+            message=message
+        )
+
+    return success, message
+
+
 def send_leader_nomination_reminder(leader, base_url, db):
     """
     Send nomination reminder email to a leader who hasn't added enough raters.
