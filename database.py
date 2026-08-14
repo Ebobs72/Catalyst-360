@@ -829,6 +829,12 @@ class Database:
 
         cursor.execute("DELETE FROM ratings WHERE rater_id = ?", (rater_id,))
         cursor.execute("DELETE FROM comments WHERE rater_id = ?", (rater_id,))
+        # email_log also has a FOREIGN KEY on rater_id (invitations, reminders,
+        # and now invitation-failure notices all log against it) and was
+        # missing here, so deleting anyone who'd ever had so much as one send
+        # attempt logged - success or fail - raised a FOREIGN KEY constraint
+        # error and left them stuck, undeletable, in the admin dashboard.
+        cursor.execute("DELETE FROM email_log WHERE rater_id = ?", (rater_id,))
         cursor.execute("DELETE FROM raters WHERE id = ?", (rater_id,))
 
         conn.commit()
