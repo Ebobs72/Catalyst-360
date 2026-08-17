@@ -166,7 +166,12 @@ class Database:
         # the leader's own development intent, not anonymous feedback, and they
         # need to outlive any change to how self-assessment rows are handled.
         self._safe_add_column("leaders", "development_priorities", "TEXT")
-        
+        # Durable record that the admin "Full 360 report-ready" notification
+        # has already fired for this leader, so the one-time transition check
+        # in try_claim_full_360_notification survives app restarts rather
+        # than relying on in-session state. NULL until claimed.
+        self._safe_add_column("leaders", "full_360_notified_at", "TIMESTAMP")
+
         # Continue with rest of schema
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -808,7 +813,54 @@ class Database:
 
         conn.commit()
         conn.close()
-    
+
+    def is_full_360_report_ready(self, leader_id):
+        """
+        Whether this leader has enough completed responses to generate a
+        meaningful Full 360 (the same MIN_RESPONSES_FOR_REPORT threshold the
+        admin dashboard already displays as "Ready for Full 360" everywhere
+        it shows that status). Deliberately the simple total-completions
+        check, not a re-run of get_leader_feedback_data's fold-cascade
+        maths - the fold cascade governs how thin GROUPS get folded for
+        anonymity, not whether the leader is reportable at all, and by the
+        time total completions clears this threshold the cascade always
+        resolves to something reportable (see the comment above the
+        suppression branch in get_leader_feedback_data).
+        """
+        from framework import MIN_RESPONSES_FOR_REPORT
+        row = self._fetchone(
+            "SELECT COUNT(*) as n FROM raters WHERE leader_id = ? AND completed_at IS NOT NULL",
+            (leader_id,)
+        )
+        return (row['n'] if row else 0) >= MIN_RESPONSES_FOR_REPORT
+
+    def try_claim_full_360_notification(self, leader_id):
+        """
+        Atomically claim the one-time transition into Full 360 report-ready.
+
+        Multiple raters can complete their feedback within moments of each
+        other, so "check is_full_360_report_ready, then check
+        full_360_notified_at, then set it" would race: two completions could
+        both see it unset and both send the notification. This does the
+        check-and-set as a single UPDATE ... WHERE, so only one caller's
+        UPDATE can ever match the NULL row - the caller whose UPDATE actually
+        changed a row (rowcount > 0) is the one that won the transition and
+        should send the notification. Everyone else gets False and sends
+        nothing, including on any call after the first, since the column is
+        no longer NULL.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE leaders SET full_360_notified_at = CURRENT_TIMESTAMP "
+            "WHERE id = ? AND full_360_notified_at IS NULL",
+            (leader_id,)
+        )
+        claimed = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return claimed
+
     def delete_rater(self, rater_id):
         """
         Delete a rater and their responses.

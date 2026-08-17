@@ -77,6 +77,39 @@ def get_app_base_url():
     return DEFAULT_BASE_URL
 
 
+def get_admin_notification_email():
+    """
+    Coordinator/admin address for report-ready milestone notifications
+    (self-assessment complete, Full 360 crossed the response threshold).
+
+    Same os.environ-first, st.secrets-fallback pattern as get_app_base_url()
+    and get_smtp_config() below - not hardcoded, not Bentley-specific, so
+    each deployment configures its own address rather than this project
+    picking one deployment's coordinator for everyone.
+
+    Configure per environment as either:
+        ADMIN_NOTIFICATION_EMAIL=coordinator@example.com   (env var - Render)
+    or:
+        [app]
+        admin_notification_email = "coordinator@example.com"   (Streamlit Cloud secrets)
+
+    Returns None if unset, so callers can skip sending and log the gap
+    rather than raise - a missing address must never block a rater's own
+    submission.
+    """
+    env_value = os.environ.get("ADMIN_NOTIFICATION_EMAIL")
+    if env_value:
+        return env_value.strip()
+
+    try:
+        value = st.secrets.get("app", {}).get("admin_notification_email")
+        if value:
+            return str(value).strip()
+    except Exception:
+        pass
+    return None
+
+
 def get_smtp_config():
     """
     Get SMTP configuration - environment variables first, falling back to
@@ -656,6 +689,165 @@ def send_leader_notification(leader, db):
         )
     
     return success, message
+
+
+def _get_admin_notification_html(leader_name, milestone_type):
+    """Generate HTML for the admin report-ready milestone notice.
+
+    milestone_type selects body copy only ('self_assessment_ready' or
+    'full_360_ready') - the caller decides subject and whether/who to send
+    to; this just renders the two known bodies."""
+    admin_url = f"{get_app_base_url()}?admin=true"
+
+    if milestone_type == 'self_assessment_ready':
+        heading = "SELF-ASSESSMENT COMPLETE"
+        body = (
+            f"<strong>{leader_name}</strong> has completed their leadership "
+            f"self-assessment. Their Self-Assessment report can now be generated "
+            f"ahead of Module 1."
+        )
+    else:
+        heading = "FULL 360 REPORT READY"
+        body = (
+            f"<strong>{leader_name}</strong>'s Full 360 has reached enough "
+            f"responses to generate a meaningful report."
+        )
+
+    logo_html = _email_logo_html()
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 20px 0;">
+        <tr>
+            <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: #183319; padding: 30px 40px; text-align: center;">
+                            {logo_html}
+                            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                                {heading}
+                            </h1>
+                            <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0 0; font-size: 14px;">
+                                Bentley Compass 360
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding: 40px;">
+                            <p style="color: #333; font-size: 15px; line-height: 1.6; margin: 0 0 30px 0;">
+                                {body}
+                            </p>
+
+                            <!-- CTA Button -->
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td align="center" style="padding: 0 0 20px 0;">
+                                        <a href="{admin_url}"
+                                           style="display: inline-block; background: #183319;
+                                                  color: #ffffff; text-decoration: none; padding: 16px 40px;
+                                                  border-radius: 6px; font-size: 16px; font-weight: 600;
+                                                  letter-spacing: 0.5px;">
+                                            Open Admin Dashboard
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f9f9f9; padding: 20px 40px; text-align: center; border-top: 1px solid #eee;">
+                            <p style="color: #999; font-size: 12px; margin: 0;">
+                                This is an automated message from Bentley Compass 360.
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
+def send_admin_notification(subject, leader_name, milestone_type, db, leader_id=None):
+    """
+    Notify the programme coordinator that a leader has reached a report-ready
+    milestone - self-assessment complete, or Full 360 just crossed the
+    response threshold. Deliberately NOT a per-rater completion notice:
+    every individual submission firing an email would be noise, not signal.
+    This covers exactly two rare, genuinely actionable events, each meant to
+    fire once per leader - the one-time guarantee for the Full 360 case
+    lives in database.py's try_claim_full_360_notification, not here; this
+    function only sends and logs whatever it's told to.
+
+    Never raises on a missing or failed send - a notification failure must
+    not block or error out the rater-facing submission it's triggered from.
+    Callers should not need their own try/except around this.
+
+    Args:
+        subject: Email subject line (caller's choice, not derived here)
+        leader_name: Name of the leader who reached the milestone
+        milestone_type: 'self_assessment_ready' or 'full_360_ready' - selects
+            body copy only, not who it's sent to
+        db: Database instance for logging
+        leader_id: Optional, for the email_log FK so the audit trail can be
+            traced back to the leader without parsing the message text
+
+    Returns:
+        (success: bool, message: str)
+    """
+    try:
+        admin_email = get_admin_notification_email()
+        if not admin_email:
+            if db:
+                db.log_email(
+                    leader_id=leader_id,
+                    email_type=milestone_type,
+                    to_email='[not configured]',
+                    success=False,
+                    message="ADMIN_NOTIFICATION_EMAIL not configured"
+                )
+            return False, "ADMIN_NOTIFICATION_EMAIL not configured"
+
+        html = _get_admin_notification_html(leader_name, milestone_type)
+        success, message = _send_email(admin_email, None, subject, html)
+
+        if db:
+            db.log_email(
+                leader_id=leader_id,
+                email_type=milestone_type,
+                to_email=admin_email,
+                success=success,
+                message=message
+            )
+
+        return success, message
+    except Exception as e:
+        if db:
+            try:
+                db.log_email(
+                    leader_id=leader_id,
+                    email_type=milestone_type,
+                    to_email='[error]',
+                    success=False,
+                    message=str(e)
+                )
+            except Exception:
+                pass
+        return False, str(e)
 
 
 def send_bulk_invitations(raters, leader_name, base_url, db):

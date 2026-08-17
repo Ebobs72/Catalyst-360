@@ -22,6 +22,16 @@ from framework import (
     SUPPORTED_LOCALES, RTL_LOCALES, dimension_slug
 )
 
+# Admin report-ready milestone notifications (self-assessment complete, Full
+# 360 crossed threshold) - optional the same way every other email feature
+# in this app is: a deployment with no SMTP/admin address configured must
+# still let raters submit normally.
+try:
+    from email_sender import send_admin_notification
+    ADMIN_NOTIFICATIONS_AVAILABLE = True
+except ImportError:
+    ADMIN_NOTIFICATIONS_AVAILABLE = False
+
 TOTAL_ITEMS = 45
 
 # Rating scale as a single row of 6 labelled buttons (st.segmented_control),
@@ -1002,6 +1012,40 @@ def _render_review_page(db, rater_info, pages, locale, is_self, relationship, le
                 if is_self:
                     db.save_development_priorities(rater_info['leader_id'], priorities)
                 db.submit_feedback(rater_id, processed_ratings, processed_comments)
+
+                # Admin milestone notifications - self-assessment completion is
+                # a one-off per leader (there's no rater-facing way to resubmit;
+                # app.py's routing sends a completed rater straight to the
+                # thank-you page instead of back into this form), so it needs
+                # no extra guard beyond "this is a Self rater". The Full 360
+                # case genuinely can fire from more than one completion in
+                # quick succession, so it goes through try_claim_full_360_
+                # notification's atomic claim instead of a plain if-check.
+                # Failures here must never surface to the rater - this is
+                # purely a side effect of a successful submission that has
+                # already happened.
+                try:
+                    if ADMIN_NOTIFICATIONS_AVAILABLE:
+                        leader_id = rater_info['leader_id']
+                        leader_name = rater_info['leader_name']
+                        if is_self:
+                            send_admin_notification(
+                                subject=f"Self-Assessment Complete: {leader_name} — Bentley Compass 360",
+                                leader_name=leader_name,
+                                milestone_type='self_assessment_ready',
+                                db=db,
+                                leader_id=leader_id
+                            )
+                        elif db.is_full_360_report_ready(leader_id) and db.try_claim_full_360_notification(leader_id):
+                            send_admin_notification(
+                                subject=f"Full 360 Ready: {leader_name} — Bentley Compass 360",
+                                leader_name=leader_name,
+                                milestone_type='full_360_ready',
+                                db=db,
+                                leader_id=leader_id
+                            )
+                except Exception:
+                    pass
 
                 st.success(_t(db, 'ui_success_submitted', locale, "Thank you! Your feedback has been submitted successfully."))
                 st.balloons()
