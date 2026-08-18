@@ -1709,16 +1709,45 @@ def synthesise_feedback_themes(leader_name, comments, data):
     if len(all_comments) < 5:
         return None, None
     
-    # Build dimension scores context
+    # Build dimension scores context. Self/Combined/Gap is the self-vs-others
+    # picture; the per-group breakdown (Boss/Peers/DRs/Others) additionally
+    # surfaces whether the OTHER raters agree with each other, which a single
+    # Combined figure averages away. Only included when 2+ groups are
+    # individually visible AND they actually diverge (spread >= 0.5) - a tight
+    # cluster isn't a theme, and forcing one in would read as manufactured.
+    # These per-group averages are exactly what's already in data['by_dimension']
+    # from get_leader_feedback_data's own anonymity fold-cascade (a group only
+    # has its own key there if it already cleared the threshold, or was never
+    # subject to it like Boss), so this adds no new disclosure - it's the same
+    # numbers already shown elsewhere in the report, just previously withheld
+    # from this one section.
     scores_context = []
     for dim_name in DIMENSIONS.keys():
         dim_data = data.get('by_dimension', {}).get(dim_name, {})
         self_score = dim_data.get('Self')
         combined = dim_data.get('Combined')
         gap = dim_data.get('Gap')
-        if combined:
-            scores_context.append(f"{dim_name}: Self={self_score}, Others={combined}, Gap={gap:+.1f}" if gap else f"{dim_name}: Combined={combined}")
-    
+        if not combined:
+            continue
+
+        # No self-score (leader hasn't self-assessed yet) gets its own
+        # cleaner format rather than a literal "Self=None" in the prompt.
+        if self_score is not None:
+            line = f"{dim_name}: Self={self_score}, Others={combined}"
+            if gap:
+                line += f", Gap={gap:+.1f}"
+        else:
+            line = f"{dim_name}: Combined={combined}"
+
+        group_scores = {g: dim_data[g] for g in ('Boss', 'Peers', 'DRs', 'Others') if g in dim_data}
+        if len(group_scores) >= 2:
+            spread = max(group_scores.values()) - min(group_scores.values())
+            if spread >= 0.5:
+                by_group = ", ".join(f"{g}={v}" for g, v in group_scores.items())
+                line += f" | By group: {by_group} (spread={spread:.1f})"
+
+        scores_context.append(line)
+
     prompt = f"""You are writing a section of a 360-degree feedback report for {leader_name}. This section synthesises the key themes from their verbatim feedback. The leader will read this directly, so write in the second person — use "you", "your", "your feedback suggests" etc. Never refer to them as "the leader" or "this leader".
 
 The tone should be warm, constructive, and developmental — as if a skilled coach were talking them through their feedback. Be direct but supportive.
@@ -1733,7 +1762,9 @@ DIMENSION SCORES:
 
 Please identify 4-6 key themes that emerge from this feedback. For each theme:
 1. Give it a clear, concise title (e.g., "Building Trust Through Authenticity" or "Balancing Operational Focus with Strategic Thinking")
-2. Write a 2-3 sentence narrative that synthesises the evidence — reference what respondents said without quoting them verbatim, connect to the quantitative scores where relevant, and speak directly to {leader_name} using "you" and "your"."""
+2. Write a 2-3 sentence narrative that synthesises the evidence — reference what respondents said without quoting them verbatim, connect to the quantitative scores where relevant, and speak directly to {leader_name} using "you" and "your".
+
+Where a dimension shows scores by individual rater group, consider whether those groups diverge meaningfully from each other, not only from the self-rating. Genuine disagreement between groups (e.g. Direct Reports and Peers seeing something differently) is a distinct, often more actionable insight than a self-vs-others gap, and is worth its own theme if the spread is notable. Don't manufacture a divergence theme where the groups broadly agree."""
 
     request_payload = {
         "model": SYNTHESIS_MODEL,
