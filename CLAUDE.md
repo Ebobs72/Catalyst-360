@@ -456,9 +456,27 @@ SILENTLY if either is missing:
 - Failures now print a loud, specific message to STDERR (visible in Streamlit
   logs) naming the HTTP status and saying the section will be missing. A silent
   skip means a real leader's report loses a whole section with no warning.
-- STILL OUTSTANDING: the failure is loud in the logs but invisible in the admin
-  UI. If the human wants report generation to surface "Key Themes could not be
-  generated", that is a small change in admin_dashboard.py's report tab.
+- ALREADY DONE, CLAUDE.md previously said otherwise: failures ARE surfaced in
+  the admin UI, not just the logs - `st.warning(f"Key Themes section could not
+  be generated: {theme_warning}")` in admin_dashboard.py (both the single-leader
+  report tab and the bulk-generation one). The whole function is wrapped in a
+  broad `except Exception as e: return None, f"theme synthesis raised an
+  exception: {e}"`, which is exactly what caught the bug below rather than
+  crashing the report generation entirely.
+- FOUND 2026-08-17 (first real end-to-end run against the live API in this
+  environment - never caught locally, since local testing had no API key to
+  exercise a real call): `content[0]` is NOT reliably the text block.
+  `max_tokens` caps thinking PLUS response text together (see above) because
+  thinking is on by default - and a thinking response puts a `{"type":
+  "thinking", ...}` block FIRST in `content`, with no `"text"` key at all.
+  Indexing `result['content'][0]['text']` directly raised `KeyError: 'text'`
+  in production, surfaced to the admin as "theme synthesis raised an
+  exception: 'text'" via the broad except above. Fixed by finding the actual
+  `{"type": "text"}` block in `content` instead of assuming its position -
+  correct whether thinking produced 0, 1, or several blocks before it, and
+  falls back to a clear warning (not a crash) in the edge case where thinking
+  exhausts the token budget and no text block exists at all. Verified against
+  simulated thinking-then-text, text-only, and thinking-only response shapes.
 
 ### Typography and charts — DONE 2026-08-04
 - RADAR LABELS were cutting into the plot (the human spotted it). Cause: labels

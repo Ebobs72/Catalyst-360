@@ -1827,7 +1827,25 @@ Where a dimension shows scores by individual rater group, consider whether those
                           file=sys.stderr)
                     return None, warning
 
-                text = result['content'][0]['text'].strip()
+                # content[0] is NOT reliably the text block: thinking is on by
+                # default for this model (see max_tokens note above), and a
+                # thinking response puts a {"type": "thinking", ...} block
+                # first in content, with no "text" key at all - indexing [0]
+                # directly raised KeyError: 'text' in production the first
+                # time this path actually ran against the live API (never
+                # caught locally, since this session had no API key to
+                # exercise a real call). Find the actual text block instead
+                # of assuming its position.
+                text_block = next(
+                    (block for block in result.get('content', []) if block.get('type') == 'text'),
+                    None
+                )
+                if text_block is None:
+                    warning = "the API response contained no text content (thinking only)"
+                    print(f"SYNTHESIS FAILED: {warning}.", file=sys.stderr)
+                    return None, warning
+
+                text = text_block['text'].strip()
                 return json.loads(text)['themes'], None
 
             # 429/500/529 are transient and routinely resolve a few seconds
