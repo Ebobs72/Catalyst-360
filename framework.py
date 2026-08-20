@@ -31,11 +31,11 @@ DIMENSIONS = {
 
 ITEMS = {
     # Leading Self (1-5)
-    1: {"self": "I manage my own emotions effectively, even under pressure", "other": "They manage their own emotions effectively, even under pressure"},
+    1: {"self": "I stay calm and manage my emotions effectively, even under pressure", "other": "They stay calm and manage their emotions effectively, even under pressure"},
     2: {"self": "I acknowledge my strengths and development areas openly", "other": "They acknowledge their strengths and development areas openly"},
-    3: {"self": "I stay composed when situations get difficult", "other": "They stay composed when situations get difficult"},
+    3: {"self": "I delegate appropriately rather than taking on too much myself", "other": "They delegate appropriately rather than taking on too much themselves"},
     4: {"self": "I take responsibility for my mistakes and learn from them", "other": "They take responsibility for their mistakes and learn from them"},
-    5: {"self": "I act in line with my stated values, even when it's costly to do so", "other": "They act in line with their stated values, even when it's costly to do so"},
+    5: {"self": "I manage my time effectively, focusing on high-value activities rather than firefighting", "other": "They manage their time effectively, focusing on high-value activities rather than firefighting"},
 
     # Developing Others (6-10)
     6: {"self": "I provide constructive feedback to help others improve", "other": "They provide constructive feedback to help others improve"},
@@ -45,9 +45,9 @@ ITEMS = {
     10: {"self": "I identify high-potential talent and nurture future leaders", "other": "They identify high-potential talent and nurture future leaders"},
 
     # Building High-Performing Teams (11-15)
-    11: {"self": "I respond to mistakes and bad news without blame", "other": "They respond to mistakes and bad news without blame"},
+    11: {"self": "I create a team environment where people feel safe to raise mistakes and disagreements early", "other": "They create a team environment where people feel safe to raise mistakes and disagreements early"},
     12: {"self": "I foster collaboration and shared ownership within the team", "other": "They foster collaboration and shared ownership within the team"},
-    13: {"self": "I tackle disagreements in the team early, before they fester", "other": "They tackle disagreements in the team early, before they fester"},
+    13: {"self": "I adapt my leadership style to what different team members need", "other": "They adapt their leadership style to what different team members need"},
     14: {"self": "I celebrate team successes and recognise contributions", "other": "They celebrate team successes and recognise contributions"},
     15: {"self": "I build team capability and ensure knowledge sharing", "other": "They build team capability and ensure knowledge sharing"},
 
@@ -56,12 +56,12 @@ ITEMS = {
     17: {"self": "I establish clear accountability for results", "other": "They establish clear accountability for results"},
     18: {"self": "I monitor progress regularly and adjust plans when needed", "other": "They monitor progress regularly and adjust plans when needed"},
     19: {"self": "I push the team to deliver business results consistently", "other": "They push the team to deliver business results consistently"},
-    20: {"self": "I balance short-term delivery with sustainable, long-term performance", "other": "They balance short-term delivery with sustainable, long-term performance"},
+    20: {"self": "I make timely decisions rather than delaying unnecessarily", "other": "They make timely decisions rather than delaying unnecessarily"},
 
     # Leading Change (21-25)
     21: {"self": "I identify the need for change and initiate it proactively", "other": "They identify the need for change and initiate it proactively"},
-    22: {"self": "I create a compelling vision for change that inspires people", "other": "They create a compelling vision for change that inspires people"},
-    23: {"self": "I help people understand and adapt to change", "other": "They help people understand and adapt to change"},
+    22: {"self": "I create a compelling vision for change that helps people understand and adapt", "other": "They create a compelling vision for change that helps people understand and adapt"},
+    23: {"self": "I encourage new ideas and ways of working, not just maintaining the status quo", "other": "They encourage new ideas and ways of working, not just maintaining the status quo"},
     24: {"self": "I keep the team steady when things are uncertain", "other": "They keep the team steady when things are uncertain"},
     25: {"self": "I build momentum and sustain change through to completion", "other": "They build momentum and sustain change through to completion"},
 
@@ -80,18 +80,18 @@ ITEMS = {
     35: {"self": "I build strong relationships based on mutual respect", "other": "They build strong relationships based on mutual respect"},
 
     # Thinking Strategically (36-40)
-    36: {"self": "I think about broader business implications of decisions", "other": "They think about broader business implications of decisions"},
-    37: {"self": "I anticipate market trends and competitive threats", "other": "They anticipate market trends and competitive threats"},
-    38: {"self": "I see connections between different parts of the business", "other": "They see connections between different parts of the business"},
+    36: {"self": "I think about how my decisions affect other parts of the business, not just my own area", "other": "They think about how decisions affect other parts of the business, not just their own area"},
+    37: {"self": "I anticipate market trends and risks before they become problems", "other": "They anticipate market trends and risks before they become problems"},
+    38: {"self": "I build effective relationships with key stakeholders across the business", "other": "They build effective relationships with key stakeholders across the business"},
     39: {"self": "I consider long-term consequences in my decision-making", "other": "They consider long-term consequences in their decision-making"},
     40: {"self": "I challenge assumptions and explore multiple perspectives", "other": "They challenge assumptions and explore multiple perspectives"},
 
     # Performance Excellence (41-45)
-    41: {"self": "I apply structured approaches to solve complex problems", "other": "They apply structured approaches to solve complex problems"},
-    42: {"self": "I systematically analyse problems before taking action", "other": "They systematically analyse problems before taking action"},
-    43: {"self": "I drive continuous improvement in processes and systems", "other": "They drive continuous improvement in processes and systems"},
-    44: {"self": "I use data and evidence to inform decisions", "other": "They use data and evidence to inform decisions"},
-    45: {"self": "I embed quality and excellence into everything we do", "other": "They embed quality and excellence into everything they do"},
+    41: {"self": "I use the Performance Excellence framework to prioritise opportunities based on data rather than instinct", "other": "They use the Performance Excellence framework to prioritise opportunities based on data rather than instinct"},
+    42: {"self": "I clearly define problem statements before jumping into solutions", "other": "They clearly define problem statements before jumping into solutions"},
+    43: {"self": "I break larger issues into structured, manageable stages to solve problems at the right level", "other": "They break larger issues into structured, manageable stages to solve problems at the right level"},
+    44: {"self": "I engage the right people at each stage of the funnel to validate assumptions and strengthen solutions", "other": "They engage the right people at each stage of the funnel to validate assumptions and strengthen solutions"},
+    45: {"self": "I follow through on improvement actions and track impact to ensure benefits are realised and sustained", "other": "They follow through on improvement actions and track impact to ensure benefits are realised and sustained"},
 }
 
 # ==========================================
