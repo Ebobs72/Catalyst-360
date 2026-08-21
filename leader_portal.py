@@ -17,6 +17,11 @@ from framework import (
     ANONYMITY_THRESHOLD, RELATIONSHIP_TYPES,
     RELATIONSHIP_INPUT_HELP, normalise_relationship, get_logo_data_uri
 )
+# Leaders have no locale column (i18n is rater-only, see CLAUDE.md section 5),
+# so every _t() call in this file passes locale=None and gets the English
+# fallback - reusing feedback_form's helper keeps the routing consistent with
+# the rest of the app instead of duplicating it here.
+from feedback_form import _t
 
 # Import email functionality if available
 try:
@@ -69,12 +74,87 @@ RATER_REQUIREMENTS = {
 }
 
 
+def render_leader_consent_gate(db, leader_info):
+    """One-time data-protection consent screen, shown on the leader's first
+    portal visit, before their welcome/status header or any nomination tab.
+    Gated on leaders.consent_given, checked from the database on every visit
+    (never session state alone), so it is asked once and never again once
+    given - same durability pattern as the rater-facing consent gate in
+    feedback_form.py. Ticking the box is a distinct, deliberate action:
+    portal entry is blocked until it's ticked, not just discouraged.
+
+    Content differs from the rater version: the leader is consenting to
+    their OWN assessment data and to raters being contacted on their behalf,
+    not to submitting a single response, so it also covers their
+    responsibility for nominating raters appropriately.
+    """
+    leader_name = leader_info['name']
+
+    logo_uri = get_logo_data_uri()
+    logo_html = f'<img src="{logo_uri}" class="main-title-logo">' if logo_uri else ''
+    st.markdown(f'{logo_html}<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Your Leadership Feedback Portal</p>', unsafe_allow_html=True)
+
+    heading = _t(db, 'ui_leader_consent_heading', None, "Before you continue")
+    own_data_explainer = _t(
+        db, 'ui_leader_consent_own_data_explainer', None,
+        "Your own self-assessment and Full 360 results are stored against your name, "
+        "and are used to build your reports and support your coaching conversations."
+    )
+    nomination_responsibility = _t(
+        db, 'ui_leader_consent_nomination_responsibility', None,
+        "You are responsible for nominating raters appropriately - choosing people who can "
+        "give you meaningful feedback, and respecting the minimum numbers for each group so "
+        "their responses stay properly protected."
+    )
+    comments_warning = _t(
+        db, 'ui_leader_consent_comments_warning', None,
+        "Rater comments are shown to you word-for-word. Comments aren't protected by the "
+        "anonymity threshold the way scores are, so anything specific or identifying a rater "
+        "writes may be recognisable to you, even where their scores aren't."
+    )
+
+    st.markdown(f"""
+    <div style="background: white; padding: 1.5rem; border-radius: 12px; border: 1px solid #E2E0D8; margin-bottom: 1.5rem;">
+        <h3 style="margin: 0 0 0.8rem 0; color: #183319;">{heading}</h3>
+        <ul style="margin: 0; padding-left: 1.2rem; color: #333; line-height: 1.7;">
+            <li>{own_data_explainer}</li>
+            <li>{nomination_responsibility}</li>
+            <li>{comments_warning}</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    checkbox_label = _t(
+        db, 'ui_leader_consent_checkbox_label', None,
+        "I understand how my feedback and my raters' feedback will be used and stored."
+    )
+    consented = st.checkbox(checkbox_label, value=False, key="leader_consent_checkbox")
+
+    if st.button(
+        _t(db, 'ui_button_continue', None, "Continue"),
+        type="primary", icon=":material/arrow_forward:", use_container_width=True,
+        disabled=not consented,
+    ):
+        db.set_leader_consent(leader_info['id'])
+        st.session_state['leader_consent_given'] = True
+        st.rerun()
+
+
 def render_leader_portal(db, leader_info):
     """Render the leader portal page."""
-    
+
     leader_id = leader_info['id']
     leader_name = leader_info['name']
-    
+
+    # --- Consent gate: shown once, on the leader's first portal visit,
+    # before any welcome/status header or nomination tab. Checked from the
+    # database on every visit, not session state, so it is asked once and
+    # never again once given.
+    if not leader_info.get('consent_given') and not st.session_state.get('leader_consent_given'):
+        render_leader_consent_gate(db, leader_info)
+        return
+
     # Header
     logo_uri = get_logo_data_uri()
     logo_html = f'<img src="{logo_uri}" class="main-title-logo">' if logo_uri else ''

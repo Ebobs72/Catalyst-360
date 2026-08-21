@@ -248,6 +248,29 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url, db=Non
         "Your feedback is valuable and will be treated confidentially. The assessment takes "
         "approximately 15-20 minutes to complete."
     )
+
+    # Advance notice only - the actual consent capture (a ticked checkbox,
+    # blocking entry until confirmed) happens in-app, since HTML email can't
+    # reliably submit a checked box back to the system. Self gets a different
+    # comments clause: their own comments land in their own report, not "shown
+    # to" someone else, which is what the other-relationship clause says.
+    if relationship == 'Self':
+        data_protection_comments_clause = _translated(
+            db, locale, 'email_data_protection_comments_clause_self',
+            "any comments you write appear in your own report exactly as you've written them"
+        )
+    else:
+        data_protection_comments_clause = _translated(
+            db, locale, 'email_data_protection_comments_clause_other',
+            "any comments you write are shown to {leader_name} as you've written them"
+        ).format(leader_name=leader_name)
+    data_protection_note = _translated(
+        db, locale, 'email_data_protection_note',
+        "Before you begin, you'll be asked to confirm you understand how your feedback is used "
+        "and stored. In short: your scores are only ever shown in combination with others, your "
+        "name is removed from your response the moment you submit, and {comments_clause}."
+    ).format(comments_clause=data_protection_comments_clause)
+
     link_note = _translated(
         db, locale, 'email_link_fallback_note',
         "If the button doesn't work, copy and paste this link into your browser:"
@@ -290,9 +313,13 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url, db=Non
                             <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
                                 {intro}
                             </p>
-                            
-                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 30px 0;">
+
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
                                 {body_note}
+                            </p>
+
+                            <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 0 0 30px 0;">
+                                {data_protection_note}
                             </p>
 
                             <!-- CTA Button -->
@@ -922,9 +949,23 @@ def send_bulk_reminders(raters, leader_name, base_url, db):
 # LEADER PORTAL EMAILS
 # ============================================
 
-def _get_portal_invitation_html(leader_name, portal_url):
-    """Generate HTML for leader portal invitation email (post Module 1)."""
-    
+def _get_portal_invitation_html(leader_name, portal_url, db=None, locale=None):
+    """Generate HTML for leader portal invitation email (post Module 1).
+
+    db/locale are optional, same reasoning as _get_rater_invitation_html -
+    leaders have no locale column of their own today, so this is currently
+    always English fallback, but routing it through _translated now means no
+    further code change is needed once leader-facing translation is ever
+    commissioned.
+    """
+    data_protection_note = _translated(
+        db, locale, 'email_leader_data_protection_note',
+        "Before you continue, you'll be asked to confirm you understand how your data and your "
+        "raters' feedback are used and stored. In short: your own results are stored against "
+        "your name to support your coaching, and any comments your raters write are shown to "
+        "you exactly as they've written them."
+    )
+
     logo_html = _email_logo_html()
     return f"""
 <!DOCTYPE html>
@@ -967,7 +1008,11 @@ def _get_portal_invitation_html(leader_name, portal_url):
                             <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
                                 Click the button below to access your personal portal where you can add your raters.
                             </p>
-                            
+
+                            <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 0 0 20px 0;">
+                                {data_protection_note}
+                            </p>
+
                             <!-- CTA Button -->
                             <table width="100%" cellpadding="0" cellspacing="0">
                                 <tr>
@@ -1156,7 +1201,10 @@ def send_portal_invitation(leader, base_url, db):
     portal_url = f"{base_url}?portal={token}"
     
     subject = "Your 360 Feedback Portal — Bentley Compass"
-    html = _get_portal_invitation_html(leader['name'], portal_url)
+    # locale=None: leaders have no locale column of their own today (i18n is
+    # rater-only) - passing db still means no further code change is needed
+    # once leader-facing translation is ever commissioned.
+    html = _get_portal_invitation_html(leader['name'], portal_url, db=db, locale=None)
     
     success, message = _send_email(
         leader['email'],

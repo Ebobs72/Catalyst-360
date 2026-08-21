@@ -171,6 +171,14 @@ class Database:
         # in try_claim_full_360_notification survives app restarts rather
         # than relying on in-session state. NULL until claimed.
         self._safe_add_column("leaders", "full_360_notified_at", "TIMESTAMP")
+        # Data-protection consent for the leader's own portal visit (their own
+        # self-assessment/360 data, and their responsibility for who they
+        # nominate) - distinct from a rater's own consent below, since a
+        # leader also nominates raters on their behalf. Checked from the
+        # database on every portal visit, never session state, so it is
+        # asked once and never again once given.
+        self._safe_add_column("leaders", "consent_given", "INTEGER DEFAULT 0")
+        self._safe_add_column("leaders", "consent_given_at", "TIMESTAMP")
 
         # Continue with rest of schema
         conn = self.get_connection()
@@ -303,7 +311,13 @@ class Database:
         # identically to 'en' at every read site (see get_translation), never
         # backfilled for existing rows.
         self._safe_add_column("raters", "locale", "TEXT")
-    
+        # Data-protection consent for this rater's own response (including a
+        # Self rater's own self-assessment). Checked from the database on
+        # every visit, never session state, so it is asked once and never
+        # again once given - same durability pattern as locale above.
+        self._safe_add_column("raters", "consent_given", "INTEGER DEFAULT 0")
+        self._safe_add_column("raters", "consent_given_at", "TIMESTAMP")
+
     # ==========================================
     # LEADER MANAGEMENT
     # ==========================================
@@ -364,7 +378,20 @@ class Database:
     def delete_leader(self, leader_id):
         """Soft delete a leader (set status to inactive)."""
         self.update_leader(leader_id, status='inactive')
-    
+
+    def set_leader_consent(self, leader_id):
+        """Record that a leader has given data-protection consent on their
+        portal. Not routed through update_leader's valid_fields allowlist -
+        this is a one-way, one-time action with its own timestamp, not a
+        general field edit."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE leaders SET consent_given = 1, consent_given_at = CURRENT_TIMESTAMP WHERE id = ?
+        """, (leader_id,))
+        conn.commit()
+        conn.close()
+
     def get_leaders_by_cohort(self, cohort_name):
         """Get all active leaders in a specific cohort."""
         return self._fetchall("""
@@ -728,10 +755,22 @@ class Database:
         cursor.execute("""
             UPDATE raters SET reminder_sent_at = CURRENT_TIMESTAMP WHERE id = ?
         """, (rater_id,))
-        
+
         conn.commit()
         conn.close()
-    
+
+    def set_rater_consent(self, rater_id):
+        """Record that a rater (including a Self rater, for their own
+        self-assessment) has given data-protection consent. One-way,
+        one-time - not routed through update_rater's field allowlist."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE raters SET consent_given = 1, consent_given_at = CURRENT_TIMESTAMP WHERE id = ?
+        """, (rater_id,))
+        conn.commit()
+        conn.close()
+
     def reset_rater_response(self, rater_id):
         """
         Testing helper: clear a rater's submitted response (ratings, comments,

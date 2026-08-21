@@ -209,6 +209,23 @@ def _t(db, key, locale, fallback):
     return db.get_translation(key, locale, fallback_text=fallback)
 
 
+def _render_comment_guidance(db, locale):
+    """Persistent guidance line below an optional comment box, encouraging
+    brevity and specificity. Deliberately NOT placeholder text - placeholder
+    text disappears the moment someone starts typing, which is exactly when
+    this matters most."""
+    guidance = _t(
+        db, 'ui_comment_guidance', locale,
+        "Optional. A specific example or two, positive or negative, is more useful than a full "
+        "account, and keeps your feedback harder to trace back to you."
+    )
+    st.markdown(f"""
+    <p style="margin-top: 0.3rem; margin-bottom: 1rem; color: #777; font-size: 0.82rem;">
+        {guidance}
+    </p>
+    """, unsafe_allow_html=True)
+
+
 def _active_locale(rater_info):
     """The rater's effective locale for this render.
 
@@ -275,6 +292,90 @@ def render_locale_picker(db, rater_info):
         db.set_rater_locale(rater_info['id'], code)
         st.session_state['rater_locale'] = code
         st.rerun()
+
+
+def render_consent_gate(db, rater_info, locale):
+    """One-time data-protection consent screen, shown after locale selection
+    and before any survey content, until the rater has given consent
+    (raters.consent_given is set either on their row already or, on the run
+    they just gave it, in session_state) - same durability pattern as
+    render_locale_picker above. Ticking the box is a distinct, deliberate
+    action: the checkbox and the Continue button are separate controls, and
+    Continue stays disabled until the box is ticked, so consent can't be
+    given by clicking through without reading.
+
+    Unlike the locale picker, this screen renders after a locale has already
+    been chosen, so its copy - and an Arabic layout - go through the normal
+    translation/RTL machinery rather than staying English-only by design.
+    """
+    leader_name = rater_info['leader_name']
+    is_rtl = locale in RTL_LOCALES
+
+    with st.container(key="compass_consent_gate"):
+        if is_rtl:
+            st.markdown("""
+            <style>
+            div[class*="st-key-compass_consent_gate"] {
+                direction: rtl; text-align: right;
+            }
+            div[class*="st-key-compass_consent_gate"] p {
+                unicode-bidi: plaintext;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
+        logo_uri = get_logo_data_uri()
+        logo_html = f'<img src="{logo_uri}" class="feedback-header-logo">' if logo_uri else ''
+        st.markdown(f"""
+        <div class="feedback-header">
+            {logo_html}
+            <h1 style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
+        </div>
+        """, unsafe_allow_html=True)
+
+        heading = _t(db, 'ui_consent_heading', locale, "Before you begin")
+        scores_explainer = _t(
+            db, 'ui_consent_scores_explainer', locale,
+            "Your individual scores are never shown to the leader alone - they're only ever "
+            "shown combined with others, once enough people in your group have responded."
+        )
+        identity_explainer = _t(
+            db, 'ui_consent_identity_explainer', locale,
+            "The moment you submit, your name and email are permanently removed from your "
+            "response. This cannot be undone."
+        )
+        comments_warning = _t(
+            db, 'ui_consent_comments_warning', locale,
+            "Your written comments are shown to {leader_name} word-for-word. Comments aren't "
+            "protected by the anonymity threshold the way scores are, so anything specific or "
+            "identifying you write may be recognisable, even if your scores aren't."
+        ).format(leader_name=leader_name)
+
+        st.markdown(f"""
+        <div style="background: white; padding: 1.2rem; border-radius: 8px; margin: 1.5rem 0; border: 1px solid #E0E0E0; border-left: 4px solid #183319;">
+            <p style="margin: 0 0 0.8rem 0; color: #183319; font-weight: 600; font-size: 1.1rem;">{heading}</p>
+            <ul style="margin: 0; padding-left: 1.2rem; color: #333; line-height: 1.7;">
+                <li>{scores_explainer}</li>
+                <li>{identity_explainer}</li>
+                <li>{comments_warning}</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+        checkbox_label = _t(
+            db, 'ui_consent_checkbox_label', locale,
+            "I understand how my feedback will be used and stored."
+        )
+        consented = st.checkbox(checkbox_label, value=False, key="consent_checkbox")
+
+        if st.button(
+            _t(db, 'ui_button_continue', locale, "Continue"),
+            type="primary", icon=":material/arrow_forward:", use_container_width=True,
+            disabled=not consented,
+        ):
+            db.set_rater_consent(rater_info['id'])
+            st.session_state['rater_consent_given'] = True
+            st.rerun()
 
 
 def _render_rtl_css(locale):
@@ -425,8 +526,17 @@ def _render_header(db, locale, rater_info, is_self, leader_name, relationship, s
             # identical to today. A translator needs to keep the <strong> tags
             # in place around the equivalent clause - flagged as a rough edge
             # of this foundation pass, not solved generally here.
+            #
+            # Deliberately says "labelled", not "anonymised" (changed
+            # 2026-08-21): "anonymised" overclaimed protection this line never
+            # actually provided - only the LABEL is anonymised (group name
+            # instead of a person's name), never the CONTENT of what's
+            # written. Read next to the new consent-gate warning that
+            # comments "aren't protected the way scores are" and "may be
+            # recognisable", the old wording read as a flat contradiction
+            # rather than the same fact stated twice. See ui_consent_comments_warning.
             _t(db, 'ui_instructions_other_4', locale,
-               "Any comments you make will be anonymised to the group title you respond from – "
+               "Any comments you make will be labelled with the group you respond from, not your name – "
                "<strong>unless you are the direct line manager of the individual.</strong>"),
             _t(db, 'ui_instructions_other_5', locale,
                "Rate how often you have observed each behaviour. If you have not had an opportunity to "
@@ -562,6 +672,7 @@ def _render_dimension_page(db, rater_info, dim_name, page_idx, pages, locale, is
             label_visibility="collapsed",
             placeholder=_t(db, 'ui_dimension_comment_placeholder', locale, "Share specific examples or observations...")
         )
+        _render_comment_guidance(db, locale)
 
         st.markdown("<br>", unsafe_allow_html=True)
         col_save, col_continue = st.columns(2)
@@ -636,6 +747,7 @@ def _render_overall_page(db, rater_info, page_idx, pages, locale, is_self, relat
             label_visibility="collapsed",
             placeholder=_t(db, 'ui_keep_placeholder', locale, "Describe the leadership qualities and behaviours that are most effective...")
         )
+        _render_comment_guidance(db, locale)
 
         change_prompt = _t(db, f'prompt_change_{keep_form}', locale, get_prompt_text('change', relationship))
         st.markdown(f"""
@@ -649,6 +761,7 @@ def _render_overall_page(db, rater_info, page_idx, pages, locale, is_self, relat
             label_visibility="collapsed",
             placeholder=_t(db, 'ui_change_placeholder', locale, "Suggest the one change that would make the biggest difference...")
         )
+        _render_comment_guidance(db, locale)
 
         st.markdown("<br>", unsafe_allow_html=True)
         col_save, col_continue = st.columns(2)
@@ -1072,6 +1185,15 @@ def render_feedback_form(db, rater_info):
         return
 
     locale = _active_locale(rater_info)
+
+    # --- Consent gate: shown once, after locale selection and before any
+    # survey content, until the rater has given consent. Same durability
+    # pattern as the locale gate above - checked from the database on every
+    # visit, not session state, so a rater who closes the tab before
+    # consenting sees it again, and one who has already consented never does.
+    if not rater_info.get('consent_given') and not st.session_state.get('rater_consent_given'):
+        render_consent_gate(db, rater_info, locale)
+        return
 
     leader_name = rater_info['leader_name']
     relationship = rater_info['relationship']
