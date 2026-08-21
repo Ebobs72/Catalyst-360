@@ -251,25 +251,26 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url, db=Non
 
     # Advance notice only - the actual consent capture (a ticked checkbox,
     # blocking entry until confirmed) happens in-app, since HTML email can't
-    # reliably submit a checked box back to the system. Self gets a different
-    # comments clause: their own comments land in their own report, not "shown
-    # to" someone else, which is what the other-relationship clause says.
+    # reliably submit a checked box back to the system. Self is a genuinely
+    # different message, not a shared template with one clause swapped in -
+    # there's no anonymity threshold, no "shown to" someone else, and no
+    # scores-vs-comments distinction to draw for your own reflection.
     if relationship == 'Self':
-        data_protection_comments_clause = _translated(
-            db, locale, 'email_data_protection_comments_clause_self',
-            "any comments you write appear in your own report exactly as you've written them"
+        data_protection_note = _translated(
+            db, locale, 'email_data_protection_note_self',
+            "Before you begin, you'll be asked to confirm you understand how this self-assessment "
+            "is used. In short: this is your own reflection, not anonymous feedback, so nothing "
+            "here is hidden from you. It forms the basis of your Self-Assessment report and your "
+            "first coaching conversation."
         )
     else:
-        data_protection_comments_clause = _translated(
-            db, locale, 'email_data_protection_comments_clause_other',
-            "any comments you write are shown to {leader_name} as you've written them"
+        data_protection_note = _translated(
+            db, locale, 'email_data_protection_note_other',
+            "Before you begin, you'll be asked to confirm you understand how your feedback is used "
+            "and stored. In short: your scores are only ever shown in combination with others, your "
+            "name is removed from your response the moment you submit, and any comments you write "
+            "are shown to {leader_name} as you've written them, but never attributed to you by name."
         ).format(leader_name=leader_name)
-    data_protection_note = _translated(
-        db, locale, 'email_data_protection_note',
-        "Before you begin, you'll be asked to confirm you understand how your feedback is used "
-        "and stored. In short: your scores are only ever shown in combination with others, your "
-        "name is removed from your response the moment you submit, and {comments_clause}."
-    ).format(comments_clause=data_protection_comments_clause)
 
     link_note = _translated(
         db, locale, 'email_link_fallback_note',
@@ -965,6 +966,14 @@ def _get_portal_invitation_html(leader_name, portal_url, db=None, locale=None):
         "your name to support your coaching, and any comments your raters write are shown to "
         "you exactly as they've written them."
     )
+    # Lets a leader pass this on verbally when they send invitations - added
+    # per the consent copy addendum, alongside (not replacing) the note above.
+    rater_scrubbing_note = _translated(
+        db, locale, 'email_leader_rater_scrubbing_note',
+        "Once someone you've nominated submits their feedback, their name and email are "
+        "permanently removed from the system. Feel free to let them know this when you invite "
+        "them, it often helps people give more candid feedback."
+    )
 
     logo_html = _email_logo_html()
     return f"""
@@ -1009,15 +1018,19 @@ def _get_portal_invitation_html(leader_name, portal_url, db=None, locale=None):
                                 Click the button below to access your personal portal where you can add your raters.
                             </p>
 
-                            <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 0 0 20px 0;">
+                            <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 0 0 12px 0;">
                                 {data_protection_note}
+                            </p>
+
+                            <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 0 0 20px 0;">
+                                {rater_scrubbing_note}
                             </p>
 
                             <!-- CTA Button -->
                             <table width="100%" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td align="center" style="padding: 20px 0;">
-                                        <a href="{portal_url}" 
+                                        <a href="{portal_url}"
                                            style="display: inline-block; background: #183319; 
                                                   color: #ffffff; text-decoration: none; padding: 16px 40px; 
                                                   border-radius: 6px; font-size: 16px; font-weight: 600;

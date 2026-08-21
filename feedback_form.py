@@ -307,8 +307,16 @@ def render_consent_gate(db, rater_info, locale):
     Unlike the locale picker, this screen renders after a locale has already
     been chosen, so its copy - and an Arabic layout - go through the normal
     translation/RTL machinery rather than staying English-only by design.
+
+    Self gets genuinely different copy (ui_consent_self_body_*), not a
+    reworded version of the rater copy (ui_consent_rater_body_*): nothing is
+    anonymised for a self-assessment, there's no threshold, and no one to
+    hide from but the leader themself. See the consent copy addendum
+    (2026-08-21) for why these were split - the original single shared
+    version read as if scores/anonymity applied to Self too.
     """
     leader_name = rater_info['leader_name']
+    is_self = rater_info['relationship'] == 'Self'
     is_rtl = locale in RTL_LOCALES
 
     with st.container(key="compass_consent_gate"):
@@ -334,31 +342,70 @@ def render_consent_gate(db, rater_info, locale):
         """, unsafe_allow_html=True)
 
         heading = _t(db, 'ui_consent_heading', locale, "Before you begin")
-        scores_explainer = _t(
-            db, 'ui_consent_scores_explainer', locale,
-            "Your individual scores are never shown to the leader alone - they're only ever "
-            "shown combined with others, once enough people in your group have responded."
-        )
-        identity_explainer = _t(
-            db, 'ui_consent_identity_explainer', locale,
-            "The moment you submit, your name and email are permanently removed from your "
-            "response. This cannot be undone."
-        )
-        comments_warning = _t(
-            db, 'ui_consent_comments_warning', locale,
-            "Your written comments are shown to {leader_name} word-for-word. Comments aren't "
-            "protected by the anonymity threshold the way scores are, so anything specific or "
-            "identifying you write may be recognisable, even if your scores aren't."
-        ).format(leader_name=leader_name)
 
+        if is_self:
+            bullets = [
+                _t(
+                    db, 'ui_consent_self_body_1', locale,
+                    "This is your own reflection, not anonymous feedback, so nothing here is "
+                    "hidden from you. Your responses form your Self-Assessment report, which is "
+                    "the basis for your first coaching conversation."
+                ),
+                _t(
+                    db, 'ui_consent_self_body_2', locale,
+                    "Only you, the programme administrator, and your coach can see this, unless "
+                    "you choose to share it further once you have your report."
+                ),
+                _t(
+                    db, 'ui_consent_self_body_3', locale,
+                    "Any comments you write appear in your own report exactly as you've written "
+                    "them, and your development priorities carry forward to be compared against "
+                    "what your raters say later."
+                ),
+            ]
+        else:
+            bullets = [
+                _t(
+                    db, 'ui_consent_rater_body_1', locale,
+                    "Your individual scores are never shown to {leader_name} alone - they're only "
+                    "ever shown combined with others in your category, once enough people have "
+                    "responded."
+                ).format(leader_name=leader_name),
+                _t(
+                    db, 'ui_consent_rater_body_2', locale,
+                    "Your written comments are shown to {leader_name}, grouped with others' in the "
+                    "same category, word-for-word. Your name is never attributed to your comments. "
+                    "In fact, your name and email are scrubbed from the system as soon as you "
+                    "submit your responses."
+                ).format(leader_name=leader_name),
+                _t(
+                    db, 'ui_consent_rater_body_3', locale,
+                    "Please note: comments aren't protected by the anonymity threshold the way "
+                    "scores are, so anything specific or identifying you write may be recognisable, "
+                    "even if your scores aren't."
+                ),
+                _t(
+                    db, 'ui_consent_rater_body_4', locale,
+                    "Beyond {leader_name}, only the programme administrator and their coach can see "
+                    "this feedback, unless {leader_name} chooses to share the report with others "
+                    "once they receive it."
+                ).format(leader_name=leader_name),
+            ]
+
+        retention_note = _t(
+            db, 'ui_consent_retention', locale, "[Retention statement to be confirmed]"
+        )
+
+        bullets_html = "\n".join(f"<li>{b}</li>" for b in bullets)
         st.markdown(f"""
         <div style="background: white; padding: 1.2rem; border-radius: 8px; margin: 1.5rem 0; border: 1px solid #E0E0E0; border-left: 4px solid #183319;">
             <p style="margin: 0 0 0.8rem 0; color: #183319; font-weight: 600; font-size: 1.1rem;">{heading}</p>
             <ul style="margin: 0; padding-left: 1.2rem; color: #333; line-height: 1.7;">
-                <li>{scores_explainer}</li>
-                <li>{identity_explainer}</li>
-                <li>{comments_warning}</li>
+                {bullets_html}
             </ul>
+            <p style="margin: 0.9rem 0 0 0; color: #B45309; font-style: italic; font-size: 0.85rem;">
+                {retention_note}
+            </p>
         </div>
         """, unsafe_allow_html=True)
 

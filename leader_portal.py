@@ -95,23 +95,32 @@ def render_leader_consent_gate(db, leader_info):
     st.markdown(f'{logo_html}<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">Your Leadership Feedback Portal</p>', unsafe_allow_html=True)
 
-    heading = _t(db, 'ui_leader_consent_heading', None, "Before you continue")
+    heading = _t(db, 'ui_leader_consent_heading', None, "Before you begin")
     own_data_explainer = _t(
-        db, 'ui_leader_consent_own_data_explainer', None,
-        "Your own self-assessment and Full 360 results are stored against your name, "
-        "and are used to build your reports and support your coaching conversations."
+        db, 'ui_consent_leader_body_1', None,
+        "Your own Self-Assessment and Full 360 data is visible only to you, the programme "
+        "administrator, and your coach, unless you choose to share your report further."
     )
     nomination_responsibility = _t(
-        db, 'ui_leader_consent_nomination_responsibility', None,
-        "You are responsible for nominating raters appropriately - choosing people who can "
-        "give you meaningful feedback, and respecting the minimum numbers for each group so "
-        "their responses stay properly protected."
+        db, 'ui_consent_leader_body_2', None,
+        "When you nominate raters, you're responsible for choosing people who can give you "
+        "meaningful feedback (see the Guidelines tab for guidance on each category)."
+    )
+    rater_scrubbing_explainer = _t(
+        db, 'ui_consent_leader_body_3', None,
+        "Once your raters submit their feedback, their name and email are permanently scrubbed "
+        "from the system, this can't be undone. You're welcome to tell them this directly when "
+        "you send their invitations."
     )
     comments_warning = _t(
-        db, 'ui_leader_consent_comments_warning', None,
-        "Rater comments are shown to you word-for-word. Comments aren't protected by the "
-        "anonymity threshold the way scores are, so anything specific or identifying a rater "
-        "writes may be recognisable to you, even where their scores aren't."
+        db, 'ui_consent_leader_body_4', None,
+        "Their comments are shown to you grouped with others' in the same category, word-for-word. "
+        "Comments aren't protected by the anonymity threshold the way scores are, so anything "
+        "specific or identifying a rater writes may be recognisable to you, even where their "
+        "scores aren't."
+    )
+    retention_note = _t(
+        db, 'ui_consent_retention', None, "[Retention statement to be confirmed]"
     )
 
     st.markdown(f"""
@@ -120,8 +129,12 @@ def render_leader_consent_gate(db, leader_info):
         <ul style="margin: 0; padding-left: 1.2rem; color: #333; line-height: 1.7;">
             <li>{own_data_explainer}</li>
             <li>{nomination_responsibility}</li>
+            <li>{rater_scrubbing_explainer}</li>
             <li>{comments_warning}</li>
         </ul>
+        <p style="margin: 0.9rem 0 0 0; color: #B45309; font-style: italic; font-size: 0.85rem;">
+            {retention_note}
+        </p>
     </div>
     """, unsafe_allow_html=True)
 
