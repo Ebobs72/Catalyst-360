@@ -168,9 +168,10 @@ def render_email_settings(db):
         sender_email = "your-email@domain.com"
         ```
 
-        The From name recipients see is always "Bentley Compass 360" — it's
-        not configurable here, so replies always go to a real monitored
-        inbox rather than a personal name with no way back to the system.
+        The From display name is fixed in code (`SENDER_DISPLAY_NAME` in
+        `email_sender.py`), not configurable via secrets here — so it can't
+        drift to an arbitrary name with no way back to the system. Replies
+        always go to `sender_email` above, a real monitored inbox.
         
         **For Microsoft 365:**
         - Use `smtp.office365.com` with port 587

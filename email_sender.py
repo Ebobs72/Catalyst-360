@@ -21,12 +21,22 @@ from framework import get_logo_data_uri
 # Minimum time between reminder emails to the same rater
 REMINDER_THROTTLE_HOURS = 48
 
-# The From display name is always the brand, never the sending individual's
-# own name - deliberately NOT configurable via secrets/env (there used to be
-# a sender_name override here; it's how a live send ended up displaying "Ian
-# Moreton-Thickett" instead of the system). The underlying mailbox
-# (sender_email, below) stays configurable - only the display name is fixed.
-SENDER_DISPLAY_NAME = "Bentley Compass 360"
+# REVERTED 2026-08-21, PERMANENTLY - not a temporary toggle. Was briefly
+# "Bentley Compass 360" (a recognisable third-party brand name paired with
+# an unrelated sending domain), which two of three real corporate recipients
+# (Doğuş Otomotiv, Samaco) silently never received - no bounce, email_log
+# showed success on our side both times. Consistent with enterprise mail
+# security treating a brand/domain mismatch as a phishing signal, exactly
+# the pattern those systems are built to catch. A sender identity where the
+# display name and the sending domain actually match is the robust fix at
+# the scale this system sends at (many independent corporate mail
+# environments), not a cosmetic preference. Getting Bentley to align a
+# Bentley-owned sending domain isn't practical either, for the same
+# scale reason. Still a single hardcoded constant, still no env var/secrets
+# override (that override is what caused the ORIGINAL incident this
+# constant replaced) - only the value changes, not the one-source-of-truth
+# discipline.
+SENDER_DISPLAY_NAME = "Ian Moreton-Thickett"
 
 
 def _email_logo_html():
@@ -181,13 +191,12 @@ def _send_email(to_email, to_name, subject, html_content):
     msg['From'] = formataddr((SENDER_DISPLAY_NAME, config['sender_email']))
     msg['To'] = formataddr((to_name, to_email)) if to_name else to_email
     msg['Subject'] = subject
-    # Once the From name always reads "Bentley Compass 360" rather than a
-    # person's name, Reply-To is the only visible link back to a real,
-    # monitored inbox if a recipient hits reply - it must be the actual
-    # sending mailbox, not a placeholder. It already is: sender_email is the
-    # same address used to authenticate and send (see get_smtp_config -
-    # sender_email defaults to the SMTP login itself), so a reply lands
-    # exactly where the invitation came from.
+    # Reply-To is unaffected by SENDER_DISPLAY_NAME either way: it must be
+    # the actual sending mailbox, not a placeholder. It already is -
+    # sender_email is the same address used to authenticate and send (see
+    # get_smtp_config - sender_email defaults to the SMTP login itself), so
+    # a reply lands exactly where the invitation came from regardless of
+    # what display name is showing.
     msg['Reply-To'] = config['sender_email']
     
     msg.attach(MIMEText(html_content, 'html'))
