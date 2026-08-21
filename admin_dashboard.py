@@ -139,7 +139,7 @@ def render_email_settings(db):
         if st.button("Send Test Email") and test_email:
             from email_sender import _send_email, _get_rater_invitation_html
             
-            html = _get_rater_invitation_html("Test Leader", "Peers", "https://example.com/test")
+            html = _get_rater_invitation_html("Test Recipient", "Test Leader", "Peers", "https://example.com/test")
             success, message = _send_email(
                 test_email,
                 "Test Recipient",
@@ -166,8 +166,11 @@ def render_email_settings(db):
         username = "your-email@domain.com"
         password = "your-app-password"
         sender_email = "your-email@domain.com"
-        sender_name = "Bentley Compass 360"
         ```
+
+        The From name recipients see is always "Bentley Compass 360" — it's
+        not configurable here, so replies always go to a real monitored
+        inbox rather than a personal name with no way back to the system.
         
         **For Microsoft 365:**
         - Use `smtp.office365.com` with port 587

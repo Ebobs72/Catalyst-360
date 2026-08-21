@@ -21,6 +21,13 @@ from framework import get_logo_data_uri
 # Minimum time between reminder emails to the same rater
 REMINDER_THROTTLE_HOURS = 48
 
+# The From display name is always the brand, never the sending individual's
+# own name - deliberately NOT configurable via secrets/env (there used to be
+# a sender_name override here; it's how a live send ended up displaying "Ian
+# Moreton-Thickett" instead of the system). The underlying mailbox
+# (sender_email, below) stays configurable - only the display name is fixed.
+SENDER_DISPLAY_NAME = "Bentley Compass 360"
+
 
 def _email_logo_html():
     """Logo <img> tag for the email header banner, or '' if the asset is missing.
@@ -136,8 +143,10 @@ def get_smtp_config():
     smtp_port = resolve("SMTP_PORT", "smtp_port", 587)
     username = resolve("SMTP_USERNAME", "username")
     password = resolve("SMTP_PASSWORD", "password")
+    # sender_email is the real mailbox (used to authenticate, to send, and as
+    # Reply-To) - it stays configurable. There is deliberately no
+    # sender_name field here any more: see SENDER_DISPLAY_NAME above.
     sender_email = resolve("SMTP_SENDER_EMAIL", "sender_email", username)
-    sender_name = resolve("SMTP_SENDER_NAME", "sender_name", "Bentley Compass 360")
 
     if smtp_server and username and password:
         return {
@@ -146,7 +155,6 @@ def get_smtp_config():
             'username': username,
             'password': password,
             'sender_email': sender_email,
-            'sender_name': sender_name
         }
     return None
 
@@ -170,9 +178,16 @@ def _send_email(to_email, to_name, subject, html_content):
     # one encoded-word, which is invalid (encoded-words must never straddle
     # into the addr-spec) and is what corrupted "Seher Başar Turgut" into an
     # unresolvable recipient at the receiving server.
-    msg['From'] = formataddr((config['sender_name'], config['sender_email']))
+    msg['From'] = formataddr((SENDER_DISPLAY_NAME, config['sender_email']))
     msg['To'] = formataddr((to_name, to_email)) if to_name else to_email
     msg['Subject'] = subject
+    # Once the From name always reads "Bentley Compass 360" rather than a
+    # person's name, Reply-To is the only visible link back to a real,
+    # monitored inbox if a recipient hits reply - it must be the actual
+    # sending mailbox, not a placeholder. It already is: sender_email is the
+    # same address used to authenticate and send (see get_smtp_config -
+    # sender_email defaults to the SMTP login itself), so a reply lands
+    # exactly where the invitation came from.
     msg['Reply-To'] = config['sender_email']
     
     msg.attach(MIMEText(html_content, 'html'))
@@ -209,7 +224,7 @@ def _translated(db, locale, key, fallback_text):
     return db.get_translation(key, locale, fallback_text=fallback_text)
 
 
-def _get_rater_invitation_html(leader_name, relationship, assessment_url, db=None, locale=None):
+def _get_rater_invitation_html(rater_name, leader_name, relationship, assessment_url, db=None, locale=None):
     """Generate HTML for rater invitation email.
 
     db/locale are optional - the email a rater receives should go out in
@@ -218,6 +233,7 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url, db=Non
     existing callers that don't have a locale in scope (the admin test-email
     preview), which just get the English fallback throughout.
     """
+    greeting = _translated(db, locale, 'email_greeting', "Dear {name},").format(name=rater_name)
     relationship_clause_key = {
         'Boss': 'email_relationship_clause_boss',
         'Peers': 'email_relationship_clause_peers',
@@ -320,6 +336,10 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url, db=Non
                     <tr>
                         <td style="padding: 40px;">
                             <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                {greeting}
+                            </p>
+
+                            <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
                                 {intro}
                             </p>
 
@@ -371,9 +391,11 @@ def _get_rater_invitation_html(leader_name, relationship, assessment_url, db=Non
 """
 
 
-def _get_reminder_html(leader_name, relationship, assessment_url, db=None, locale=None):
+def _get_reminder_html(rater_name, leader_name, relationship, assessment_url, db=None, locale=None):
     """Generate HTML for reminder email. db/locale optional - see
     _get_rater_invitation_html for why."""
+
+    greeting = _translated(db, locale, 'email_greeting', "Dear {name},").format(name=rater_name)
 
     if relationship == 'Self':
         intro = _translated(
@@ -434,6 +456,10 @@ def _get_reminder_html(leader_name, relationship, assessment_url, db=None, local
                     <tr>
                         <td style="padding: 40px;">
                             <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                {greeting}
+                            </p>
+
+                            <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
                                 {intro}
                             </p>
 
@@ -471,7 +497,7 @@ def _get_reminder_html(leader_name, relationship, assessment_url, db=None, local
                             </p>
                         </td>
                     </tr>
-                    
+
                 </table>
             </td>
         </tr>
@@ -604,7 +630,7 @@ def send_rater_invitation(rater, leader_name, base_url, db):
                                "360 Feedback Request for {leader_name} — Bentley Compass"
                                ).format(leader_name=leader_name)
 
-    html = _get_rater_invitation_html(leader_name, rater['relationship'], assessment_url, db=db, locale=locale)
+    html = _get_rater_invitation_html(rater.get('name'), leader_name, rater['relationship'], assessment_url, db=db, locale=locale)
     
     success, message = _send_email(
         rater['email'],
@@ -666,7 +692,7 @@ def send_rater_reminder(rater, leader_name, base_url, db):
                                "Reminder: 360 Feedback for {leader_name} — Bentley Compass"
                                ).format(leader_name=leader_name)
 
-    html = _get_reminder_html(leader_name, rater['relationship'], assessment_url, db=db, locale=locale)
+    html = _get_reminder_html(rater.get('name'), leader_name, rater['relationship'], assessment_url, db=db, locale=locale)
     
     success, message = _send_email(
         rater['email'],
@@ -982,6 +1008,20 @@ def _get_portal_invitation_html(leader_name, portal_url, db=None, locale=None):
         "permanently removed from the system. Feel free to let them know this when you invite "
         "them, it often helps people give more candid feedback."
     )
+    # FIXED 2026-08-21: previously hardcoded (not routed through _translated
+    # like everything else in this function - simply never migrated) and
+    # described the OLD immediate-send behaviour ("they will automatically
+    # receive an invitation email"). Adding a rater only writes the record;
+    # nothing sends until the leader reviews "People You've Nominated" and
+    # clicks "Send Invitations" themselves - see the leader-portal section of
+    # CLAUDE.md. The stale copy would have set a wrong expectation right in
+    # the email that hands the leader their portal.
+    raters_flow_note = _translated(
+        db, locale, 'email_leader_raters_flow_note',
+        "Once you've added your raters, you'll be able to review them and send their "
+        "invitations yourself from your portal — where you can also track progress and send "
+        "reminders."
+    )
 
     logo_html = _email_logo_html()
     return f"""
@@ -1078,9 +1118,7 @@ def _get_portal_invitation_html(leader_name, portal_url, db=None, locale=None):
                             </div>
                             
                             <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 20px 0;">
-                                Once you've added your raters, they will automatically receive an invitation email 
-                                with a link to complete their feedback. You can track progress and send reminders 
-                                from your portal.
+                                {raters_flow_note}
                             </p>
                             
                             <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">

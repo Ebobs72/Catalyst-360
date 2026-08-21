@@ -693,14 +693,31 @@ def _render_dimension_page(db, rater_info, dim_name, page_idx, pages, locale, is
                     label_visibility="collapsed"
                 )
 
-        comment_prompt_key = 'ui_dimension_comment_prompt_self' if is_self else 'ui_dimension_comment_prompt_other'
-        comment_prompt_fallback = (
-            "Optional: Any specific comments about yourself regarding {dimension}?" if is_self
-            else "Optional: Any specific comments about {leader_name} regarding {dimension}?"
-        )
-        comment_prompt = _t(db, comment_prompt_key, locale, comment_prompt_fallback).format(
-            dimension=dim_display_name, leader_name=leader_name
-        )
+        # Merged 2026-08-21: the prompt (whether to comment) and the guidance
+        # (keep it brief and specific) used to be two separate lines - the
+        # question above the box, the brevity/anonymity advice below it. That
+        # split made "Optional" read as if it only qualified the second
+        # sentence, not the whole box. Self and rater versions differ for
+        # real reasons, not just pronoun-swapping: a self-assessment comment
+        # has no one to trace it back to, so the trace-back clause is dropped
+        # entirely rather than reworded.
+        #
+        # Trade-off, not an oversight: this guidance is now only visible
+        # BEFORE typing starts, not while composing - the old below-the-box
+        # line stayed in view once the placeholder text had disappeared.
+        if is_self:
+            comment_prompt = _t(
+                db, 'ui_comment_prompt_self', locale,
+                "Optional: any specific comments about yourself regarding {dimension}? A specific "
+                "example or two, positive or negative, is more useful than a full account."
+            ).format(dimension=dim_display_name)
+        else:
+            comment_prompt = _t(
+                db, 'ui_comment_prompt_rater', locale,
+                "Optional: any specific comments about them regarding {dimension}? A specific "
+                "example or two, positive or negative, is more useful than a full account, and "
+                "keeps your feedback harder to trace back to you."
+            ).format(dimension=dim_display_name)
         st.markdown(f"""
         <p style="margin-top: 1rem; margin-bottom: 0.5rem; color: #555; font-size: 0.9rem;">
             <em>{comment_prompt}</em>
@@ -719,7 +736,6 @@ def _render_dimension_page(db, rater_info, dim_name, page_idx, pages, locale, is
             label_visibility="collapsed",
             placeholder=_t(db, 'ui_dimension_comment_placeholder', locale, "Share specific examples or observations...")
         )
-        _render_comment_guidance(db, locale)
 
         st.markdown("<br>", unsafe_allow_html=True)
         col_save, col_continue = st.columns(2)
