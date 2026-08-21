@@ -801,6 +801,127 @@ the record. It does NOT send that person's invitation email at the same time.
   behaviour, per the same "don't quietly change the one part of the system
   built around irreversible protection" caution as the guard itself.
 
+### Data-protection consent gates and comment guidance — DONE 2026-08-21
+Agreed at a Bentley progress meeting ahead of the next pilot cohort: consent
+needs to be explicit and captured, not implied by proceeding, and comments
+need to visibly read as optional and focused on highlights, since verbatim
+length was a driver of "process feels long" feedback on the test cohort.
+
+- `raters`/`leaders` both gained `consent_given`/`consent_given_at`
+  (`_safe_add_column`, same pattern as `raters.locale`), plus
+  `set_rater_consent(rater_id)`/`set_leader_consent(leader_id)`. Checked from
+  the database on every visit, never session state, so the gate shows once
+  and never again once given — same durability discipline as the locale
+  picker.
+- THREE DISTINCT CONSENT SCREENS, not one shared version, because what a
+  person is consenting to genuinely differs:
+  - Rater (`render_consent_gate` in `feedback_form.py`, shown to Boss/Peers/
+    DRs/Others): scores only ever shown combined with others; comments shown
+    to the leader grouped by category, name/email scrubbed on submit; an
+    explicit "comments aren't protected by the anonymity threshold the way
+    scores are" warning; who else can see the feedback beyond the leader.
+  - Self (same function, `relationship == 'Self'` branch): genuinely
+    different copy, not a reworded rater version — nothing is anonymised for
+    your own reflection, there's no threshold, and no one to hide from but
+    the leader themself. The FIRST version of this shipped with the SAME
+    copy for Self and raters, which read as if scores/anonymity applied to a
+    self-assessment too — corrected the same day once caught.
+  - Leader (`render_leader_consent_gate` in `leader_portal.py`, shown once on
+    first portal visit): covers their own Self-Assessment/Full 360 data,
+    responsibility for nominating raters appropriately, and the rater
+    name/email-scrubbing disclosure, since the leader is consenting to their
+    raters' data being handled too, not just their own.
+  - All three: Continue is FORM-DISABLED until the checkbox is ticked
+    (`st.button(..., disabled=not consented)`), not just discouraged by
+    copy — verified via the button's actual `disabled` attribute, not just
+    how it looks.
+- Every string routed through `_t()`/`get_translation()` (leaders have no
+  locale column, so their gate always passes `locale=None`, which
+  `get_translation` already short-circuits to fallback text) — zero real
+  translation rows, ready for the six-language commissioning with no further
+  code change.
+- Rater and portal invitation emails (`email_sender.py`) each carry a short
+  advance-notice paragraph ahead of the in-app checkbox — HTML email can't
+  submit a checked box back to the system, so this is notice only, not
+  capture. The rater invitation's note is a genuinely separate message for
+  Self vs everyone else (not one template with a swapped clause), matching
+  how `intro`/`cta_text` already split in that same function. The leader
+  portal invitation also gained a line encouraging leaders to tell raters
+  verbally that their name/email get scrubbed on submit.
+- Every optional comment box (dimension comments, the keep/change prompts)
+  gained a PERSISTENT guidance line below the box (`_render_comment_guidance`),
+  not placeholder text — placeholder text disappears the moment someone
+  starts typing, which is exactly when the reminder matters most. No
+  character limit was added; the guidance text does the work of encouraging
+  brevity, not a hard cap that would read as suppressing feedback.
+- The one genuinely required field (Development Priorities, self-assessment
+  only) already had a red-asterisk convention from the earlier priorities
+  work; combined with the new "Optional." comment guidance, the two are now
+  visibly distinguished from each other with no further styling needed.
+- WORDING CONSISTENCY FIX: the survey's pre-existing instruction box claimed
+  comments "will be anonymised to the group title you respond from" —
+  overclaiming, since only the LABEL is anonymised (group name instead of a
+  person's name), never the CONTENT of what's written. Read next to the new
+  consent copy's "comments aren't protected the way scores are... may be
+  recognisable" warning, the old wording read as a flat contradiction rather
+  than the same fact stated twice. Reworded to "labelled with the group you
+  respond from, not your name" (`ui_instructions_other_4`,
+  `feedback_form.py`) so the two no longer conflict.
+- STILL OUTSTANDING, needs the human: `ui_consent_retention` renders a
+  literal placeholder — `"[Retention statement to be confirmed]"` — on all
+  three consent screens, deliberately visible rather than silently missing.
+  Do not invent a retention period. Pending a decision informed by the
+  actual DPA arrangement with Bentley, and in tension with the fact that
+  `historical_scores` already exists for year-on-year comparison, which
+  pulls against early deletion. This is a DIFFERENT open item from section
+  8's "guidance artefacts" (rater-facing "comment on behaviour, not
+  incidents"; coach-facing "don't attempt to attribute feedback") — the new
+  comment-guidance line partially serves the same spirit but does not
+  replace that outstanding work.
+
+### Email header encoding — non-ASCII display names — FIXED 2026-08-21
+Real bug hit in the sandbox: an invitation to "Seher Başar Turgut"
+(sbasar@dogusotomotiv.com.tr) bounced from O365 with `InvalidRecipientsException`
+showing the name silently corrupted to "Seher Baar Turgut" — the "ş" dropped
+entirely, not garbled. The sending account also started showing as throttled
+for "continuous invalid recipients errors" (plural), which is what raised
+the possibility of it being systemic rather than one bad address.
+
+- DIAGNOSED, NOT A DATA BUG: `raters`/`leaders.name` was confirmed intact at
+  rest for this rater, and every write path (the single-add form and CSV
+  import in `leader_portal.py`, `add_rater`/`add_to_nomination_roster` and
+  the connection layer in `database.py`) was audited clean — parameterised
+  binds throughout, no `.encode`/`.decode`/`unicodedata`/ASCII-only regex
+  touching name data anywhere in the repo.
+- ROOT CAUSE: `_send_email` in `email_sender.py` built both `msg['From']`
+  and `msg['To']` as raw `f"{name} <{email}>"` strings. When `name` has
+  non-ASCII characters, Python's email library wraps the WHOLE string — name
+  AND address together — in one RFC 2047 encoded-word, which is invalid:
+  encoded-words must only ever cover the display-name portion, never
+  straddle into the addr-spec. Reproduced locally: this exact code turns
+  into `=?utf-8?q?Seher_Ba=C5=9Far_Turgut_=3Csbasar=40...?=` (address baked
+  into the blob), and `'Seher Başar Turgut'.encode('ascii', errors='ignore')`
+  reproduces the bounce's corrupted name byte-for-byte, consistent with
+  whatever downstream system (Exchange's own recipient-resolution/NDR path)
+  had to decode and re-parse that malformed compound header.
+  `_send_email` is the single shared function every send in the file funnels
+  through (7 call sites), so this was one defect with a wide blast radius,
+  not seven scattered ones.
+- FIX: both header assignments now go through `email.utils.formataddr()`,
+  which RFC-2047-encodes only the display name when needed and leaves the
+  address as plain, untouched ASCII. Verified: `formataddr()` now produces a
+  correctly separated encoded-word-plus-plain-address pair, and round-trips
+  correctly through `parseaddr()`/`decode_header()`. Grepped the file for
+  the same pattern elsewhere (CC/BCC/Reply-To) — none found; `Reply-To` is a
+  bare address with no display name, never exposed.
+- NOT DONE, needs the human (no O365 admin access or live deployment from
+  this environment): confirm the O365 throttle has actually cleared before
+  retrying — if it was account-wide, retrying too soon risks failing again
+  for the throttle itself and being mistaken for the fix not working — then
+  resend the invitation to Seher's real row and confirm it sends clean.
+  Seher was confirmed as the only non-ASCII name among the current ten
+  leader rows at diagnosis time; no other resends were identified as needed.
+
 ---
 
 ## 6. Known live bug to fix first
