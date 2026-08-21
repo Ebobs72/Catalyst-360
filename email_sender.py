@@ -12,6 +12,7 @@ import smtplib
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import formataddr
 from datetime import datetime, timedelta
 import streamlit as st
 
@@ -162,8 +163,15 @@ def _send_email(to_email, to_name, subject, html_content):
         return False, "Email not configured"
     
     msg = MIMEMultipart('alternative')
-    msg['From'] = f"{config['sender_name']} <{config['sender_email']}>"
-    msg['To'] = f"{to_name} <{to_email}>" if to_name else to_email
+    # formataddr() RFC 2047-encodes only the display-name portion when it has
+    # non-ASCII characters, leaving the address itself as plain, untouched
+    # ASCII. Assigning a raw f"{name} <{email}>" string instead lets Python's
+    # email library wrap the WHOLE string - name and address together - in
+    # one encoded-word, which is invalid (encoded-words must never straddle
+    # into the addr-spec) and is what corrupted "Seher Başar Turgut" into an
+    # unresolvable recipient at the receiving server.
+    msg['From'] = formataddr((config['sender_name'], config['sender_email']))
+    msg['To'] = formataddr((to_name, to_email)) if to_name else to_email
     msg['Subject'] = subject
     msg['Reply-To'] = config['sender_email']
     
