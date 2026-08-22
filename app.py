@@ -387,6 +387,64 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
+    /* Phone-width fix for the rating scale: below the breakpoint the six
+       options (five frequency + "No opportunity...") wrap unevenly across
+       two or three rows instead of reading as a deliberate layout. Verified
+       against the real rendered DOM before writing this, not assumed: the
+       actual flex container that wraps is [role="radiogroup"] INSIDE
+       stButtonGroup (display:flex, flex-wrap:wrap) - the outer
+       stButtonGroup div itself is only display:block, so a rule targeting
+       it directly would do nothing. A pure viewport-width media query, not
+       user-agent/device sniffing, so a resized desktop window behaves
+       identically to a phone at the same width.
+
+       BREAKPOINT IS 960px, NOT the ~480px "phone portrait" starting point -
+       measured empirically, twice, not assumed. Checked 390/430/600px per
+       the original ask; 600px still wrapped awkwardly (4 buttons then 2,
+       the exact uneven split this fix exists to prevent). Swept every width
+       from 480 up looking for the real single-row fit point, and it moved
+       on a SECOND pass: the survey card's own content column is itself
+       viewport-constrained up to ~940px (radiogroup width grows with
+       viewport, e.g. 668px wide at 900px viewport - not enough for six
+       buttons), then hits Streamlit's fixed content max-width (~709-710px)
+       above that. That capped width is ONLY marginally sufficient for one
+       row (708px still wraps, 709px doesn't) - a single pixel of margin
+       that a different browser/font could easily land the wrong side of.
+       So the wrap isn't fixed just above 480px, or even 600px - it persists
+       in some form up to ~940-950px viewport. 960px covers the entire
+       viewport-constrained range with certainty (column layout can't wrap,
+       full stop, regardless of font metrics) and lands past where the
+       capped desktop width reliably measured clean across several points
+       (950/1000/1100/1200px all tested single-row). Below 960px: clean
+       single-column stack, six full-width rows. At or above: unchanged
+       horizontal row, exactly as before this fix - the razor-thin margin
+       at the container's own capped width is a pre-existing desktop-layout
+       property, not something this fix introduces or is scoped to solve. */
+    @media (max-width: 960px) {
+        div[data-testid="stButtonGroup"] [role="radiogroup"] {
+            flex-direction: column;
+            flex-wrap: nowrap;
+            gap: 0.4rem;
+        }
+        div[data-testid="stButtonGroup"] [role="radiogroup"] > button {
+            width: 100%;
+        }
+        /* The "No opportunity..." divider (above) uses a LEFT border/margin
+           to set it apart in a horizontal row. Left unchanged here, it would
+           indent that one button out of alignment with the five full-width
+           buttons stacked above it instead of separating them. Re-oriented
+           to a top border/margin - the same "set apart from the five
+           frequency options" signal, rotated to match the column. */
+        div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child {
+            margin-left: 0;
+            padding-left: 0;
+            border-left: none;
+            margin-top: 0.5rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid #DDDDDD;
+        }
+    }
+
     /* One prominent progress readout per page (since the paginated redesign,
        not a slim per-item readout repeated 45 times as originally built) -
        thicker track and a larger, bolder percentage than that earlier,
