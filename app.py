@@ -398,50 +398,94 @@ st.markdown("""
        user-agent/device sniffing, so a resized desktop window behaves
        identically to a phone at the same width.
 
-       BREAKPOINT IS 960px, NOT the ~480px "phone portrait" starting point -
-       measured empirically, twice, not assumed. Checked 390/430/600px per
-       the original ask; 600px still wrapped awkwardly (4 buttons then 2,
-       the exact uneven split this fix exists to prevent). Swept every width
-       from 480 up looking for the real single-row fit point, and it moved
-       on a SECOND pass: the survey card's own content column is itself
-       viewport-constrained up to ~940px (radiogroup width grows with
-       viewport, e.g. 668px wide at 900px viewport - not enough for six
-       buttons), then hits Streamlit's fixed content max-width (~709-710px)
-       above that. That capped width is ONLY marginally sufficient for one
-       row (708px still wraps, 709px doesn't) - a single pixel of margin
-       that a different browser/font could easily land the wrong side of.
-       So the wrap isn't fixed just above 480px, or even 600px - it persists
-       in some form up to ~940-950px viewport. 960px covers the entire
-       viewport-constrained range with certainty (column layout can't wrap,
-       full stop, regardless of font metrics) and lands past where the
-       capped desktop width reliably measured clean across several points
-       (950/1000/1100/1200px all tested single-row). Below 960px: clean
-       single-column stack, six full-width rows. At or above: unchanged
-       horizontal row, exactly as before this fix - the razor-thin margin
-       at the container's own capped width is a pre-existing desktop-layout
-       property, not something this fix introduces or is scoped to solve. */
-    @media (max-width: 960px) {
+       BREAKPOINT IS 1100px, NOT the ~480px "phone portrait" starting point,
+       and NOT the 960px this shipped with originally - measured
+       empirically, three times over, not assumed. Checked 390/430/600px
+       per the original ask; 600px still wrapped awkwardly (4 buttons then
+       2, the exact uneven split this fix exists to prevent). Swept every
+       width from 480 up looking for the real single-row fit point: the
+       survey card's content column is viewport-constrained up to ~940px,
+       then hits a content-driven width around ~709-710px for today's
+       English labels - only marginally sufficient for one row (708px still
+       wraps, 709px doesn't).
+
+       RETESTED 2026-08-21 against placeholder German-length translations
+       (before real six-language translations exist, per the human's
+       request) - and the 960px breakpoint this originally shipped with
+       FAILED the retest: German-length labels ("Keine Gelegenheit zur
+       Beobachtung" vs "No opportunity to observe", +27%) need ~771px
+       unwrapped, not ~709px, and wrapped again at 970-1000px viewport
+       (clean again only from ~1010px) - the exact "silently reintroduced
+       for non-English locales" bug this check existed to catch, confirmed
+       real rather than hypothetical. A further deliberately-extreme stress
+       test (not realistic, just to find the outer bound) needed ~1233px
+       unwrapped and didn't stop wrapping until ~1500px viewport - proof
+       there is no single breakpoint that survives arbitrarily long future
+       translations, only ones tuned to a given length assumption.
+
+       1100px is tuned to clear the REALISTIC German-length case (~1010px)
+       with real margin, not the deliberately-extreme stress case (~1500px)
+       - widening all the way to 1500px now would force the column layout
+       on far more ordinary desktop widths than today's content justifies.
+       REVISIT THIS ONCE REAL SIX-LANGUAGE TRANSLATIONS ARE COMMISSIONED:
+       re-run this same width sweep against the actual shipped strings,
+       not placeholder text, since a real translation could still land
+       longer than this placeholder guessed. Below 1100px: clean single-
+       column stack, six full-width rows, regardless of content length or
+       font metrics. At or above: unchanged horizontal row. */
+    @media (max-width: 1100px) {
+        /* FIXED 2026-08-21: buttons were narrower than the card, a visible
+           gap on the right. width:100% on the buttons alone did nothing,
+           because their actual containing chain was each shrunk to its own
+           content by THREE separate Streamlit defaults, found by checking
+           computed styles and matching stylesheet rules directly rather
+           than guessing: stElementContainer has width:fit-content, and
+           [role="radiogroup"] separately has max-width:fit-content (its own
+           width is auto, but max-width caps it regardless of what width is
+           set to). All three needed overriding together - fixing only the
+           radiogroup left it still capped by stElementContainer above it,
+           and fixing width alone on the radiogroup left it capped by its
+           own separate max-width rule. Verified the result matches the
+           card's own established content width exactly (52px/338px on
+           both the question text and every button, at a 390px viewport) -
+           this is the card's real content edge, inside its own padding,
+           not the outer card border. */
+        div[class*="st-key-item_box_"] div[data-testid="stElementContainer"] {
+            width: 100%;
+        }
+        div[data-testid="stButtonGroup"] {
+            width: 100%;
+        }
         div[data-testid="stButtonGroup"] [role="radiogroup"] {
             flex-direction: column;
             flex-wrap: nowrap;
             gap: 0.4rem;
+            width: 100%;
+            max-width: none;
         }
         div[data-testid="stButtonGroup"] [role="radiogroup"] > button {
             width: 100%;
         }
-        /* The "No opportunity..." divider (above) uses a LEFT border/margin
-           to set it apart in a horizontal row. Left unchanged here, it would
-           indent that one button out of alignment with the five full-width
-           buttons stacked above it instead of separating them. Re-oriented
-           to a top border/margin - the same "set apart from the five
-           frequency options" signal, rotated to match the column. */
+        /* The "No opportunity..." divider (above) uses a LEFT border to set
+           it apart in a horizontal row. FIXED 2026-08-21: rotating that to
+           border-top for the stacked column REPLACED the button's own
+           normal top border instead of adding to it (border-top is a
+           shorthand - it always overwrites, never layers), leaving this one
+           button visibly missing an edge the other five still had. The
+           divider now has to be genuinely additive: border-left/top here
+           are reset back to the button's own normal border (measured
+           directly from an unmodified button: 1px solid rgba(49,51,63,0.2))
+           rather than left in the "none"/custom-colour state the first
+           version of this fix left them in, and the actual "set apart from
+           the five frequency options" line is drawn with box-shadow
+           instead, which sits outside the border box entirely and can't
+           overwrite any of the button's four normal border sides. */
         div[data-testid="stButtonGroup"] [role="radiogroup"] > button:last-child {
             margin-left: 0;
             padding-left: 0;
-            border-left: none;
+            border-left: 1px solid rgba(49, 51, 63, 0.2);
             margin-top: 0.5rem;
-            padding-top: 0.5rem;
-            border-top: 1px solid #DDDDDD;
+            box-shadow: 0 -1px 0 0 #DDDDDD;
         }
     }
 
