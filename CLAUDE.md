@@ -922,6 +922,192 @@ the possibility of it being systemic rather than one bad address.
   Seher was confirmed as the only non-ASCII name among the current ten
   leader rows at diagnosis time; no other resends were identified as needed.
 
+### Email greetings, sender display name — DONE 2026-08-21, then PARTLY REVERTED
+Two rounds, because the first change caused a real delivery failure.
+
+- GREETINGS: every email template now opens with "Dear {name}," using the
+  actual recipient's name (`email_greeting` translation key, `_translated()`).
+  `_get_rater_invitation_html` and `_get_reminder_html` had NO greeting at
+  all and needed the rater's own name threaded through as a new parameter
+  from `send_rater_invitation`/`send_rater_reminder` - the other four
+  templates already had one. `_get_admin_notification_html` deliberately
+  excluded: it's a system alert about a leader, not addressed to a named
+  person. Caught and fixed in the same pass: `admin_dashboard.py`'s
+  test-email preview still called the old 3-argument signature - would
+  have thrown a `TypeError` on the next "Send Test Email" click.
+- SENDER DISPLAY NAME - DO NOT CHANGE THIS AGAIN WITHOUT RE-READING THIS
+  ENTRY. First set to the brand ("Bentley Compass 360") via a hardcoded
+  `SENDER_DISPLAY_NAME` constant in `email_sender.py`, removing the
+  `sender_name` config field entirely (that field was the exact mechanism
+  that had let a live send display "Ian Moreton-Thickett" instead of the
+  system). That seemed like the right white-labelling call - until two of
+  three real corporate recipients (Doğuş Otomotiv, Samaco) silently never
+  received their invitation after the change, no bounce, `email_log` showed
+  success on our side both times. Diagnosis: enterprise mail security
+  treating a recognisable third-party brand name paired with an unrelated
+  sending domain as a phishing/brand-impersonation signal - exactly the
+  pattern those systems are built to catch, and something that gets WORSE,
+  not better, at the scale this eventually sends across many independent
+  corporate mail environments. `SENDER_DISPLAY_NAME` was reverted to
+  `"Ian Moreton-Thickett"` and this is now the PERMANENT configuration, not
+  a temporary experiment - the display name and the sending domain need to
+  actually match. The no-override discipline stays: still one hardcoded
+  constant, still no `sender_name` env var/secrets path. If white-labelling
+  the sender identity comes up again, the actual fix is a Bentley-owned
+  sending domain, not a display-name change on an unrelated domain - and
+  that wasn't judged practical given the scale of eventual recipients
+  across many organisations' own independent mail policies.
+- Reply-To was never affected either way - `sender_email` already correctly
+  resolves to the real, authenticated SMTP login, so replies land at a
+  monitored inbox regardless of what display name is showing.
+
+### Comment prompt merged with brevity guidance, self/rater split — DONE 2026-08-21
+The per-dimension comment prompt (asking whether to comment) and the
+guidance line below the box (encouraging brevity, added earlier) were two
+separate lines - split that way, "Optional" read as if it only qualified
+the second sentence, not the whole box. Merged into one line above the box
+(`ui_comment_prompt_self` / `ui_comment_prompt_rater`), removing the
+separate line below. Self and rater versions are genuinely different
+strings, not one template with a swapped clause: a self-assessment comment
+has no one to trace it back to, so the trace-back clause is dropped
+entirely for Self rather than reworded. Only the dimension comment box was
+touched - the Overall Feedback keep/change boxes keep their separate
+below-the-box guidance line, unchanged. Trade-off, not an oversight: this
+guidance is now only visible before typing starts, not while composing,
+since the old below-the-box version stayed in view once the placeholder
+text had disappeared.
+
+### Mobile rating-scale layout — three follow-up fixes, DONE 2026-08-21 to 2026-08-22
+The five frequency options plus "No opportunity..." wrapped unevenly across
+two or three rows below a certain viewport width. Three passes, because
+each fix surfaced a real problem the first pass hadn't checked for.
+
+- SELECTOR: the actual flex container that wraps is
+  `[data-testid="stButtonGroup"] [role="radiogroup"]`, not the outer
+  `stButtonGroup` div (which is `display:block`, just a wrapper). A rule
+  targeting the outer div does nothing.
+- BREAKPOINT moved twice, both times because testing found the wrap
+  persisted further than assumed - do not "simplify" this back to a small
+  number without re-running the same sweep. Started at 480px, but 600px
+  already showed the exact uneven wrap this fix exists to prevent. Swept
+  the full range and found the survey card's own content column is
+  viewport-constrained up to ~940px, then hits a content-driven width
+  (~709-710px for English) only marginally sufficient for one row
+  (708px still wraps, 709px doesn't) - moved to 960px. Then, checking the
+  breakpoint's margin against future translated content (placeholder
+  German-length labels, not real translations - none exist yet): 960px
+  FAILED - German-length labels need ~771px unwrapped and wrapped again at
+  970-1000px viewport. Moved to **1100px**, tuned to clear the realistic
+  German case with margin, not a deliberately-extreme stress case that
+  needed ~1500px (going that wide would force the column layout onto
+  ordinary desktop widths today's content doesn't justify). REVISIT ONCE
+  REAL SIX-LANGUAGE TRANSLATIONS ARE COMMISSIONED - re-run the same sweep
+  against actual shipped strings, not placeholder text.
+- WIDTH: buttons were narrower than the card even after stacking into a
+  column, `width:100%` on the buttons did nothing on its own. Root cause,
+  found by checking computed styles and matching stylesheet rules directly
+  rather than guessing: Streamlit applies `width:fit-content` on the
+  widget's own `stElementContainer` wrapper, AND SEPARATELY sets
+  `max-width:fit-content` directly on the radiogroup itself - two
+  independent shrink-to-content rules stacked on each other. Needed all
+  three overridden together (`stElementContainer`, `stButtonGroup`, and the
+  radiogroup's `width` AND `max-width`) - fixing only one left the others
+  still capping it.
+- BORDER: rotating the "No opportunity..." divider from a `border-left`
+  (correct in the horizontal row) to a `border-top` (for the stacked
+  column) REPLACED that button's own normal top border instead of adding
+  to it - `border-top` is a shorthand, it always overwrites, never layers.
+  Fixed by resetting `border-left`/`border-top` back to the button's own
+  measured normal border (`1px solid rgba(49,51,63,0.2)`) and drawing the
+  actual divider line with `box-shadow` instead, which sits outside the
+  border box and can't touch any of the four declared sides.
+- Verified at every stage against a real Arabic-locale rater too, not just
+  English - the column stack composes correctly with the existing
+  forced-LTR rule on this same widget (different CSS properties,
+  `direction` vs `flex-direction`, genuinely orthogonal).
+
+### Cohort near-duplicate prevention — DONE 2026-08-23
+Real incident: the Overview tab showed two separate "Self Assessment Test
+August 2026" cohort cards (1 leader vs 2 leaders) instead of one combined
+card with 3 - visually identical text, but not byte-identical underneath
+(same category of bug as the non-ASCII name/email-header issue above: what
+you see on screen isn't a reliable guide to what's actually stored).
+Diagnosis of the SPECIFIC affected row(s) needed live Turso access this
+environment didn't have - not resolved here, still needs the human to run
+the `hex()`/`length()` comparison against the real database and report
+back what's found before the existing bad row(s) can be fixed. What WAS
+built is the prevention:
+- `normalise_cohort_text()` in `framework.py` (same pattern as the existing
+  `normalise_relationship`) - canonicalises non-breaking/zero-width
+  spaces, smart quotes, en/em dashes to plain ASCII equivalents.
+- `db.get_leader_cohort_options()` - merges the existing (previously
+  unused-by-leader-creation) `cohorts` table with any `leaders.cohort`
+  values not yet in it, DEDUPLICATED ON THE NORMALISED FORM, so two rows
+  differing only by an invisible character collapse into one dropdown
+  option instead of showing as two visually-identical entries.
+- The single "Add Leader" form's cohort field is now a dropdown of
+  existing cohorts plus "+ Add a new cohort...", which reveals a text
+  field. Had to live OUTSIDE `st.form` - forms only rerun on submit, so a
+  selectbox inside one can't dynamically reveal anything. A typed new name
+  runs through `_resolve_new_cohort_name()`, which normalises it and checks
+  case-insensitively against every existing cohort BEFORE accepting it as
+  new - a match silently returns the EXISTING cohort's exact stored value,
+  not the newly-typed variant. Genuinely new names get registered into the
+  `cohorts` table, closing a separate pre-existing gap where the cohort
+  management UI's own text promised this ("they'll be created automatically
+  when adding leaders") but no code path actually did it.
+- CSV import gets the same normalise-and-resolve treatment silently
+  (it can't offer a dropdown), rather than blocking - a genuinely new
+  cohort in a CSV is a legitimate bulk-import case, not an error.
+- Verified against a REAL byte-level repro, not just the normaliser in
+  isolation: seeded a leader locally with an actual `U+00A0` in their
+  cohort (confirmed via `hex()`), reproduced the exact reported bug live
+  in the dashboard (two identical-looking cards), then ran both entry
+  paths against that same variant and confirmed every resulting row landed
+  on the byte-identical canonical value in the database.
+
+### Admin notification system — VERIFIED 2026-08-23, one known gap
+Confirmed fully wired, not a partial/orphaned build: `send_admin_notification`
+exists, both triggers (self-assessment-complete, Full-360-threshold-crossed)
+have live call sites in `feedback_form.py`'s `_render_review_page`, right
+after a successful `submit_feedback`, and every send attempt logs to
+`email_log` regardless of outcome. `ADMIN_NOTIFICATION_EMAIL` resolves
+env-first then `st.secrets["app"]["admin_notification_email"]`, matching the
+SMTP config pattern. NOT verified from this environment (no live Turso
+access): whether that env var/secret is actually set in the deployed
+sandbox, and whether a notification has actually fired and logged
+successfully there.
+KNOWN GAP, NOT YET FIXED: Full 360 has a real atomic once-only guard -
+`full_360_notified_at`, claimed via `try_claim_full_360_notification`'s
+conditional `UPDATE ... WHERE full_360_notified_at IS NULL`. Self-assessment
+has NO equivalent column or claim - it relies entirely on the fact that a
+completed rater's token routes to the thank-you page instead of back into
+the form, so genuine resubmission isn't possible in the normal flow. That's
+an app-routing safeguard, not a database-level one - functionally holds
+today but architecturally weaker than the Full 360 case. Add a
+`self_assessment_notified_at` column for consistency if this is worth
+closing.
+
+### First-name-style greetings — CONSIDERED AND REJECTED, do not implement
+Every greeting in this system uses the person's full stored name ("Dear
+Seher Başar Turgut,"), never a derived first name. Splitting a stored full
+name on the first space to guess a first name is unsafe for this cohort
+specifically: Vietnamese and Chinese naming conventions are commonly
+family-name-first, and this cohort includes participants from Ho Chi Minh
+City and Taipei - a naive split risks greeting someone by their surname. If
+a first-name-style greeting is wanted later, it must come from an explicit,
+self-reported "preferred name" field, never derived automatically from the
+stored name.
+
+### Overview tab: self-assessment readiness count — DONE 2026-08-23
+Each cohort card on the admin Overview tab now shows a "ready for
+Self-Assessment" count alongside the existing "ready for Full 360" figure
+and response rate, using `self_completed` (the same completion flag already
+read everywhere else a leader's own self-assessment status is checked -
+see `get_all_leaders` in `database.py`). Scoped deliberately to the
+per-cohort cards only, per the request; the "Overall Statistics" section
+and the filtered single-cohort view below it were left unchanged.
+
 ---
 
 ## 6. Known live bug to fix first
