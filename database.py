@@ -1537,6 +1537,34 @@ class Database:
     def get_all_cohorts(self):
         """Get all cohorts."""
         return self._fetchall("SELECT * FROM cohorts ORDER BY name")
+
+    def get_leader_cohort_options(self):
+        """Canonical, deduplicated list of cohort names for entry-form
+        dropdowns - the union of the cohorts table and any distinct
+        leaders.cohort values not yet in it (leaders.cohort has never been
+        constrained to the cohorts table, so real data can exist in one and
+        not the other). Deduplicates on the NORMALISED name (see
+        normalise_cohort_text), not the raw stored value, so two rows that
+        differ only by an invisible character - the exact bug this method
+        exists to prevent going forward - collapse into one dropdown option
+        instead of showing as two visually-identical entries."""
+        from framework import normalise_cohort_text
+
+        seen = {}  # normalised (casefolded) -> first-seen display value
+        cohort_rows = self._fetchall("SELECT name FROM cohorts")
+        leader_rows = self._fetchall(
+            "SELECT DISTINCT cohort FROM leaders WHERE cohort IS NOT NULL AND cohort != ''"
+        )
+        for row in cohort_rows + leader_rows:
+            raw = row['name'] if 'name' in row else row['cohort']
+            normalised = normalise_cohort_text(raw)
+            if not normalised:
+                continue
+            key = normalised.casefold()
+            if key not in seen:
+                seen[key] = normalised
+
+        return sorted(seen.values())
     
     def delete_cohort(self, cohort_id):
         """Delete a cohort (doesn't affect leaders assigned to it)."""

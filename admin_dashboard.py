@@ -9,7 +9,8 @@ import random
 from datetime import datetime
 from framework import (
     RELATIONSHIP_TYPES, GROUP_DISPLAY, MIN_RESPONSES_FOR_REPORT,
-    RELATIONSHIP_INPUT_HELP, normalise_relationship, DIMENSIONS, get_logo_data_uri
+    RELATIONSHIP_INPUT_HELP, normalise_relationship, normalise_cohort_text,
+    DIMENSIONS, get_logo_data_uri
 )
 
 # Try to import email functionality
@@ -397,15 +398,20 @@ def render_overview_tab(db):
             total_raters = sum(l['total_raters'] for l in cohort_leaders)
             completed = sum(l['completed_raters'] for l in cohort_leaders)
             ready = sum(1 for l in cohort_leaders if l['completed_raters'] >= MIN_RESPONSES_FOR_REPORT)
+            # Same completion check used everywhere else a leader's own
+            # self-assessment status is read (self_completed is a COUNT
+            # DISTINCT over their one possible 'Self' row, so it's always 0
+            # or 1 - see get_all_leaders in database.py).
+            ready_self = sum(1 for l in cohort_leaders if l['self_completed'] >= 1)
             response_rate = round(completed / total_raters * 100) if total_raters > 0 else 0
-            
+
             col1, col2 = st.columns([4, 1])
-            
+
             with col1:
                 # Cohort summary card
                 st.markdown(f"""
                 **{cohort_name}**  
-                {total_leaders} leaders · {ready} ready for Full 360 · {response_rate}% response rate
+                {total_leaders} leaders · {ready_self} ready for Self-Assessment · {ready} ready for Full 360 · {response_rate}% response rate
                 """)
             
             with col2:
@@ -516,11 +522,55 @@ def render_overview_tab(db):
                 st.divider()
 
 
+ADD_NEW_COHORT_SENTINEL = "+ Add a new cohort..."
+
+
+def _resolve_new_cohort_name(db, typed_name):
+    """Turn a freshly-typed cohort name into its canonical stored value.
+
+    Normalises lookalike/invisible characters (see normalise_cohort_text)
+    and checks the result case-insensitively against every existing cohort
+    BEFORE treating it as new - this is the actual anti-duplicate
+    protection, not the normalisation alone. If it matches an existing
+    cohort, silently returns that cohort's own exact stored value instead
+    of the newly-typed one, so a stray non-breaking space or smart-quote
+    substitution can never create a second, visually-identical cohort.
+    Registers genuinely new names in the cohorts table so future dropdowns
+    (here and in CSV import) offer them too. Returns '' if typed_name is
+    blank after normalising.
+    """
+    normalised = normalise_cohort_text(typed_name)
+    if not normalised:
+        return ''
+
+    for existing in db.get_leader_cohort_options():
+        if existing.casefold() == normalised.casefold():
+            return existing
+
+    db.add_cohort(normalised)
+    return normalised
+
+
 def render_leaders_tab(db):
     """Render the leader management tab."""
-    
+
     st.subheader("Add New Leader")
-    
+
+    # Cohort choice lives OUTSIDE the form (below) so picking "+ Add a new
+    # cohort..." can immediately reveal the name field - st.form only reruns
+    # on submit, so this couldn't react to the selectbox if it were inside.
+    cohort_options = db.get_leader_cohort_options()
+    cohort_choice = st.selectbox(
+        "Cohort *", options=cohort_options + [ADD_NEW_COHORT_SENTINEL],
+        index=None, placeholder="Select a cohort...", key="add_leader_cohort_choice"
+    )
+    new_cohort_name = None
+    if cohort_choice == ADD_NEW_COHORT_SENTINEL:
+        new_cohort_name = st.text_input(
+            "New cohort name", placeholder="e.g., January 2027",
+            key="add_leader_new_cohort_name"
+        )
+
     with st.form("add_leader_form"):
         col1, col2 = st.columns(2)
 
@@ -530,9 +580,19 @@ def render_leaders_tab(db):
 
         with col2:
             dealership = st.text_input("Retailer *")
-            cohort = st.text_input("Cohort (e.g., 'January 2026') *")
+            if cohort_choice and cohort_choice != ADD_NEW_COHORT_SENTINEL:
+                st.caption(f"Cohort: **{cohort_choice}**")
+            elif new_cohort_name:
+                st.caption(f"New cohort: **{new_cohort_name.strip()}**")
+            else:
+                st.caption("Cohort: *not yet selected above*")
 
         if st.form_submit_button("Add Leader"):
+            if cohort_choice == ADD_NEW_COHORT_SENTINEL:
+                cohort = _resolve_new_cohort_name(db, new_cohort_name)
+            else:
+                cohort = cohort_choice or ''
+
             missing = []
             if not name:
                 missing.append("leader name")
@@ -613,6 +673,16 @@ def render_leaders_tab(db):
         if st.button("Import All"):
             errors = []
             valid_rows = []
+            # CSV can't offer a dropdown, so instead of blocking on an exact
+            # match, silently resolve each row's cohort to its canonical
+            # stored value when one already matches (case-insensitively,
+            # after stripping invisible/lookalike characters) - this is the
+            # concrete fix for the actual bug that prompted this change: a
+            # copy-pasted cohort name with a non-breaking space or smart
+            # quote no longer creates a second, visually-identical cohort.
+            # Genuinely new names are still accepted, just normalised.
+            existing_cohorts = {c.casefold(): c for c in db.get_leader_cohort_options()}
+            new_cohorts_seen = {}  # casefold -> canonical, new to THIS batch
 
             for i, row in df.iterrows():
                 row_num = i + 2  # header is row 1
@@ -627,14 +697,22 @@ def render_leaders_tab(db):
                     errors.append(f"Row {row_num} ({name}): missing or invalid email")
                 elif not pd.notna(retailer) or not str(retailer).strip():
                     errors.append(f"Row {row_num} ({name}): missing retailer")
-                elif not pd.notna(cohort) or not str(cohort).strip():
+                elif not pd.notna(cohort) or not normalise_cohort_text(cohort):
                     errors.append(f"Row {row_num} ({name}): missing cohort")
                 else:
+                    normalised_cohort = normalise_cohort_text(cohort)
+                    key = normalised_cohort.casefold()
+                    resolved_cohort = (
+                        existing_cohorts.get(key)
+                        or new_cohorts_seen.get(key)
+                        or normalised_cohort
+                    )
+                    new_cohorts_seen.setdefault(key, resolved_cohort)
                     valid_rows.append({
                         'name': str(name).strip(),
                         'email': str(email).strip(),
                         'retailer': str(retailer).strip(),
-                        'cohort': str(cohort).strip(),
+                        'cohort': resolved_cohort,
                     })
 
             if errors:
@@ -643,6 +721,9 @@ def render_leaders_tab(db):
                     "\n".join(f"- {e}" for e in errors)
                 )
             else:
+                for key, cohort_name in new_cohorts_seen.items():
+                    if key not in existing_cohorts:
+                        db.add_cohort(cohort_name)
                 for r in valid_rows:
                     leader_id = db.add_leader(
                         name=r['name'],

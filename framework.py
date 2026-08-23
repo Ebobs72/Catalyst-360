@@ -271,6 +271,50 @@ def normalise_relationship(value):
 # what the template supplies and what people would naturally write.
 RELATIONSHIP_INPUT_HELP = "Line Manager, Peer, Direct Report, or Other"
 
+# Characters that read as a plain space/quote/hyphen on screen but are a
+# different byte underneath - exactly the class of bug that produced two
+# separate "Self Assessment Test August 2026" cohort cards from what looked
+# like one identical cohort name (2026-08-23). Not exhaustive, targets the
+# specific sources named at the time: a non-breaking space or zero-width
+# character picked up from a copy-paste source (Word, a browser address bar,
+# an email), or a smart quote/dash from autocorrect.
+_COHORT_LOOKALIKE_CHARS = {
+    ' ': ' ',   # non-breaking space
+    '​': '',    # zero-width space
+    '‌': '',    # zero-width non-joiner
+    '‍': '',    # zero-width joiner
+    '﻿': '',    # zero-width no-break space / BOM
+    '‘': "'", '’': "'",   # smart single quotes
+    '“': '"', '”': '"',   # smart double quotes
+    '–': '-', '—': '-',   # en dash, em dash
+}
+
+
+def normalise_cohort_text(value):
+    """
+    Canonicalise a free-text cohort name so a stray invisible or lookalike
+    character can't create a silent near-duplicate of an existing cohort.
+
+    Replaces known lookalike characters (non-breaking/zero-width spaces,
+    smart quotes, en/em dashes - see _COHORT_LOOKALIKE_CHARS) with their
+    plain-ASCII equivalents, then collapses whitespace and trims. This is
+    deliberately not exhaustive of every possible invisible character, only
+    the sources already known to have caused this - the actual anti-
+    duplicate protection is the caller comparing the normalised result
+    against existing cohorts (case-insensitively) before treating it as new,
+    not this function alone. Returns '' for None/blank input, never None,
+    so callers can treat the result as a plain string throughout.
+    """
+    if value is None:
+        return ''
+
+    text = str(value)
+    for lookalike, replacement in _COHORT_LOOKALIKE_CHARS.items():
+        text = text.replace(lookalike, replacement)
+
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 # ============================================
 # COLOURS - Bentley Brand Palette
 # ============================================
