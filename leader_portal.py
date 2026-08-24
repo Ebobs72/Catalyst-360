@@ -119,8 +119,13 @@ def render_leader_consent_gate(db, leader_info):
         "specific or identifying a rater writes may be recognisable to you, even where their "
         "scores aren't."
     )
+    # Softened 2026-08-23: the literal "[Retention statement to be
+    # confirmed]" read as a bug during real GM self-assessment testing.
+    # Still a placeholder pending the actual DPA-informed decision, just one
+    # that doesn't look broken while it's pending.
     retention_note = _t(
-        db, 'ui_consent_retention', None, "[Retention statement to be confirmed]"
+        db, 'ui_consent_retention', None,
+        "We're still finalising our data retention timeline with Bentley."
     )
 
     st.markdown(f"""

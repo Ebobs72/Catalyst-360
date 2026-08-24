@@ -77,10 +77,19 @@ def get_app_base_url():
     nobody deployed there had.
 
     Configure per environment as either:
-        APP_BASE_URL=https://compass-360.onrender.com   (env var - Render)
+        APP_BASE_URL=https://portal.thedevelopmentcatalyst.co.uk   (env var - Render)
     or:
         [app]
-        base_url = "https://bentley-compass-360-sandbox.streamlit.app"   (Streamlit Cloud secrets)
+        base_url = "https://portal.thedevelopmentcatalyst.co.uk"   (Streamlit Cloud secrets)
+
+    Moved from the shared compass-360.onrender.com subdomain to this
+    dedicated custom domain 2026-08-23: a rater's corporate mail security
+    gateway held an invitation link as suspicious, and shared PaaS
+    subdomains carry a shared reputation - one tenant's activity can affect
+    how the whole subdomain is scored. onrender.com remains live indefinitely
+    (Render doesn't disable it when a custom domain is added), so links
+    already sent before this change keep working unchanged; only the base
+    URL used for NEW links changes.
     """
     env_url = os.environ.get("APP_BASE_URL")
     if env_url:

@@ -392,8 +392,14 @@ def render_consent_gate(db, rater_info, locale):
                 ).format(leader_name=leader_name),
             ]
 
+        # Softened 2026-08-23: the literal "[Retention statement to be
+        # confirmed]" read as a bug during real GM self-assessment testing.
+        # Still a placeholder pending the actual DPA-informed decision - see
+        # the outstanding-work note in CLAUDE.md - just one that doesn't
+        # look broken while it's pending.
         retention_note = _t(
-            db, 'ui_consent_retention', locale, "[Retention statement to be confirmed]"
+            db, 'ui_consent_retention', locale,
+            "We're still finalising our data retention timeline with Bentley."
         )
 
         bullets_html = "\n".join(f"<li>{b}</li>" for b in bullets)
