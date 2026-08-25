@@ -1581,6 +1581,7 @@ def render_reports_tab(db):
                                 leader.get('dealership'),
                                 leader.get('cohort')
                             )
+                            db.log_report(leader['id'], report_type, output_path, leader.get('assessment_year'))
 
                             st.success(f"Report generated!")
                             if theme_warning:
@@ -1625,6 +1626,7 @@ def render_reports_tab(db):
                                 leader.get('dealership'),
                                 leader.get('cohort')
                             )
+                            db.log_report(leader['id'], 'Self-Assessment', output_path, leader.get('assessment_year'))
 
                             st.success(f"Report generated!")
 
@@ -1663,7 +1665,7 @@ def render_reports_tab(db):
                     from report_generator import generate_report
                     
                     data, comments = db.get_leader_feedback_data(leader['id'])
-                    _, theme_warning = generate_report(
+                    output_path, theme_warning = generate_report(
                         leader['name'],
                         'Full 360',
                         data,
@@ -1671,6 +1673,7 @@ def render_reports_tab(db):
                         leader.get('dealership'),
                         leader.get('cohort')
                     )
+                    db.log_report(leader['id'], 'Full 360', output_path, leader.get('assessment_year'))
                     if theme_warning:
                         st.warning(f"{leader['name']}: Key Themes section could not be generated ({theme_warning})")
                 except Exception as e:

@@ -28,7 +28,6 @@ from framework import get_logo_data_uri
 from database import Database
 from feedback_form import render_feedback_form
 from admin_dashboard import render_admin_dashboard
-from report_generator import generate_all_reports
 from leader_portal import render_leader_portal
 
 # Page config

@@ -1489,6 +1489,30 @@ class Database:
         
         return data, comments
     
+    def log_report(self, leader_id, report_type, file_path, assessment_year=None):
+        """Record that a report was generated - the reports table existed in
+        the schema from the start but nothing ever inserted into it, so every
+        generation was invisible here regardless of whether it succeeded.
+        Called right after generate_report() returns a path, not before -
+        a row here should mean the file was actually written, not just
+        attempted."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO reports (leader_id, report_type, file_path, assessment_year)
+            VALUES (?, ?, ?, ?)
+        """, (leader_id, report_type, file_path, assessment_year))
+
+        conn.commit()
+        conn.close()
+
+    def get_reports_for_leader(self, leader_id):
+        """Generation history for one leader, most recent first."""
+        return self._fetchall("""
+            SELECT * FROM reports WHERE leader_id = ? ORDER BY generated_at DESC
+        """, (leader_id,))
+
     def save_historical_data(self, leader_id, year, data):
         """Save a snapshot of feedback data for historical comparison."""
         conn = self.get_connection()
