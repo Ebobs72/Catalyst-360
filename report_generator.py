@@ -1022,6 +1022,35 @@ def add_fold_transparency_note(doc, data):
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
 
+def add_scoring_scale_note(doc, no_opportunity_label):
+    """Explains what the 1-5 scores in this report actually measure. Placed
+    once in About This Report, before any score appears - this is a linear,
+    front-to-back read once per coaching conversation, not a navigable app,
+    so one clear statement up front is enough; it isn't repeated near every
+    chart or table.
+
+    no_opportunity_label must be whichever "No opportunity to ..." wording is
+    already correct for this report type (see feedback_form.py's self/other
+    split): "No opportunity to demonstrate" for Self-Assessment, "No
+    opportunity to observe" for Full 360. Don't invent a third variant.
+
+    Hardcoded English for now, consistent with the rest of the report's
+    content - this string will need the same _t()/get_translation()
+    treatment as everything else once the i18n work resumes.
+    """
+    note = doc.add_paragraph()
+    run = note.add_run(
+        "Scores in this report reflect how often a behaviour is observed, "
+        "not how well it's performed. 1 = Rarely or never · "
+        "2 = Occasionally · 3 = Sometimes · 4 = Often · "
+        f"5 = Consistently. Responses of '{no_opportunity_label}' are "
+        "excluded from averages rather than counted as zero."
+    )
+    run.font.size = Pt(9)
+    run.font.italic = True
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+
 def add_executive_summary(doc, data):
     """Add executive summary with dimension table and radar chart."""
     add_section_heading(doc, "Executive Summary", font_size=16)
@@ -2040,6 +2069,8 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             "Write on this document. There is space throughout to capture what comes out of your "
             "coaching conversation, and it is yours to keep working on."
         )
+        doc.add_paragraph()
+        add_scoring_scale_note(doc, "No opportunity to demonstrate")
 
         # Overview — dimension table + radar on one page
         heading = add_section_heading(doc, "Your Self-Assessment Overview", font_size=16)
@@ -2127,6 +2158,8 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             "peers, direct reports, and others, alongside your self-assessment. The comparison "
             "helps identify areas of alignment and potential blind spots."
         )
+        doc.add_paragraph()
+        add_scoring_scale_note(doc, "No opportunity to observe")
 
         # Response Summary + Executive Summary + Radar — all on one page
         add_response_summary(doc, data)

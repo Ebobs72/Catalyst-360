@@ -1108,6 +1108,103 @@ see `get_all_leaders` in `database.py`). Scoped deliberately to the
 per-cohort cards only, per the request; the "Overall Statistics" section
 and the filtered single-cohort view below it were left unchanged.
 
+### Reports table logging gap — CLOSED 2026-08-23, VERIFIED LIVE 2026-08-25
+The `reports` table existed in the schema from the start but nothing ever
+wrote to it, so every generated report - Full 360, Self-Assessment, batch -
+was invisible to it regardless of success.
+
+- Added `db.log_report(leader_id, report_type, file_path, assessment_year)`,
+  the same pairing pattern as the existing `log_email`, plus a paired
+  `get_reports_for_leader()` getter. Wired into all three generation call
+  sites in `admin_dashboard.py`: the single Full 360/Self-Assessment/
+  Progress button, the Self-Assessment-only button, and the "Generate All
+  Full 360 Reports" batch loop (whose discarded `_` return value had to
+  become `output_path` to make logging possible there).
+- Removed the dead `generate_all_reports` import from `app.py` - the batch
+  button has its own inline loop and never called it. Left the function
+  itself untouched in `report_generator.py`.
+- Audited every other table for the same pattern. `ratings` looked like a
+  second gap on a first grep but isn't - it writes via `INSERT OR REPLACE`,
+  which a plain `INSERT INTO` grep misses. `translations` genuinely has
+  zero inserts anywhere, but that's the already-documented, deliberate i18n
+  scaffold pending the six-language commissioning, not a hidden bug.
+- VERIFIED LIVE 2026-08-25 against the deployed sandbox at
+  `portal.thedevelopmentcatalyst.co.uk`, after the fix was deployed: clicked
+  all three real Generate buttons through the actual admin UI (single Full
+  360 for Ian Moreton-Thickett, single Self-Assessment for Ian Lewis, and
+  the "Generate All Full 360 Reports" batch button) and got a clean
+  "Report(s) generated!" with no error on every one. CONFIRMED WITH DIRECT
+  DB EVIDENCE the same day: the human checked the sandbox Turso `reports`
+  table directly and saw three rows, matching the three generate actions
+  above. Gap fully closed, not just indirectly inferred from the absence
+  of an error.
+
+### Scoring scale explanation added to reports — DONE 2026-08-25
+Scores appear throughout both report types (Executive Summary, PAPU-NANU
+quadrants, item-level charts) with no on-page explanation that they measure
+behaviour frequency, not quality - a reader could reasonably misread "3.5"
+as a performance grade. Since this is a linear, front-to-back read once per
+coaching conversation, not a navigable app, a single statement placed
+before the first number appears is sufficient; it is not repeated near
+every chart.
+
+- `add_scoring_scale_note(doc, no_opportunity_label)` in
+  `report_generator.py`, styled to match the existing
+  `add_fold_transparency_note` convention (9pt italic grey, `#666666`), so
+  it reads as the same family of explanatory aside rather than a new visual
+  idiom.
+- Same core sentence for both report types (explains the instrument, not
+  the person - no self/other branching needed there), but the quoted
+  "No opportunity to..." phrase matches whichever wording is already
+  correct for that report type per the existing self/other split in
+  `feedback_form.py`: "No opportunity to demonstrate" for Self-Assessment,
+  "No opportunity to observe" for Full 360. No third variant introduced.
+- Hardcoded English, consistent with the rest of the report content -
+  flagged in the function's docstring as needing the same
+  `_t()`/`get_translation()` treatment as everything else once the i18n
+  work resumes.
+- PLACEMENT DECIDED BY REAL PAGINATION CHECK, NOT ASSUMPTION: generated
+  actual Full 360 and Self-Assessment reports from a real leader's data
+  (Ian Moreton-Thickett, 12 responses), converted to PDF via Word
+  (AppleScript automation - no LibreOffice in this environment), and
+  measured true rendered whitespace with PyMuPDF, including image bounding
+  boxes for the radar chart (a first pass that only checked text blocks
+  under-counted the radar's height and had to be redone).
+  - Full 360's "About This Report" page carries Response Summary and
+    Executive Summary on the same page (by design, ahead of the radar's
+    own deliberate page break - see the page-geometry section above), but
+    had ~3.36in of genuine trailing whitespace before the forced break, not
+    the "already packed" page that section implied. Room existed at both
+    candidate locations here.
+  - Self-Assessment's "About This Report" is its own page with ~7.22in
+    free. Its score-table-plus-radar page, by contrast, had only ~1.05in
+    free - consistent with the existing "watch heights" warning elsewhere
+    in this file - so inserting text directly above that table (the
+    Self-Assessment equivalent of "above the Executive Summary") would have
+    risked pushing the radar onto a new page.
+  - Placed in "About This Report" for BOTH report types, not because the two
+    reports were required to match, but because it's the only location
+    proven safe in both, and consistency here is simpler than tracking two
+    different placements for one static note.
+- RE-VERIFIED END TO END after making the change: regenerated both reports,
+  reconverted to PDF, and confirmed identical total page counts (27 and 17)
+  and identical leading content on every single page against the
+  pre-change baseline - proof nothing shifted anywhere in either document,
+  not just on the page that changed.
+- ONE VERIFICATION GAP, WORTH KNOWING ABOUT: the Contents page is a Word TOC
+  field, populated by Word's own layout engine on open/update, not by
+  anything this code writes - so it always renders as literal
+  "right-click and select 'Update Field'" placeholder text in a PDF
+  produced without a human (or a VBA-driven update) opening it in Word
+  first, and no Word automation route to force that update was available
+  in this environment. Not treated as a blocker: since the page-by-page
+  diff proves no section moved to a different page, the TOC will compute
+  to the same correct numbers it already had once genuinely opened and
+  updated in Word - but if the human wants to see the actual computed
+  numbers rather than take that inference, opening either regenerated
+  report in Word and updating the field (right-click, or Ctrl+A then F9)
+  will show it directly.
+
 ---
 
 ## 6. Known live bug to fix first
