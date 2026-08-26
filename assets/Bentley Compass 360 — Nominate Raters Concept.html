@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bentley Compass 360 — Nominate Raters Concept</title>
+<style>
+  :root{
+    --green:#183319;
+    --green-tint:#e7ebe3;
+    --heritage:#DCD8C0;
+    --heritage-soft:#f1efe4;
+    --white:#FFFFFF;
+    --ink:#040404;
+    --body:#3D3D3D;
+    --muted:#6B6B6B;
+    --border:#DCD8C0;
+    --page-bg:#F7F6F1;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--page-bg);color:var(--body);}
+  .topbar{background:var(--green);color:var(--white);display:flex;align-items:center;justify-content:space-between;padding:0 40px;height:76px;}
+  .brand{display:flex;align-items:center;gap:14px;}
+  .brand-mark{width:34px;height:34px;border-radius:50%;background:var(--heritage);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--green);font-size:15px;}
+  .brand-text{line-height:1.15;}
+  .brand-text .b1{font-size:11px;letter-spacing:2px;color:var(--heritage);font-weight:600;text-transform:uppercase;}
+  .brand-text .b2{font-size:18px;font-weight:700;color:var(--white);}
+  nav{display:flex;gap:36px;}
+  nav a{color:rgba(255,255,255,0.78);text-decoration:none;font-size:14.5px;font-weight:500;padding-bottom:6px;border-bottom:2px solid transparent;}
+  nav a.active{color:var(--white);border-bottom-color:var(--heritage);}
+  .account{display:flex;align-items:center;gap:12px;}
+  .avatar{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.16);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--white);}
+  .account .name{font-size:13.5px;color:var(--white);font-weight:500;}
+
+  .page{max-width:1240px;margin:0 auto;padding:44px 40px 80px;}
+  .page-head{margin-bottom:8px;}
+  .page-head h1{font-size:30px;margin:0 0 6px;color:var(--ink);font-weight:700;letter-spacing:-0.3px;}
+  .page-head p{margin:0;color:var(--muted);font-size:14.5px;max-width:640px;line-height:1.5;}
+
+  .section-label{font-size:12px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:var(--green);margin:38px 0 14px;}
+
+  .btn{border:none;border-radius:8px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;}
+  .btn-primary{background:var(--green);color:var(--white);}
+  .btn-secondary{background:var(--white);color:var(--green);border:1.5px solid var(--border);}
+  .btn-ghost{background:none;color:var(--green);border:none;font-weight:700;font-size:13px;padding:6px 0;}
+
+  /* add rater card */
+  .add-card{background:var(--white);border:1px solid var(--border);border-radius:12px;padding:24px 26px;}
+  .add-card b{font-size:15.5px;color:var(--ink);display:block;margin-bottom:16px;}
+  .add-form{display:grid;grid-template-columns:1.3fr 1.3fr 1fr auto;gap:12px;align-items:end;}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600;}
+  .field input,.field select{width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:13.5px;color:var(--ink);background:var(--white);}
+  .csv-row{display:flex;align-items:center;gap:10px;margin-top:16px;padding-top:16px;border-top:1px solid var(--heritage-soft);font-size:13px;color:var(--muted);}
+
+  /* nominated list */
+  .list-card{background:var(--white);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+  .list-row{display:grid;grid-template-columns:1.4fr 1.6fr 1fr 1fr auto;gap:16px;align-items:center;padding:16px 22px;border-bottom:1px solid var(--heritage-soft);}
+  .list-row:last-child{border-bottom:none;}
+  .list-row.head{background:var(--heritage-soft);font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:var(--muted);padding:12px 22px;}
+  .list-row .rname{font-weight:700;color:var(--ink);font-size:14px;}
+  .list-row .remail{color:var(--muted);font-size:13px;}
+  .cat-chip{display:inline-block;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:14px;background:var(--green-tint);color:var(--green);width:fit-content;}
+  .status-chip{display:inline-block;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:14px;width:fit-content;}
+  .status-chip.invited{background:var(--green-tint);color:var(--green);}
+  .status-chip.notsent{background:#f0f0ee;color:var(--muted);}
+  .row-actions{display:flex;gap:14px;justify-content:flex-end;}
+  .row-actions button{background:none;border:none;color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;}
+  .row-actions button.danger{color:#a34a3a;}
+
+  .send-bar{
+    display:flex;align-items:center;justify-content:space-between;
+    background:var(--heritage-soft);border:1px solid var(--border);border-radius:12px;
+    padding:18px 24px;margin-top:20px;
+  }
+  .send-bar .msg{font-size:14px;color:var(--ink);}
+  .send-bar .msg b{color:var(--green);}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">B</div>
+    <div class="brand-text">
+      <div class="b1">Bentley Compass 360</div>
+      <div class="b2">Your Leadership Portal</div>
+    </div>
+  </div>
+  <nav>
+    <a href="#">Overview</a>
+    <a href="#" class="active">Nominate Raters</a>
+    <a href="#">Guidelines</a>
+  </nav>
+  <div class="account">
+    <div class="avatar">JR</div>
+    <div class="name">Jordan Reeves</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <div class="page-head">
+    <h1>Nominate Your Raters</h1>
+    <p>Add the people you'd like feedback from. Nothing is sent until you're ready, review the full list below and click Send Invitations when it's complete.</p>
+  </div>
+
+  <div class="section-label">Add a rater</div>
+  <div class="add-card">
+    <div class="add-form">
+      <div class="field"><label>Full name</label><input type="text" placeholder="e.g. Priya Anand"></div>
+      <div class="field"><label>Email address</label><input type="text" placeholder="e.g. priya.anand@bentley..."></div>
+      <div class="field"><label>Relationship</label>
+        <select>
+          <option>Choose category&hellip;</option>
+          <option>Boss (Line Manager)</option>
+          <option>Peer</option>
+          <option>Direct Report</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <button class="btn btn-primary">+ Add</button>
+    </div>
+    <div class="csv-row">
+      &#128196; Adding several at once? <button class="btn-ghost">Upload a CSV instead</button>
+    </div>
+  </div>
+
+  <div class="section-label">People you've nominated (9)</div>
+  <p style="font-size:13px;color:var(--muted);margin:-6px 0 14px;max-width:640px;line-height:1.5;">
+    This shows who you've invited, not who has responded, individual response status is kept confidential to protect anonymity. See your category progress on the Overview page for response counts.
+  </p>
+  <div class="list-card">
+    <div class="list-row head">
+      <div>Name</div><div>Email</div><div>Category</div><div>Status</div><div></div>
+    </div>
+
+    <div class="list-row">
+      <div class="rname">Alex Whitfield</div>
+      <div class="remail">alex.whitfield@bentley...</div>
+      <span class="cat-chip">Boss</span>
+      <span class="status-chip invited">Invited</span>
+      <div class="row-actions"><button>Edit</button><button class="danger">Remove</button></div>
+    </div>
+
+    <div class="list-row">
+      <div class="rname">Priya Anand</div>
+      <div class="remail">priya.anand@bentley...</div>
+      <span class="cat-chip">Peer</span>
+      <span class="status-chip invited">Invited</span>
+      <div class="row-actions"><button>Edit</button><button class="danger">Remove</button></div>
+    </div>
+
+    <div class="list-row">
+      <div class="rname">Marcus Lindqvist</div>
+      <div class="remail">marcus.lindqvist@bentley...</div>
+      <span class="cat-chip">Peer</span>
+      <span class="status-chip invited">Invited</span>
+      <div class="row-actions"><button>Edit</button><button class="danger">Remove</button></div>
+    </div>
+
+    <div class="list-row">
+      <div class="rname">Chidi Okoro</div>
+      <div class="remail">chidi.okoro@bentley...</div>
+      <span class="cat-chip">Direct Report</span>
+      <span class="status-chip invited">Invited</span>
+      <div class="row-actions"><button>Edit</button><button class="danger">Remove</button></div>
+    </div>
+
+    <div class="list-row">
+      <div class="rname">Freya Halvorsen</div>
+      <div class="remail">freya.halvorsen@bentley...</div>
+      <span class="cat-chip">Direct Report</span>
+      <span class="status-chip notsent">Not yet sent</span>
+      <div class="row-actions"><button>Edit</button><button class="danger">Remove</button></div>
+    </div>
+
+  </div>
+
+  <div class="send-bar">
+    <div class="msg"><b>2 invitations</b> are ready to send.</div>
+    <button class="btn btn-primary">Send Invitations</button>
+  </div>
+
+</div>
+
+</body>
+</html>

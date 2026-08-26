@@ -6,6 +6,12 @@
       "runtimeExecutable": "streamlit",
       "runtimeArgs": ["run", "app.py", "--server.port", "8765", "--server.headless", "true"],
       "port": 8765
+    },
+    {
+      "name": "compass-360-1.60",
+      "runtimeExecutable": "/Users/ianmoreton-thickett/Library/CloudStorage/OneDrive-thedevelopmentcatalyst.co.uk/TDC Stuff/Clients/Progress International/Bentley Motors/Bentley Compass/Assessment/Claude working docs/Claude Code/.venv_test_1_60/bin/python3",
+      "runtimeArgs": ["-m", "streamlit", "run", "/Users/ianmoreton-thickett/Library/CloudStorage/OneDrive-thedevelopmentcatalyst.co.uk/TDC Stuff/Clients/Progress International/Bentley Motors/Bentley Compass/Assessment/Claude working docs/Claude Code/app.py", "--server.port", "8766", "--server.headless", "true"],
+      "port": 8766
     }
   ]
 }

@@ -1205,6 +1205,274 @@ every chart.
   report in Word and updating the field (right-click, or Ctrl+A then F9)
   will show it directly.
 
+### Leader Portal Redesign — design rationale (BUILT 2026-08-26, see the section after this one for the actual build)
+Captured now so these two constraints are known going in, rather than
+rediscovered mid-build. Nothing below has been implemented; there is no
+new screen, table, or code yet. Treat this as design input for whenever
+the redesign is actually built, not a changelog entry.
+
+**Standing anonymity rule — applies to any current or future leader-facing
+screen, not just this redesign.** Caught during early concepting: a draft
+"Nominate Raters" screen included a per-row status column showing
+`Responded` / `Awaiting response` next to each named rater - a genuine
+individual-level anonymity leak, exactly what severed identity,
+`ANONYMITY_THRESHOLD` grouping, and the per-category minimums (see section
+4, "Anonymity design principle") already exist to prevent. Caught before
+it went further, but worth stating as a rule rather than relying on it
+being caught again by luck.
+
+The rule: anything shown next to a named individual may describe the
+LEADER's own action (have I invited them, have I nominated them, what
+category did I put them in) but must never describe or imply the RATER's
+own behaviour (opened the link, responded, close to finishing). Response
+counts, progress, and completion status are only ever safe in aggregate -
+category or cohort level, never attached to a name. This is the exact
+pattern the existing Response Progress view and the Overview cohort cards
+already get right; the redesign must not regress it.
+
+Applies to: any future "Nominate Raters" / rater-list screen (name, email,
+category, invitation-sent status are fine; response status is not); any
+new screen introduced by this redesign that lists raters by name for any
+reason. Explicitly does NOT apply to `admin_dashboard.py`'s Links &
+Tracking tab - per-rater status there is legitimately visible to the
+ADMINISTRATOR, not the leader, and that distinction is correct today.
+Worth re-confirming it stays intact if that screen is ever touched as
+part of this work, since it would be easy to accidentally carry a leader-
+facing pattern back over there.
+
+When this gets built (or reviewed), "does this leak individual response
+status to the leader" is a standing check on every leader-facing screen -
+the same category of check as the self/rater consent-copy differentiation
+work, not a one-off fix to remember once.
+
+**Mobile requirement for this redesign specifically.** Whenever this moves
+from concept to build, it needs the same real-breakpoint discipline
+already applied to the feedback form (see the mobile rating-scale section
+above) - actual rendered-content sweeps, not an assumption that Streamlit/
+CSS reflows acceptably by default.
+
+- Card grids (the four rater-category cards on Overview, any admin-
+  dashboard-equivalent cohort cards) need a real stacking breakpoint
+  checked at actual phone widths, not assumed to reflow acceptably.
+- The Nominate Raters list is the highest-risk element: a five-column row
+  (Name / Email / Category / Status / Actions) cannot realistically stay
+  one row on a phone screen. Needs a deliberate mobile layout - most
+  likely each rater as a stacked card, not a table row - never a silent
+  horizontal scroll or illegible truncated columns.
+- Any fixed-pixel-width element is exactly the pattern that caused the
+  original card-width bug on the feedback form (`width: fit-content`
+  fighting a separate `max-width` rule on a different ancestor - see the
+  mobile rating-scale section above). Check computed styles directly for
+  any new element here rather than assuming a percentage-based width alone
+  is sufficient.
+- Test against the project's established width sweep - ~360px, ~430px,
+  ~600px, and the existing desktop breakpoint - for every new screen this
+  redesign introduces, not spot-checked once and assumed to generalise.
+
+STILL NEEDS: an actual design/build conversation with the human before any
+of this is implemented. Nothing here authorises starting the build.
+
+**Self-Assessment date indicator — use completion date, not send date.**
+The Overview mockup's Self-Assessment status card shows a date next to
+"Self-Assessment complete." Placeholder text with no real data source
+behind it in the concept. Decided: use completion date, labelled
+"Completed on [date]," not "sent" - the system can't currently back a
+"sent" claim, since the actual PDF hand-off happens manually outside the
+app (Contents-page update in Word, PDF conversion, sent via Outlook) and
+has no timestamp anywhere in the system today. Completion date is the one
+value that's always true, always available, and needs no new tracking.
+PRECISE SOURCE, since "self_completed" is easy to reach for and isn't
+quite it: `leaders`/admin queries expose `self_completed` as a computed
+0/1 COUNT (see `get_all_leaders` in `database.py`), not a date - there is
+no `self_completed_at` column anywhere. The actual date is
+`raters.completed_at` on that leader's Self-relationship rater row (fetch
+via `get_raters_for_leader(leader_id)`, filter `relationship == 'Self'`).
+Whenever this is built, read the date from there, not from a column that
+doesn't exist.
+If a genuine "sent" date is wanted later, that needs a new deliberate
+action - e.g. a "mark as sent" button in the admin dashboard that stamps a
+real timestamp at the moment the finished PDF is actually emailed - not
+something inferred from existing data. Not needed now; noted so it isn't
+re-derived from scratch if it comes up again.
+
+**What's already real vs. what's still concept-only.** Worth being
+explicit, since most of what this redesign reskins is existing, working
+backend functionality, not new capability to build.
+
+Already exists and works in the live system - this redesign is a visual
+reskin of it, not a rebuild: batch "Send Invitations" for not-yet-invited
+raters; the single, blind "remind everyone still to respond" action
+(already rate-limited server-side, 48h between reminders per rater via
+`reminder_sent_at`/`REMINDER_THROTTLE_HOURS`, no named per-rater
+reminders - matches the anonymity rule above); self-assessment completion
+tracking; category minimums, response counts, anonymity threshold logic.
+
+Genuinely outstanding - not yet real anywhere, treat as actual small tasks
+whenever this moves to a build:
+1. The status-card copy itself ("Completed on [date], discussed at your
+   Module 1 coaching session," per the decision above) doesn't exist in
+   the current live UI yet.
+2. The "Send reminders" control needs to SURFACE real rate-limit state,
+   not just have it exist underneath. CHECKED, NOT LEFT AS AN ASSUMPTION
+   (2026-08-26): today it does the opposite of surfacing gracefully.
+   `render_progress_section` in `leader_portal.py` (~line 861) calls
+   `send_rater_reminder(rater, ...)` for every incomplete rater and
+   discards the return value entirely, then unconditionally shows
+   "Reminders sent to anyone who hasn't responded yet." `send_rater_
+   reminder` (`email_sender.py:673`) returns `(False, "Reminded
+   recently")` and sends nothing when a rater is inside the 48h window -
+   so if every incomplete rater happens to be throttled, the leader still
+   sees an unconditional success message despite zero emails actually
+   going out. Not a silent no-op, an actively misleading one. The
+   underlying rate-limit logic itself is correct and doesn't need
+   rebuilding; surfacing its real state (e.g. a visibly disabled/cooling-
+   down button with "available again in Nh", computed from the earliest
+   `reminder_sent_at` among incomplete raters) is the actual new work.
+   Worth fixing independently of the redesign too, since it's a real bug
+   in what ships today, not just a gap in the concept.
+
+Everything else in this document (the anonymity rule, the mobile
+requirement) applies to genuinely new screens (Nominate Raters,
+Guidelines) being built for the first time in this visual language, not
+existing features being touched.
+
+### Leader Portal Redesign — THE BUILD, DONE 2026-08-26
+Moved from concept to a real build in `leader_portal.py` (full rewrite),
+plus a correctness fix carried into `admin_dashboard.py`/`email_sender.py`
+per the redesign doc's section 4 audit requirement. Built against the three
+concept mockups in `assets/` (Overview, Nominate Raters, Guidelines HTML
+files) as binding reference material for the visual language.
+
+- **Routing**: three screens, not client-side tabs. `?portal=<token>&view=
+  overview|nominate|guidelines`, defaulting to overview. Nav links are plain
+  `<a href="?portal=...&view=...">` - a real navigation/rerun, simpler than
+  session-state tab machinery for something that's fundamentally "which page
+  am I on". `render_leader_portal` is now a thin router; each screen has its
+  own `render_portal_*` function.
+- **Logo**: the mockups' plain green-circle "B" placeholder is replaced with
+  the real Bentley wing mark, negative (white) variant via the existing
+  `get_logo_data_uri(negative=True)` (already built for exactly this - dark
+  backgrounds), since the positive variant would be invisible on the dark
+  green topbar.
+- **CSS namespaced `cp-`** (Compass Portal) throughout, self-contained in
+  `leader_portal.py`'s own `PORTAL_CSS` block rather than added to app.py's
+  already-large global stylesheet - keeps this redesign reviewable and
+  revertable as one unit. Values adapted directly from the mockups' own CSS
+  variables (`--green`, `--heritage`, etc.), not reinterpreted.
+- **REAL BUG FOUND AND FIXED DURING BUILD, not in the original concept
+  work**: every multi-line HTML string passed to `st.markdown(...,
+  unsafe_allow_html=True)` was written with the function body's own 4+-space
+  Python indentation. CommonMark's own syntax treats 4+ leading spaces on a
+  line as a fenced code block, and Streamlit runs markdown parsing BEFORE
+  honouring `unsafe_allow_html` - so every card rendered as literal escaped
+  HTML text on the page instead of an actual styled card, caught live in
+  browser testing (screenshot showed raw `<div class="cp-status-card">...`
+  text). Fixed with two helpers, `_html()` (textwrap.dedent + strip) and
+  `_md()` (`st.markdown(_html(...), unsafe_allow_html=True)`), applied
+  programmatically across all 18 affected call sites (a Python script did
+  the mechanical rewrite, verified by import + live re-render, not by hand
+  across that many sites). Worth remembering for any future HTML block
+  added to this file: multi-line HTML must go through `_html`/`_md`, never
+  a bare indented triple-quoted string.
+- **Category ring cards show NOMINATED count, not response count.** The
+  mockup's ring/fraction math doesn't reduce to a single formula from its
+  own placeholder numbers (checked directly against the rendered SVG
+  `stroke-dashoffset` values - they don't correspond to count/suggested,
+  count/min, or count/max consistently), so rather than reverse-engineer
+  illustrative dummy data, the ring was built from the real, actual business
+  rule: fraction = nominated count / (suggested, or min_if_any, or min,
+  whichever applies), capped at 1.0. This is deliberately NOT a response-
+  progress ring - showing nomination count is unambiguously the leader's
+  own action under the anonymity rule; a per-category response ring would
+  have needed a separate, harder judgement call this build didn't need to
+  make.
+- **Nominate Raters list Status column is "Invited" / "Not yet sent" ONLY**,
+  sourced from `get_raters_pending_invitation` matched by email against the
+  roster - never response status. This is the anonymity rule from this same
+  document's section 1 implemented as actual logic, verified by checking
+  rendered output (not just code): with a leader whose raters were a mix of
+  invited/not-yet-sent, the list showed exactly those two states and
+  nothing else.
+- **ONE DELIBERATE DEVIATION FROM THE MOCKUP**: the Nominate Raters mockup's
+  list rows include a "Remove" action. This app does not offer self-serve
+  rater removal (see "Leader portal: sending an invitation is a separate,
+  deliberate action..." above) - a real, already-reasoned decision this
+  build wasn't asked to revisit, and a working Remove button would
+  contradict it. Only Edit (correct email/relationship, pre-existing logic,
+  functionally unchanged) is offered. If the human wants Remove revisited,
+  that's a separate decision, not a redesign side-effect.
+- **Reminder accuracy (redesign doc section 2), VERIFIED LIVE with
+  constructed data, not just read from code**: added `_reminder_cooldown_
+  state()` (computes real eligibility/hours-remaining from `reminder_sent_
+  at`) and `_send_reminders_and_report()` (uses `send_bulk_reminders`'s
+  sent/throttled/failed tally to build an honest message). Tested against
+  three local raters with `reminder_sent_at` set to -5h (throttled),
+  -60h (eligible), and NULL (eligible, never reminded):
+  - Mixed case (1 throttled + 2 attempted): button enabled, caption "Nudges
+    the N who haven't responded yet.", and after clicking the message read
+    "All 1 rater still within their 48-hour window — no reminders were
+    sent. Try again in about 42h. 2 failed to send — check back or contact
+    your programme coordinator." (the 2 "failed" are the non-throttled
+    attempts genuinely failing against a fake local SMTP target used only
+    for this test - correctly NOT counted as throttled).
+  - All-throttled case (all 3 within window): button correctly rendered
+    DISABLED with "Available again in 42h." - verified via computed style,
+    not just visual inspection. Since a disabled button can't be clicked
+    through the UI (correctly), the pure "all throttled, zero other
+    failures" message text was verified via a direct call to
+    `_send_reminders_and_report`: "All 3 raters still within their 48-hour
+    window — no reminders were sent. Try again in about 42h." No false
+    "reminders sent" claim in either case - the bug this section exists to
+    fix is confirmed closed.
+  - Test raters and the temporary `.streamlit/secrets.toml` (fake SMTP
+    creds, needed to make `is_email_configured()` return True locally so
+    the button would render at all) were both removed after verification -
+    nothing test-related was left in the local dev DB or gitignored
+    secrets file.
+- **Admin-side audit (redesign doc section 4)**: found the SAME category of
+  bug, in the opposite direction, in two places - `admin_dashboard.py`'s
+  Links & Tracking bulk "Send Reminders" button and its single-rater
+  reminder toast both lumped a throttled skip (`"Reminded recently"`, not a
+  failure) into the same bucket as a genuine SMTP failure, showing "N failed
+  to send" / a red error toast for raters who were simply correctly rate-
+  limited - a false alarm, not a false success, but the same "confident
+  wrong result" pattern the leader-side bug was. Fixed by changing
+  `send_bulk_reminders`'s return signature from `(sent, failed, results)` to
+  `(sent, throttled, failed, results)` (its one call site updated
+  accordingly) and special-casing `"Reminded recently"` in the single-rater
+  toast. Confirmed the Links & Tracking per-rater status view itself -
+  documented here as the legitimate admin-side exemption to the anonymity
+  rule - was not touched by this build; it still shows real response status
+  to the administrator, correctly distinct from the leader-side restriction.
+- **Mobile**: swept ~360px, ~430px, ~600px, and desktop against the live
+  local app (Streamlit 1.60.0 via `.venv_test_1_60`, not the system 1.53.1 -
+  see the environment gotchas section) for both Overview and Nominate
+  Raters. Nominate Raters' list - the highest-risk element per the redesign
+  doc - genuinely switches to stacked cards with visible field labels below
+  700px, verified by screenshot at all three widths, not assumed from the
+  CSS alone. ONE REAL BUG FOUND AND FIXED here too: `.cp-field-label`
+  (Name/Email/Category/Status) had no default `display:none` for desktop,
+  so the labels appeared inline next to every value on desktop too
+  ("NameMichael Stocks") - the mobile-only media query rule set the label's
+  font styling but never explicitly restored `display:block`, so once a
+  base `display:none` was added it also needed adding to the mobile
+  override, or the labels would have stayed hidden at every width. Both
+  fixed together; re-verified live after the fix at both a desktop and a
+  360px width.
+- **Local dev environment note**: `.claude/launch.json` gained a second
+  config, `compass-360-1.60`, pointed at `.venv_test_1_60`'s `python3 -m
+  streamlit` (not the venv's own `streamlit` executable - that wrapper
+  script failed with a `getcwd`/sandbox permission error specific to this
+  environment, `-m streamlit` avoids it entirely). Use this config, not
+  `compass-360-local` (system Streamlit, 1.53.1), for any future work
+  touching this file's widget-adjacent CSS - same reasoning as the existing
+  environment-gotchas entry for `.venv_test_1_60`.
+- **NOT verified**: real email delivery (local SMTP was intentionally fake
+  for the reminder-accuracy test above); the live deployed sandbox (this
+  was local-only, matching the pattern for prior UI work in this project -
+  worth a live pass after this deploys, the same way the mobile rating-
+  scale and button-contrast work were later confirmed live).
+
 ---
 
 ## 6. Known live bug to fix first

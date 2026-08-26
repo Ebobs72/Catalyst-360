@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bentley Compass 360 — Leader Portal Concept</title>
+<style>
+  :root{
+    --green:#183319;
+    --green-tint:#e7ebe3;
+    --heritage:#DCD8C0;
+    --heritage-soft:#f1efe4;
+    --white:#FFFFFF;
+    --ink:#040404;
+    --body:#3D3D3D;
+    --muted:#6B6B6B;
+    --border:#DCD8C0;
+    --page-bg:#F7F6F1;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    background:var(--page-bg);
+    color:var(--body);
+  }
+  .topbar{
+    background:var(--green);
+    color:var(--white);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 40px;
+    height:76px;
+  }
+  .brand{display:flex;align-items:center;gap:14px;}
+  .brand-mark{
+    width:34px;height:34px;border-radius:50%;
+    background:var(--heritage);
+    display:flex;align-items:center;justify-content:center;
+    font-weight:700;color:var(--green);font-size:15px;
+  }
+  .brand-text{line-height:1.15;}
+  .brand-text .b1{font-size:11px;letter-spacing:2px;color:var(--heritage);font-weight:600;text-transform:uppercase;}
+  .brand-text .b2{font-size:18px;font-weight:700;color:var(--white);}
+  nav{display:flex;gap:36px;}
+  nav a{
+    color:rgba(255,255,255,0.78);
+    text-decoration:none;
+    font-size:14.5px;
+    font-weight:500;
+    padding-bottom:6px;
+    border-bottom:2px solid transparent;
+  }
+  nav a.active{color:var(--white);border-bottom-color:var(--heritage);}
+  .account{display:flex;align-items:center;gap:12px;}
+  .avatar{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.16);
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--white);}
+  .account .name{font-size:13.5px;color:var(--white);font-weight:500;}
+
+  .page{max-width:1240px;margin:0 auto;padding:44px 40px 80px;}
+  .page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:30px;}
+  .page-head h1{font-size:30px;margin:0 0 6px;color:var(--ink);font-weight:700;letter-spacing:-0.3px;}
+  .page-head p{margin:0;color:var(--muted);font-size:14.5px;}
+
+  .quick-actions{display:flex;gap:12px;}
+  .btn{
+    border:none;border-radius:8px;padding:11px 18px;font-size:14px;font-weight:600;
+    cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+  }
+  .btn-primary{background:var(--green);color:var(--white);}
+  .btn-secondary{background:var(--white);color:var(--green);border:1.5px solid var(--border);}
+
+  .section-label{
+    font-size:12px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;
+    color:var(--green);margin:40px 0 16px;
+  }
+  .progress-head{display:flex;align-items:center;justify-content:space-between;margin:38px 0 14px;}
+  .progress-head .section-label{margin:0;}
+  .reminder-note{font-size:11.5px;color:var(--muted);margin-top:6px;text-align:right;}
+
+  /* status strip: self-assessment + full 360 readiness */
+  .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+  .status-card{
+    background:var(--white);border:1px solid var(--border);border-radius:12px;
+    padding:22px 24px;display:flex;align-items:center;justify-content:space-between;
+  }
+  .status-card.done{background:var(--green);border-color:var(--green);}
+  .status-left{display:flex;align-items:center;gap:16px;}
+  .status-icon{
+    width:42px;height:42px;border-radius:50%;background:var(--green-tint);
+    display:flex;align-items:center;justify-content:center;font-size:19px;color:var(--green);flex-shrink:0;
+  }
+  .status-card.done .status-icon{background:rgba(255,255,255,0.16);color:var(--white);}
+  .status-text b{display:block;font-size:15.5px;color:var(--ink);margin-bottom:3px;}
+  .status-card.done .status-text b{color:var(--white);}
+  .status-text span{font-size:12.5px;color:var(--muted);}
+  .status-card.done .status-text span{color:var(--heritage);}
+  .pill{
+    font-size:11.5px;font-weight:700;padding:5px 12px;border-radius:20px;
+    background:var(--heritage-soft);color:var(--green);white-space:nowrap;
+  }
+  .status-card.done .pill{background:rgba(255,255,255,0.16);color:var(--white);}
+
+  /* rater category cards */
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;}
+  .card{
+    background:var(--white);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:20px 20px 16px;
+    position:relative;
+    overflow:hidden;
+  }
+  .card::before{
+    content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+    background:var(--accent,var(--green));
+  }
+  .card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;}
+  .cat-label{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);}
+  .ring{position:relative;width:48px;height:48px;}
+  .ring svg{transform:rotate(-90deg);}
+  .ring-track{stroke:var(--heritage-soft);}
+  .ring-progress{stroke:var(--green);stroke-linecap:round;}
+  .ring-label{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;color:var(--green);
+  }
+  .card h3{font-size:16.5px;margin:2px 0 4px;color:var(--ink);font-weight:700;}
+  .card .req{font-size:12px;color:var(--muted);margin-bottom:14px;}
+  .card .req b{color:var(--ink);}
+  .card-foot{display:flex;justify-content:space-between;align-items:center;}
+  .status-chip{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:14px;}
+  .status-chip.met{background:var(--green-tint);color:var(--green);}
+  .status-chip.pending{background:var(--heritage-soft);color:#8a7a4a;}
+  .link-btn{
+    background:none;border:none;color:var(--green);font-weight:700;font-size:12.5px;
+    cursor:pointer;
+  }
+
+  .stats-strip{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:0;
+    background:var(--green);border-radius:14px;margin-top:44px;overflow:hidden;
+  }
+  .stat-block{padding:26px 28px;border-right:1px solid rgba(255,255,255,0.14);}
+  .stat-block:last-child{border-right:none;}
+  .stat-block .num{font-size:32px;font-weight:700;color:var(--white);line-height:1;}
+  .stat-block .lbl{font-size:12.5px;color:var(--heritage);margin-top:8px;letter-spacing:0.3px;}
+
+  .guide-card{
+    margin-top:44px;background:var(--heritage-soft);border:1px solid var(--border);
+    border-radius:12px;padding:24px 26px;
+  }
+  .guide-card .g-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .guide-card .g-head b{font-size:15.5px;color:var(--ink);}
+  .guide-list{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+  .guide-item b{display:block;font-size:13.5px;color:var(--ink);margin-bottom:3px;}
+  .guide-item span{font-size:12px;color:var(--muted);}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">B</div>
+    <div class="brand-text">
+      <div class="b1">Bentley Compass 360</div>
+      <div class="b2">Your Leadership Portal</div>
+    </div>
+  </div>
+  <nav>
+    <a href="#" class="active">Overview</a>
+    <a href="#">Nominate Raters</a>
+    <a href="#">Guidelines</a>
+  </nav>
+  <div class="account">
+    <div class="avatar">JR</div>
+    <div class="name">Jordan Reeves</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <div class="page-head">
+    <div>
+      <h1>Welcome, Jordan Reeves</h1>
+      <p>Bentley Manchester &middot; October 2026 cohort</p>
+    </div>
+    <div class="quick-actions">
+      <button class="btn btn-secondary">+ Add a rater</button>
+      <button class="btn btn-primary">Send pending invitations</button>
+    </div>
+  </div>
+
+  <div class="status-grid">
+    <div class="status-card done">
+      <div class="status-left">
+        <div class="status-icon">&#10003;</div>
+        <div class="status-text">
+          <b>Self-Assessment complete</b>
+          <span>Completed on 14 October, discussed at your Module 1 coaching session</span>
+        </div>
+      </div>
+    </div>
+    <div class="status-card">
+      <div class="status-left">
+        <div class="status-icon">&#128340;</div>
+        <div class="status-text">
+          <b>Full 360 in progress</b>
+          <span>7 of 11 responses received</span>
+        </div>
+      </div>
+      <span class="pill">64%</span>
+    </div>
+  </div>
+
+  <div class="guide-card">
+    <div class="g-head">
+      <b>Who should you nominate?</b>
+      <button class="btn btn-secondary">Open full guidelines</button>
+    </div>
+    <div class="guide-list">
+      <div class="guide-item"><b>Boss</b><span>Your direct line manager. One is enough.</span></div>
+      <div class="guide-item"><b>Peers</b><span>Colleagues at a similar level who see your day-to-day work.</span></div>
+      <div class="guide-item"><b>Direct Reports</b><span>People who report to you. Aim for a range of tenure.</span></div>
+      <div class="guide-item"><b>Others</b><span>Stakeholders or customers, if relevant to your role.</span></div>
+    </div>
+  </div>
+
+  <div class="section-label">Your raters, by category</div>
+  <div class="grid">
+
+    <div class="card" style="--accent:#183319">
+      <div class="card-top">
+        <span class="cat-label">Line Manager</span>
+        <div class="ring">
+          <svg width="48" height="48">
+            <circle class="ring-track" cx="24" cy="24" r="19" stroke-width="5" fill="none"/>
+            <circle class="ring-progress" cx="24" cy="24" r="19" stroke-width="5" fill="none"
+              stroke-dasharray="119.4" stroke-dashoffset="0"/>
+          </svg>
+          <div class="ring-label">1/1</div>
+        </div>
+      </div>
+      <h3>Boss</h3>
+      <div class="req">Minimum <b>1</b>, max 2 if matrix reporting</div>
+      <div class="card-foot">
+        <span class="status-chip met">Requirement met</span>
+      </div>
+    </div>
+
+    <div class="card" style="--accent:#183319">
+      <div class="card-top">
+        <span class="cat-label">Colleagues</span>
+        <div class="ring">
+          <svg width="48" height="48">
+            <circle class="ring-track" cx="24" cy="24" r="19" stroke-width="5" fill="none"/>
+            <circle class="ring-progress" cx="24" cy="24" r="19" stroke-width="5" fill="none"
+              stroke-dasharray="119.4" stroke-dashoffset="24"/>
+          </svg>
+          <div class="ring-label">3/5</div>
+        </div>
+      </div>
+      <h3>Peers</h3>
+      <div class="req">Minimum <b>3</b>, suggested 5</div>
+      <div class="card-foot">
+        <span class="status-chip met">Requirement met</span>
+      </div>
+    </div>
+
+    <div class="card" style="--accent:#6b7a63">
+      <div class="card-top">
+        <span class="cat-label">Your team</span>
+        <div class="ring">
+          <svg width="48" height="48">
+            <circle class="ring-track" cx="24" cy="24" r="19" stroke-width="5" fill="none"/>
+            <circle class="ring-progress" cx="24" cy="24" r="19" stroke-width="5" fill="none"
+              stroke-dasharray="119.4" stroke-dashoffset="60"/>
+          </svg>
+          <div class="ring-label">2/5</div>
+        </div>
+      </div>
+      <h3>Direct Reports</h3>
+      <div class="req">Minimum <b>3</b>, suggested 5</div>
+      <div class="card-foot">
+        <span class="status-chip pending">2 more needed</span>
+      </div>
+    </div>
+
+    <div class="card" style="--accent:#DCD8C0">
+      <div class="card-top">
+        <span class="cat-label">Optional</span>
+        <div class="ring">
+          <svg width="48" height="48">
+            <circle class="ring-track" cx="24" cy="24" r="19" stroke-width="5" fill="none"/>
+            <circle class="ring-progress" cx="24" cy="24" r="19" stroke-width="5" fill="none"
+              stroke-dasharray="119.4" stroke-dashoffset="119.4"/>
+          </svg>
+          <div class="ring-label">0</div>
+        </div>
+      </div>
+      <h3>Others</h3>
+      <div class="req">Add at least 3 if you use this category</div>
+      <div class="card-foot">
+        <span class="status-chip met">Not in use</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="progress-head">
+    <div class="section-label">Your progress</div>
+    <div style="text-align:right;">
+      <button class="btn btn-secondary" style="opacity:0.5;cursor:default;">Send reminders</button>
+      <div class="reminder-note">Nudges the 4 who haven't responded yet &middot; available again in 30h</div>
+    </div>
+  </div>
+  <div class="stats-strip">
+    <div class="stat-block"><div class="num">11</div><div class="lbl">Raters invited</div></div>
+    <div class="stat-block"><div class="num">7</div><div class="lbl">Responded</div></div>
+    <div class="stat-block"><div class="num">64%</div><div class="lbl">Response rate</div></div>
+    <div class="stat-block"><div class="num">4</div><div class="lbl">Still to respond</div></div>
+  </div>
+
+</div>
+
+</body>
+</html>

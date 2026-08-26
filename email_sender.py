@@ -967,20 +967,33 @@ def send_bulk_invitations(raters, leader_name, base_url, db):
 def send_bulk_reminders(raters, leader_name, base_url, db):
     """
     Send reminder emails to incomplete raters.
-    
+
     Args:
         raters: List of rater dicts
         leader_name: Name of the leader
         base_url: Base URL for assessments
         db: Database instance
-    
+
     Returns:
-        (sent_count, failed_count, results)
+        (sent_count, throttled_count, failed_count, results)
+
+    THROTTLED IS NOT A FAILURE, so it is counted separately rather than
+    folded into failed_count. Found 2026-08-26 while auditing for the same
+    pattern as the leader-portal reminder bug (see render_progress_section
+    in leader_portal.py): this function used to lump send_rater_reminder's
+    (False, "Reminded recently") skip - the 48h rate limit working exactly
+    as designed - into the same failed_count as a genuine SMTP failure. The
+    caller in admin_dashboard.py then showed "N failed to send" with a
+    warning icon for raters who were simply still in their cooldown window,
+    a false alarm implying a delivery problem that didn't exist. Callers
+    must report throttled_count as a neutral "still in cooldown" fact, not
+    as a failure.
     """
     sent = 0
+    throttled = 0
     failed = 0
     results = []
-    
+
     for rater in raters:
         if rater.get('email') and not rater.get('completed'):
             success, message = send_rater_reminder(rater, leader_name, base_url, db)
@@ -992,10 +1005,12 @@ def send_bulk_reminders(raters, leader_name, base_url, db):
             })
             if success:
                 sent += 1
+            elif message == "Reminded recently":
+                throttled += 1
             else:
                 failed += 1
-    
-    return sent, failed, results
+
+    return sent, throttled, failed, results
 
 
 # ============================================

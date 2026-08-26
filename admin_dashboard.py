@@ -1182,16 +1182,27 @@ def render_links_tab(db):
                             disabled=len(incomplete_with_email) == 0,
                             help="Send reminders to incomplete raters with email addresses"):
                     with st.spinner("Sending reminders..."):
-                        sent, failed, results = send_bulk_reminders(
-                            incomplete_with_email, 
-                            selected_leader['name'], 
-                            base_url, 
+                        sent, throttled, failed, results = send_bulk_reminders(
+                            incomplete_with_email,
+                            selected_leader['name'],
+                            base_url,
                             db
                         )
                         if sent > 0:
                             st.success(f"Sent {sent} reminder(s)", icon=":material/check_circle:")
+                        if throttled > 0:
+                            # Not a failure - the 48h per-rater throttle working
+                            # as designed. Reported separately from failed so it
+                            # doesn't read as a delivery problem that isn't real.
+                            st.info(
+                                f"{throttled} rater(s) were reminded within the last "
+                                f"48 hours, so weren't reminded again.",
+                                icon=":material/schedule:"
+                            )
                         if failed > 0:
                             st.warning(f"{failed} failed to send", icon=":material/warning:")
+                        if sent == 0 and throttled == 0 and failed == 0:
+                            st.info("Nobody to remind.", icon=":material/info:")
             
             with col3:
                 # Show email log
@@ -1358,6 +1369,11 @@ def render_links_tab(db):
                                 success, msg = send_rater_reminder(rater, selected_leader['name'], base_url, db)
                                 if success:
                                     st.toast(f"Reminder sent", icon=":material/check_circle:")
+                                elif msg == "Reminded recently":
+                                    # Not a failure - the 48h throttle working as
+                                    # designed. An error toast here would read as
+                                    # a delivery problem that isn't real.
+                                    st.toast(f"Already reminded within the last 48h", icon=":material/schedule:")
                                 else:
                                     st.toast(f"Failed: {msg}", icon=":material/error:")
                 

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bentley Compass 360 — Guidelines Concept</title>
+<style>
+  :root{
+    --green:#183319;
+    --green-tint:#e7ebe3;
+    --heritage:#DCD8C0;
+    --heritage-soft:#f1efe4;
+    --white:#FFFFFF;
+    --ink:#040404;
+    --body:#3D3D3D;
+    --muted:#6B6B6B;
+    --border:#DCD8C0;
+    --page-bg:#F7F6F1;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--page-bg);color:var(--body);}
+  .topbar{background:var(--green);color:var(--white);display:flex;align-items:center;justify-content:space-between;padding:0 40px;height:76px;}
+  .brand{display:flex;align-items:center;gap:14px;}
+  .brand-mark{width:34px;height:34px;border-radius:50%;background:var(--heritage);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--green);font-size:15px;}
+  .brand-text{line-height:1.15;}
+  .brand-text .b1{font-size:11px;letter-spacing:2px;color:var(--heritage);font-weight:600;text-transform:uppercase;}
+  .brand-text .b2{font-size:18px;font-weight:700;color:var(--white);}
+  nav{display:flex;gap:36px;}
+  nav a{color:rgba(255,255,255,0.78);text-decoration:none;font-size:14.5px;font-weight:500;padding-bottom:6px;border-bottom:2px solid transparent;}
+  nav a.active{color:var(--white);border-bottom-color:var(--heritage);}
+  .account{display:flex;align-items:center;gap:12px;}
+  .avatar{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.16);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--white);}
+  .account .name{font-size:13.5px;color:var(--white);font-weight:500;}
+
+  .page{max-width:1100px;margin:0 auto;padding:44px 40px 80px;}
+  .page-head{margin-bottom:34px;}
+  .page-head h1{font-size:30px;margin:0 0 6px;color:var(--ink);font-weight:700;letter-spacing:-0.3px;}
+  .page-head p{margin:0;color:var(--muted);font-size:14.5px;max-width:680px;line-height:1.5;}
+
+  .cat-card{background:var(--white);border:1px solid var(--border);border-radius:12px;padding:26px 28px;margin-bottom:18px;position:relative;overflow:hidden;}
+  .cat-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent,var(--green));}
+  .cat-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  .cat-top h2{font-size:18px;margin:0;color:var(--ink);font-weight:700;}
+  .req-badge{font-size:12px;font-weight:700;padding:5px 12px;border-radius:20px;background:var(--green-tint);color:var(--green);white-space:nowrap;}
+  .cat-card p{font-size:14px;line-height:1.6;color:var(--body);margin:0 0 12px;}
+  .cat-card .tip{font-size:13px;color:var(--muted);background:var(--heritage-soft);border-radius:8px;padding:10px 14px;margin-top:8px;}
+  .cat-card .tip b{color:var(--ink);}
+
+  .note-card{
+    margin-top:32px;background:var(--green);border-radius:12px;padding:24px 28px;color:var(--white);
+  }
+  .note-card b{display:block;font-size:15px;margin-bottom:8px;}
+  .note-card p{font-size:13.5px;line-height:1.6;color:var(--heritage);margin:0;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">B</div>
+    <div class="brand-text">
+      <div class="b1">Bentley Compass 360</div>
+      <div class="b2">Your Leadership Portal</div>
+    </div>
+  </div>
+  <nav>
+    <a href="#">Overview</a>
+    <a href="#">Nominate Raters</a>
+    <a href="#" class="active">Guidelines</a>
+  </nav>
+  <div class="account">
+    <div class="avatar">JR</div>
+    <div class="name">Jordan Reeves</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <div class="page-head">
+    <h1>360 Feedback Guidelines</h1>
+    <p>The quality of your feedback depends on choosing raters who can give you meaningful, honest insight into your leadership. Here's guidance on each category.</p>
+  </div>
+
+  <div class="cat-card" style="--accent:#183319">
+    <div class="cat-top">
+      <h2>Boss (Line Manager)</h2>
+      <span class="req-badge">1 required, max 2</span>
+    </div>
+    <p>Your direct line manager, the person you report to day-to-day. If you have matrix reporting into two managers, you can add a second, but one is enough in most cases.</p>
+    <div class="tip"><b>Why it matters:</b> your manager sees things your peers and reports often don't, how you represent your team upward and how you handle pressure from above.</div>
+  </div>
+
+  <div class="cat-card" style="--accent:#183319">
+    <div class="cat-top">
+      <h2>Peers</h2>
+      <span class="req-badge">Minimum 3, suggested 5</span>
+    </div>
+    <p>Colleagues at a similar level who see your day-to-day work, ideally from more than one part of the business, not just people on your immediate team.</p>
+    <div class="tip"><b>Tip:</b> a mix of peers who work closely with you and some who only see you occasionally (in meetings, on projects) gives a more rounded picture than five people who see the same slice of your week.</div>
+  </div>
+
+  <div class="cat-card" style="--accent:#6b7a63">
+    <div class="cat-top">
+      <h2>Direct Reports</h2>
+      <span class="req-badge">Minimum 3, suggested 5</span>
+    </div>
+    <p>People who report to you. Aim for a range, someone who's been in your team for years, someone newer, someone from a different function if your team spans more than one.</p>
+    <div class="tip"><b>Why it matters:</b> this is the group with the clearest, most frequent view of how you actually lead, day to day. Don't only nominate your strongest supporters.</div>
+  </div>
+
+  <div class="cat-card" style="--accent:#DCD8C0">
+    <div class="cat-top">
+      <h2>Others</h2>
+      <span class="req-badge">Optional, min 3 if used</span>
+    </div>
+    <p>Stakeholders, customers, or colleagues from outside your direct chain, if relevant to your role. Only use this category if you have genuinely relevant people to add; leave it empty otherwise.</p>
+    <div class="tip"><b>Note:</b> if you add anyone here, add at least three. A category with one or two people can't be shown separately without risking that person being identifiable, so it needs the same minimum as any other category.</div>
+  </div>
+
+  <div class="note-card">
+    <b>A note on anonymity</b>
+    <p>Individual scores are never shown to you alone, only combined with others in the same category once enough people have responded. This is exactly why the minimums above matter: they're what keeps individual feedback protected. Comments are shown to you word-for-word, though, so anything specific a rater writes may still be recognisable, even where their scores aren't.</p>
+  </div>
+
+</div>
+
+</body>
+</html>
