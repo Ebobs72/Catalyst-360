@@ -1473,6 +1473,124 @@ files) as binding reference material for the visual language.
   worth a live pass after this deploys, the same way the mobile rating-
   scale and button-contrast work were later confirmed live).
 
+### Leader Portal Rebuild: Rendering & Navigation Bug Audit — FIXED 2026-08-26
+Ten items found via live screenshot review of the deployed rebuild. All
+fixed and re-verified live (screenshots, not just code reading) against
+`leader_portal.py` locally on Streamlit 1.60.0. Two of the ten turned out
+to be genuinely new bugs (not present-but-unverified) introduced by the
+rebuild itself, worth knowing about if this pattern recurs elsewhere:
+
+- **Icons (item 1)**: the status-card checkmark/clock and the failed-
+  invitation warning triangle were raw HTML entities (`&#10003;`, `&#128340;`,
+  `&#9888;`), not the Material Symbols set the rest of the app uses via
+  Streamlit's `:material/name:` shortcode. Added `_icon(name, size, color)`,
+  which renders `<span style="font-family:'Material Symbols Rounded'">name
+  </span>` for use inside raw HTML - confirmed live that Streamlit already
+  loads that font globally (it's how this file's own Edit button icon
+  renders), so a plain span naming the icon works anywhere on the page, not
+  just inside Streamlit's own widget markup. The CSV-upload toggle's 📄
+  emoji was dropped in favour of the button's own `icon=` parameter instead.
+  REAL BUG FOUND WHILE FIXING THIS: the first version used double quotes for
+  the CSS font-family value inside an already-double-quoted HTML `style="..."`
+  attribute, which terminates the attribute early - confirmed live via
+  computed style (the browser had parsed it as `style="font-family:"` plus
+  two bogus boolean attributes, `material=""` and `symbols=""`, so the icon
+  rendered as the literal word "check"). Fixed with single quotes around the
+  font name.
+- **"Send pending invitations" invisible text (item 2)**: only reproduced in
+  the button's ENABLED state (a leader with something actually pending) -
+  the disabled/grey state was already legible, which is why this wasn't
+  caught in the original build's verification pass. REAL BUG, confirmed live
+  via computed style: `button{color:#FFFFFF !important}` doesn't win against
+  Streamlit's own colour set directly on the inner `<p>` label (inheritance
+  always loses to an explicit rule on the element itself, `!important` or
+  not - same root cause as an already-documented fix elsewhere in this app,
+  the segmented-control button styling in `app.py`). Fixed the same way that
+  fix does it: also target `button *` explicitly, not just `button`, across
+  all three button namespaces (primary/secondary/ghost) and their disabled
+  states.
+- **Stats strip and Full 360 description (items 3, 4, 7)**: NOT a static
+  placeholder - `_progress_stats_safe` already switched between real numbers
+  and a vague fallback correctly, confirmed live in three states (real
+  numbers at 11/13, vague "Responses are coming in" when gated at
+  outstanding==1, real zeros at total==0). The one genuine fix: total==0
+  used to return the SAME vague-fallback path as the anonymity gate,
+  showing "You haven't nominated any raters yet." instead of a 0/0/0%/0
+  strip - there is nothing to protect at zero raters, so this was an
+  over-broad reuse of the gating logic, not a privacy requirement. Split
+  `_progress_stats_safe` so total==0 is its own safe=True branch with real
+  zeros plus a short caption ("Nominate your raters to start tracking
+  responses."), while keeping the genuine anonymity gate (total <
+  ANONYMITY_THRESHOLD, or outstanding == 1) as the one deliberate exception
+  where numbers still don't render - explained plainly here because the
+  original ask, read literally, would have removed that protection, and it
+  is a documented, intentional hard floor (CLAUDE.md section 4), not a bug.
+- **Item 8 (empty rings at zero)**: confirmed correct as-is, no change -
+  matches the human's own note that this is expected behaviour, not a
+  rendering failure.
+- **Send Reminders spacing (item 5)**: `margin-top` on the "Your progress"
+  label's own HTML only pushed that column's content down - the Send
+  Reminders button, a real widget in the neighbouring column with no
+  equivalent margin, stayed flush against the category cards above it,
+  visibly squashed on desktop. Confirmed via the human's own observation
+  that mobile was already fine (columns stack there with natural gaps) -
+  fixed by wrapping both columns in one `st.container(key="cp_progress_row")`
+  and moving the margin to that container, so it applies evenly to the row
+  as a whole rather than to one column's inner content.
+- **Guide-card alignment (item 6)**: the "Who should you nominate?" 4-column
+  text sat inside the guide card's own 26px side padding, while the rater-
+  category cards below it have no such wrapper and sit directly in the page
+  flow - different available width, different starting X position, so no
+  possible column-count match could align them. Fixed by cancelling the
+  card's padding for the list row specifically (`margin: 0 -26px`) and
+  matching the category grid's own 18px gap (was 16px), so both grids
+  compute identical column tracks against the identical width. Restored on
+  mobile, where the alignment requirement no longer applies (single column)
+  and flush-to-border text would look cramped.
+- **Navigation opening new tabs (item 9, "most important")**: root-caused
+  live, not assumed - inspecting the actual rendered DOM showed Streamlit's
+  own markdown renderer force-injects `target="_blank" rel="noopener
+  noreferrer"` onto EVERY `<a>` tag rendered via `unsafe_allow_html`, even a
+  plain same-origin query-string href; nothing in this file's own source set
+  that attribute. A `<script>`-tag workaround (strip the attribute, or
+  attach a same-tab click handler) was tried and confirmed NOT to work
+  either - script tags never execute inside `unsafe_allow_html` content,
+  standard browser behaviour for anything inserted via innerHTML, not a
+  Streamlit-specific bug. FIX: stopped using `<a>` tags for in-app
+  navigation entirely. Added `_go_to_view(view)` (sets `st.query_params
+  ['view']` and calls `st.rerun()`) and converted every nav control - the
+  three topbar links, "+ Add a rater", "Open full guidelines" - to real
+  `st.button()` calls wired to it, styled via container-key CSS to read as
+  plain links/buttons rather than boxed Streamlit buttons. This meant
+  rebuilding `_render_portal_topbar` around real `st.columns` (brand / nav /
+  account) instead of one raw HTML bar with an embedded `<nav>`. Verified
+  live end to end: `tabs_context` checked before and after every click
+  across the full flow named in the acceptance checks (Overview → Nominate
+  Raters → add a rater → Overview again, plus a category-card link) - tab
+  count never changed. Multi-tab session-state risk (also asked about):
+  not applicable any more, since there is no longer any code path that can
+  open a second tab against the same portal token in the first place.
+- **Category cards not clickable (item 10)**: added a real "→ Nominate"
+  `st.button()` under each card (same column, pulled up flush with
+  `margin-top:-9px` so it reads as part of the card, not a stray control
+  below it), wired to the same `_go_to_view('nominate')`. Deliberately NOT
+  deep-linked to pre-select that category in the add-rater form - the
+  relationship dropdown has no default on purpose (`render_portal_nominate`'s
+  own docstring: a leftover selection once caused a leader to add too many
+  Bosses), and pre-filling a category would undo that already-reasoned
+  safety choice. A plain link to Nominate Raters is the correct scope here,
+  not a corner cut for time, so this wasn't attempted.
+- **Mobile re-swept 360/430/600px + desktop** on Overview and Nominate
+  Raters after all of the above, specifically checking the new real-button
+  topbar (Streamlit's own column-stacking handles it; nav items stack
+  vertically with normal spacing, no overlap) and the new per-card
+  "Nominate" buttons (attach cleanly to the bottom of each stacked card).
+  No regressions found against the sweep already confirmed in the prior
+  build entry above.
+- Test leaders/raters and the temporary `.streamlit/secrets.toml` used to
+  reach the enabled-button and zero-state cases were all removed after
+  verification, same discipline as the original build pass.
+
 ---
 
 ## 6. Known live bug to fix first

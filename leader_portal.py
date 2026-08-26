@@ -93,6 +93,41 @@ def _md(fragment):
     st.markdown(_html(fragment), unsafe_allow_html=True)
 
 
+def _icon(name, size=20, color=None):
+    """
+    A Material Symbols glyph for use inside raw HTML (unsafe_allow_html)
+    blocks - NOT the :material/name: shortcode, which only expands inside
+    Streamlit's own markdown-rendered widget text, not arbitrary HTML
+    strings (see the RTL note elsewhere in this app for the same
+    constraint). Confirmed live: Streamlit already loads the "Material
+    Symbols Rounded" icon font globally for its own icon= parameters (this
+    file's Edit button uses one), so a plain <span> naming the icon in that
+    font renders correctly anywhere on the same page, raw HTML included -
+    no separate font load needed.
+
+    Replaces the raw emoji/unicode glyphs (checkmarks, clock, warning
+    triangle) the first pass of this redesign used, which didn't match the
+    Material icon set already established everywhere else in this app.
+    `name` is a Material Symbols icon name, e.g. "check_circle", "schedule".
+    """
+    # Single quotes around the font name, deliberately - this whole style
+    # string sits inside an HTML style="..." attribute (double-quoted), and
+    # a double-quoted CSS font-family value here would terminate that
+    # attribute early. Confirmed live: this exact bug shipped once already -
+    # the browser parsed style="font-family:"Material Symbols Rounded"..."
+    # as style="font-family:" followed by two bogus boolean attributes
+    # (material="" symbols=""), so the icon rendered as literal text
+    # ("check") instead of the glyph.
+    style = (
+        f"font-family:'Material Symbols Rounded';font-size:{size}px;"
+        f'font-weight:400;line-height:1;display:inline-flex;'
+        f'align-items:center;justify-content:center;'
+    )
+    if color:
+        style += f'color:{color};'
+    return f'<span style="{style}" translate="no">{name}</span>'
+
+
 def _initials(name):
     """'Jordan Reeves' -> 'JR'. Falls back to the first two characters of
     whatever's there rather than crashing on an unusual name."""
@@ -125,27 +160,45 @@ def _progress_stats_safe(completed, total):
     """
     Numbers for the Full 360 status pill and the Your Progress stats strip.
 
-    SAME GATING AS _progress_summary_text, applied to the numeric display
-    rather than just the sentence: this is the anonymity hard floor from
-    CLAUDE.md section 4 ("never show a group of one, or any count/coverage
-    split that resolves to a single person by simple subtraction"). The
-    concept mockup's stats strip shows raw numbers unconditionally - real
-    data has to stay gated regardless of what the static mockup shows.
+    TWO DIFFERENT THINGS THIS USED TO CONFLATE, split apart after a live
+    review found the zero-nomination case reading as broken:
+    - total == 0 (nobody nominated yet): there is NOTHING to leak by
+      showing 0/0/0%/0 - zero people means zero risk of resolving to one
+      person by subtraction. This now returns safe=True with real zeros,
+      not the vague fallback sentence, so the stats strip always renders
+      real numbers here, per the "don't hide the numbers behind
+      conditional placeholder text" rule.
+    - total > 0 but below ANONYMITY_THRESHOLD, or outstanding == 1: this
+      IS the anonymity hard floor from CLAUDE.md section 4 ("never show a
+      group of one, or any count/coverage split that resolves to a single
+      person by simple subtraction") and stays gated - showing "11 of 12"
+      would let the leader work out exactly which one person hasn't
+      responded. This is the one legitimate exception to "always show
+      real numbers": there are no safe numbers to show here, not a
+      placeholder standing in for numbers that exist.
 
     Returns a dict:
       safe=True  -> invited, responded, rate, outstanding are real numbers
+                    (including the all-zero case)
       safe=False -> those are None; use `text` (from _progress_summary_text)
-                    instead of rendering the numeric strip/pill at all
+                    instead - ONLY reachable when total > 0 and gated for
+                    anonymity, never for a genuine zero state any more.
     """
     outstanding = total - completed
-    gated = total > 0 and (total < ANONYMITY_THRESHOLD or outstanding == 1)
-    if total == 0 or gated:
+    if total == 0:
+        return {
+            'safe': True,
+            'text': None,
+            'invited': 0, 'responded': 0, 'rate': 0, 'outstanding': 0,
+        }
+    gated = total < ANONYMITY_THRESHOLD or outstanding == 1
+    if gated:
         return {
             'safe': False,
             'text': _progress_summary_text(completed, total),
             'invited': None, 'responded': None, 'rate': None, 'outstanding': None,
         }
-    rate = round(100 * completed / total) if total else 0
+    rate = round(100 * completed / total)
     return {
         'safe': True,
         'text': None,
@@ -393,8 +446,18 @@ GUIDELINE_CATEGORIES = [
 # ==========================================================================
 PORTAL_CSS = """
 <style>
-  .cp-topbar{background:#183319;color:#FFFFFF;display:flex;align-items:center;justify-content:space-between;
-    padding:0 40px;height:76px;margin:-1rem -1rem 0 -1rem;border-radius:0;}
+  /* Topbar is now a real st.container(key="cp_topbar") wrapping brand/nav/
+     account columns, not one raw HTML div - nav items had to become real
+     st.button() calls (see _go_to_view's docstring: Streamlit force-adds
+     target="_blank" to every <a> rendered via unsafe_allow_html, breaking
+     in-tab navigation). Green fill + bleed-to-edge margin now apply to the
+     container Streamlit wraps around that key. */
+  div[class*="st-key-cp_topbar"] > div{
+    background:#183319;margin:-1rem -1rem 0 -1rem;padding:14px 40px;
+  }
+  div[class*="st-key-cp_topbar"] div[data-testid="stHorizontalBlock"]{
+    align-items:center;
+  }
   .cp-brand{display:flex;align-items:center;gap:14px;}
   /* Real Bentley wing mark sitting directly on the green topbar - no
      circle/badge behind it. Sized off the mockup's original 34px badge
@@ -405,14 +468,33 @@ PORTAL_CSS = """
   .cp-brand-text{line-height:1.15;}
   .cp-brand-text .cp-b1{font-size:11px;letter-spacing:2px;color:#DCD8C0;font-weight:600;text-transform:uppercase;}
   .cp-brand-text .cp-b2{font-size:18px;font-weight:700;color:#FFFFFF;}
-  .cp-nav{display:flex;gap:36px;}
-  .cp-nav a{color:rgba(255,255,255,0.78);text-decoration:none;font-size:14.5px;font-weight:500;
-    padding-bottom:6px;border-bottom:2px solid transparent;}
-  .cp-nav a.cp-active{color:#FFFFFF;border-bottom-color:#DCD8C0;}
-  .cp-account{display:flex;align-items:center;gap:12px;}
+  .cp-account{display:flex;align-items:center;gap:12px;justify-content:flex-end;}
   .cp-avatar{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.16);
     display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#FFFFFF;flex-shrink:0;}
   .cp-account .cp-name{font-size:13.5px;color:#FFFFFF;font-weight:500;}
+
+  /* Nav buttons (Overview / Nominate Raters / Guidelines) - real
+     st.button()s reskinned to read as plain text links on the green bar,
+     not boxed buttons. cp_nav_active_ is the current page: white text,
+     underline. cp_nav_ (inactive) is dimmer with no underline, matching
+     the mockup's nav a / nav a.active split exactly, just driven by two
+     container-key variants instead of a CSS class toggle. */
+  div[class*="st-key-cp_nav_"] button,
+  div[class*="st-key-cp_nav_"] button *{
+    color:rgba(255,255,255,0.78) !important;
+  }
+  div[class*="st-key-cp_nav_"] button{
+    background:none !important;border:none !important;border-radius:0 !important;
+    border-bottom:2px solid transparent !important;font-weight:500 !important;
+    font-size:14.5px !important;padding:6px 4px !important;
+  }
+  div[class*="st-key-cp_nav_active_"] button,
+  div[class*="st-key-cp_nav_active_"] button *{
+    color:#FFFFFF !important;
+  }
+  div[class*="st-key-cp_nav_active_"] button{
+    border-bottom:2px solid #DCD8C0 !important;font-weight:700 !important;
+  }
 
   .cp-page-head{margin:34px 0 8px;}
   .cp-page-head h1{font-size:30px;margin:0 0 6px;color:#040404;font-weight:700;letter-spacing:-0.3px;}
@@ -438,12 +520,28 @@ PORTAL_CSS = """
     background:#f1efe4;color:#183319;white-space:nowrap;}
   .cp-status-card.cp-done .cp-pill{background:rgba(255,255,255,0.16);color:#FFFFFF;}
 
-  /* rater category cards */
-  .cp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;}
+  /* rater category cards - laid out with real st.columns(4) now (each
+     card needed a real "Nominate" button under it, issue: cards were
+     display-only), not a single raw .cp-grid div - Streamlit's own column
+     stacking handles the mobile collapse, so no grid-template-columns
+     override is needed in the mobile block below either. */
   .cp-card{background:#FFFFFF;border:1px solid #DCD8C0;border-radius:12px;
     padding:20px 20px 16px;position:relative;overflow:hidden;}
   .cp-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
     background:var(--cp-accent,#183319);}
+  /* "Nominate" link button directly under each card, pulled up to sit
+     flush against it (no visible gap) so the two read as one clickable
+     unit rather than a stray button floating below. */
+  div[class*="st-key-cp_cat_link_"]{margin-top:-9px;}
+  div[class*="st-key-cp_cat_link_"] button,
+  div[class*="st-key-cp_cat_link_"] button *{
+    color:#183319 !important;
+  }
+  div[class*="st-key-cp_cat_link_"] button{
+    background:#FFFFFF !important;border:1px solid #DCD8C0 !important;border-top:none !important;
+    border-radius:0 0 12px 12px !important;font-weight:600 !important;font-size:12.5px !important;
+    padding:6px 10px !important;
+  }
   .cp-card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;}
   .cp-cat-label{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#6B6B6B;}
   .cp-ring{position:relative;width:48px;height:48px;flex-shrink:0;}
@@ -469,15 +567,33 @@ PORTAL_CSS = """
   .cp-stats-vague{background:#183319;border-radius:14px;margin-top:14px;padding:26px 28px;
     color:#FFFFFF;font-size:14.5px;}
 
-  .cp-guide-card{margin-top:34px;background:#f1efe4;border:1px solid #DCD8C0;
-    border-radius:12px;padding:24px 26px;}
-  .cp-guide-card .cp-g-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
-  .cp-guide-card .cp-g-head b{font-size:15.5px;color:#040404;}
-  .cp-guide-list{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+  /* Real st.container(key="cp_guide_card") now, not a raw div (the "Open
+     full guidelines" control had to become a button - see _go_to_view). */
+  div[class*="st-key-cp_guide_card"] > div{
+    margin-top:34px;background:#f1efe4;border:1px solid #DCD8C0;
+    border-radius:12px;padding:24px 26px;
+  }
+  .cp-g-head-title{font-size:15.5px;color:#040404;}
+  /* Guide-list columns MUST align with the rater-category cards below,
+     which sit directly in the page flow with no card padding of their
+     own (cp-grid) - found live: the mockup's guide-list sat inside this
+     card's 26px side padding, so its 4 columns started 26px further right
+     than cp-grid's and were computed against a narrower available width,
+     visibly misaligning "Boss"/"Peers"/etc from the cards underneath them.
+     Cancelling the card's side padding with a matching negative margin
+     (and matching cp-grid's own 18px gap, not the mockup's 16px) makes
+     both grids compute their column tracks against the identical width
+     and start position, so column N of one sits exactly above column N
+     of the other. */
+  .cp-guide-list{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin:0 -26px;}
   .cp-guide-item b{display:block;font-size:13.5px;color:#040404;margin-bottom:3px;}
   .cp-guide-item span{font-size:12px;color:#6B6B6B;}
 
-  .cp-progress-head{display:flex;align-items:center;justify-content:space-between;margin:34px 0 0;}
+  /* Top spacing now lives on the row container (cp_progress_row) so it
+     applies evenly to both columns - see that container's own comment at
+     the call site for why margin only on this label wasn't enough. */
+  div[class*="st-key-cp_progress_row"] > div{margin-top:34px;}
+  .cp-progress-head{display:flex;align-items:center;justify-content:space-between;margin:0;}
   .cp-progress-head .cp-section-label{margin:0;}
   .cp-reminder-note{font-size:11.5px;color:#6B6B6B;margin-top:6px;text-align:right;}
 
@@ -528,23 +644,54 @@ PORTAL_CSS = """
   /* Streamlit buttons reskinned to match the mockups' .btn family. Two
      namespaces via container key, same pattern already established
      elsewhere in this app (see app.py's button-contrast section): never
-     set colour without background, per that section's rule. */
+     set colour without background, per that section's rule.
+
+     REAL BUG FOUND LIVE: setting `color` on the <button> element alone
+     wasn't enough - the button's own theme colour (Bentley green) is set
+     explicitly on the inner <p> Streamlit wraps the label in
+     (stMarkdownContainer p), not just inherited from the button, so it
+     beat the button-level override regardless of !important (inheritance
+     always loses to an explicit rule on the element itself, !important or
+     not). "Send pending invitations" rendered as dark-green-on-dark-green,
+     invisible. Fixed the same way app.py's segmented-control fix already
+     does it elsewhere in this app: also target `button *` explicitly, not
+     just `button`. */
+  div[class*="st-key-cp_primary_"] button,
+  div[class*="st-key-cp_primary_"] button *{
+    color:#FFFFFF !important;
+  }
   div[class*="st-key-cp_primary_"] button{
-    background:#183319 !important;color:#FFFFFF !important;border:none !important;
+    background:#183319 !important;border:none !important;
     border-radius:8px !important;font-weight:600 !important;
+  }
+  div[class*="st-key-cp_primary_"] button:disabled,
+  div[class*="st-key-cp_primary_"] button:disabled *{
+    color:#F0F0EE !important;
   }
   div[class*="st-key-cp_primary_"] button:disabled{
-    background:#9AA79B !important;color:#F0F0EE !important;
+    background:#9AA79B !important;
+  }
+  div[class*="st-key-cp_secondary_"] button,
+  div[class*="st-key-cp_secondary_"] button *{
+    color:#183319 !important;
   }
   div[class*="st-key-cp_secondary_"] button{
-    background:#FFFFFF !important;color:#183319 !important;border:1.5px solid #DCD8C0 !important;
+    background:#FFFFFF !important;border:1.5px solid #DCD8C0 !important;
     border-radius:8px !important;font-weight:600 !important;
   }
+  div[class*="st-key-cp_secondary_"] button:disabled,
+  div[class*="st-key-cp_secondary_"] button:disabled *{
+    color:#9A9A9A !important;
+  }
   div[class*="st-key-cp_secondary_"] button:disabled{
-    background:#F5F4EE !important;color:#9A9A9A !important;border-color:#E5E3D8 !important;
+    background:#F5F4EE !important;border-color:#E5E3D8 !important;
+  }
+  div[class*="st-key-cp_ghost_"] button,
+  div[class*="st-key-cp_ghost_"] button *{
+    color:#183319 !important;
   }
   div[class*="st-key-cp_ghost_"] button{
-    background:none !important;border:none !important;color:#183319 !important;font-weight:700 !important;
+    background:none !important;border:none !important;font-weight:700 !important;
   }
 
   /* Add-a-rater form fields, restyled to the card look above (same pattern
@@ -571,11 +718,19 @@ PORTAL_CSS = """
      to stacked cards with visible field labels, never a horizontal scroll
      or truncated columns. */
   @media (max-width: 700px){
-    .cp-topbar{padding:0 16px;height:auto;flex-wrap:wrap;row-gap:10px;padding-top:12px;padding-bottom:12px;}
-    .cp-nav{gap:18px;order:3;width:100%;justify-content:center;}
+    /* Topbar columns (brand/nav/account) are real st.columns now, which
+       Streamlit stacks vertically on its own below its internal
+       breakpoint - this just tightens the padding/margins on that stacked
+       result so it doesn't inherit the desktop bar's wide side padding. */
+    div[class*="st-key-cp_topbar"] > div{padding:14px 16px;}
+    div[class*="st-key-cp_nav_"] button{justify-content:center !important;}
+    .cp-account{justify-content:flex-start;margin-top:4px;}
     .cp-status-grid{grid-template-columns:1fr;}
-    .cp-grid{grid-template-columns:1fr;}
-    .cp-guide-list{grid-template-columns:1fr;}
+    /* Single column again on mobile, so the desktop cross-grid alignment
+       trick (negative margin cancelling the card's padding) is no longer
+       needed - restore normal inset so item text doesn't sit flush
+       against the card's border. */
+    .cp-guide-list{grid-template-columns:1fr;margin:0;padding:0 4px;}
     .cp-stats-strip{grid-template-columns:1fr 1fr;}
     .cp-stat-block{border-right:none !important;border-bottom:1px solid rgba(255,255,255,0.14);}
     .cp-progress-head{flex-direction:column;align-items:flex-start;gap:10px;}
@@ -597,22 +752,48 @@ PORTAL_CSS = """
 """
 
 
+def _go_to_view(view):
+    """
+    Navigate within the same tab - the fix for the reported "every nav
+    click opens a new tab" bug.
+
+    ROOT CAUSE, confirmed live, not assumed: this file's own source never
+    set target="_blank" anywhere - inspecting the actual rendered DOM
+    showed Streamlit's markdown renderer force-injects
+    target="_blank" rel="noopener noreferrer" onto EVERY <a> tag it
+    renders through unsafe_allow_html, even a plain same-origin
+    query-string link like href="?portal=...&view=...". A <script>-tag
+    workaround (find those links and strip the attribute, or attach a
+    same-tab click handler) was tried and confirmed NOT to work either -
+    script tags inside unsafe_allow_html content never execute, which is
+    standard browser behaviour for HTML injected via innerHTML, not a
+    Streamlit-specific bug.
+
+    The robust fix: stop using <a> tags for in-app navigation entirely.
+    Every nav control in this file (topbar links, quick-action links,
+    category-card links) now calls this instead of rendering a raw href -
+    a real Streamlit rerun over the existing connection, which was never
+    capable of opening a new tab in the first place.
+    """
+    st.query_params['view'] = view
+    st.rerun()
+
+
 def _render_portal_topbar(leader_info, active_view=None, show_nav=True):
     """
     Shared header for every portal screen (and, without nav, the consent
     gate) - dark green bar, Bentley wing mark, page nav, account badge.
 
-    Nav links are plain <a href="?portal=...&view=..."> - a real browser
-    navigation/rerun, not client-side state - which keeps this simple and
-    avoids fragile CSS-over-widget tricks for something that's fundamentally
-    just "which page am I on".
+    Nav items are real st.button() calls wired to _go_to_view, not <a>
+    tags (see that function's docstring for why) - styled via the
+    cp_nav_/cp_nav_active_ container-key CSS below to read as plain text
+    links inside the green bar, not boxed buttons.
 
     The mockup's plain green-circle "B" badge is replaced with the real
     Bentley wing mark per the human's instruction, negative (white) variant
     since it sits on the dark green bar - the positive variant would be
     invisible there.
     """
-    token = leader_info.get('portal_token', '')
     logo_uri = get_logo_data_uri(negative=True)
     # Fallback only fires if the logo asset is genuinely missing from disk -
     # styled to stay legible on its own (no circle to lean on any more)
@@ -620,37 +801,41 @@ def _render_portal_topbar(leader_info, active_view=None, show_nav=True):
     mark_inner = (f'<img src="{logo_uri}" alt="">' if logo_uri
                   else '<span style="color:#DCD8C0;font-weight:700;font-size:22px;">B</span>')
 
-    nav_html = ""
-    if show_nav:
-        views = [('overview', 'Overview'), ('nominate', 'Nominate Raters'), ('guidelines', 'Guidelines')]
-        links = []
-        for key, label in views:
-            cls = "cp-active" if key == active_view else ""
-            links.append(f'<a class="{cls}" href="?portal={_esc(token)}&view={key}">{label}</a>')
-        nav_html = f'<nav class="cp-nav">{"".join(links)}</nav>'
+    with st.container(key="cp_topbar"):
+        if show_nav:
+            col_brand, col_nav, col_account = st.columns([2.3, 3.4, 2.1], vertical_alignment="center")
+        else:
+            col_brand = st.container()
 
-    account_html = ""
-    if show_nav:
-        account_html = _html(f"""
-        <div class="cp-account">
-          <div class="cp-avatar">{_esc(_initials(leader_info.get('name')))}</div>
-          <div class="cp-name">{_esc(leader_info.get('name'))}</div>
-        </div>
-        """)
+        with col_brand:
+            _md(f"""
+            <div class="cp-brand">
+              <div class="cp-brand-mark">{mark_inner}</div>
+              <div class="cp-brand-text">
+                <div class="cp-b1">Bentley Compass 360</div>
+                <div class="cp-b2">Your Leadership Portal</div>
+              </div>
+            </div>
+            """)
 
-    _md(f"""
-    <div class="cp-topbar">
-      <div class="cp-brand">
-        <div class="cp-brand-mark">{mark_inner}</div>
-        <div class="cp-brand-text">
-          <div class="cp-b1">Bentley Compass 360</div>
-          <div class="cp-b2">Your Leadership Portal</div>
-        </div>
-      </div>
-      {nav_html}
-      {account_html}
-    </div>
-    """)
+        if show_nav:
+            views = [('overview', 'Overview'), ('nominate', 'Nominate Raters'), ('guidelines', 'Guidelines')]
+            with col_nav:
+                nav_cols = st.columns(len(views), vertical_alignment="center")
+                for (key, label), col in zip(views, nav_cols):
+                    with col:
+                        active = key == active_view
+                        with st.container(key=f"cp_nav_{'active_' if active else ''}{key}"):
+                            if st.button(label, key=f"cp_nav_btn_{key}", use_container_width=True):
+                                _go_to_view(key)
+
+            with col_account:
+                _md(f"""
+                <div class="cp-account">
+                  <div class="cp-avatar">{_esc(_initials(leader_info.get('name')))}</div>
+                  <div class="cp-name">{_esc(leader_info.get('name'))}</div>
+                </div>
+                """)
 
 
 def render_leader_consent_gate(db, leader_info):
@@ -791,13 +976,9 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
         """)
     with add_col:
         st.markdown('<div style="margin-top:38px;"></div>', unsafe_allow_html=True)
-        token = leader_info.get('portal_token', '')
-        st.markdown(
-            f'<a href="?portal={_esc(token)}&view=nominate" style="display:block;text-align:center;'
-            f'padding:11px 18px;border-radius:8px;border:1.5px solid #DCD8C0;background:#FFFFFF;'
-            f'color:#183319;font-weight:600;font-size:14px;text-decoration:none;">+ Add a rater</a>',
-            unsafe_allow_html=True
-        )
+        with st.container(key="cp_secondary_add_rater_link"):
+            if st.button("+ Add a rater", use_container_width=True, key="cp_add_rater_link_btn"):
+                _go_to_view('nominate')
     with send_col:
         st.markdown('<div style="margin-top:38px;"></div>', unsafe_allow_html=True)
         pending = db.get_raters_pending_invitation(leader_info['id']) if EMAIL_AVAILABLE else []
@@ -813,22 +994,21 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
     st.markdown(f'<div class="cp-status-grid">{self_html}{full360_html}</div>', unsafe_allow_html=True)
 
     # --- Who should you nominate? teaser -----------------------------------
-    token = leader_info.get('portal_token', '')
-    _md(f"""
-    <div class="cp-guide-card">
-      <div class="cp-g-head">
-        <b>Who should you nominate?</b>
-        <a href="?portal={_esc(token)}&view=guidelines" style="padding:9px 16px;border-radius:8px;
-           border:1.5px solid #DCD8C0;background:#FFFFFF;color:#183319;font-weight:600;font-size:13px;
-           text-decoration:none;">Open full guidelines</a>
-      </div>
+    with st.container(key="cp_guide_card"):
+        g_head_col, g_btn_col = st.columns([4, 1.5], vertical_alignment="center")
+        with g_head_col:
+            st.markdown('<b class="cp-g-head-title">Who should you nominate?</b>', unsafe_allow_html=True)
+        with g_btn_col:
+            with st.container(key="cp_secondary_open_guidelines"):
+                if st.button("Open full guidelines", use_container_width=True, key="cp_open_guidelines_btn"):
+                    _go_to_view('guidelines')
+        _md("""
       <div class="cp-guide-list">
         <div class="cp-guide-item"><b>Boss</b><span>Your direct line manager. One is enough.</span></div>
         <div class="cp-guide-item"><b>Peers</b><span>Colleagues at a similar level who see your day-to-day work.</span></div>
         <div class="cp-guide-item"><b>Direct Reports</b><span>People who report to you. Aim for a range of tenure.</span></div>
         <div class="cp-guide-item"><b>Others</b><span>Stakeholders or customers, if relevant to your role.</span></div>
       </div>
-    </div>
     """)
 
     # --- Category ring cards ------------------------------------------------
@@ -838,43 +1018,70 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
             rater_counts[r['relationship']] += 1
 
     st.markdown('<div class="cp-section-label">Your raters, by category</div>', unsafe_allow_html=True)
-    cards_html = '<div class="cp-grid">'
-    for cat in ['Boss', 'Peers', 'DRs', 'Others']:
-        cards_html += _category_card_html(cat, rater_counts[cat])
-    cards_html += '</div>'
-    st.markdown(cards_html, unsafe_allow_html=True)
+    # Each card is a real link to Nominate Raters (issue: cards were
+    # display-only with no way to act on a "3 more needed" chip). A plain
+    # link to the page is the baseline shipped here - NOT deep-linked to
+    # pre-select this category in the add-rater form, because that
+    # dropdown deliberately has no default (see render_portal_nominate's
+    # docstring: a leftover selection once caused a leader to add too many
+    # Bosses) - pre-filling a category would undo that already-reasoned
+    # safety choice, so the plain link is the right scope here, not a
+    # corner cut for time.
+    cat_cols = st.columns(4, gap="medium")
+    for cat, col in zip(['Boss', 'Peers', 'DRs', 'Others'], cat_cols):
+        with col:
+            _md(_category_card_html(cat, rater_counts[cat]))
+            with st.container(key=f"cp_cat_link_{cat}"):
+                if st.button("Nominate", icon=":material/arrow_forward:", use_container_width=True,
+                             key=f"cp_cat_link_btn_{cat}"):
+                    _go_to_view('nominate')
 
     # --- Your Progress + Send reminders -------------------------------------
     incomplete = [r for r in other_raters if not r.get('completed')]
     any_eligible, hours_until_next = _reminder_cooldown_state(incomplete)
     email_configured = EMAIL_AVAILABLE and is_email_configured()
 
-    prog_col1, prog_col2 = st.columns([3, 1.6])
-    with prog_col1:
-        st.markdown('<div class="cp-progress-head"><div class="cp-section-label">Your progress</div></div>',
-                     unsafe_allow_html=True)
-    with prog_col2:
-        if other_raters and email_configured:
-            disabled = not any_eligible
-            with st.container(key="cp_secondary_send_reminders"):
-                if st.button("Send reminders", disabled=disabled, use_container_width=True,
-                             key="cp_send_reminders_btn"):
-                    msg = _send_reminders_and_report(db, leader_info, incomplete, base_url)
-                    st.session_state['cp_reminder_result'] = msg
-                    st.rerun()
-            if disabled and hours_until_next:
-                note = f"Available again in {round(hours_until_next)}h."
-            elif incomplete:
-                note = f"Nudges the {len(incomplete)} who haven't responded yet."
-            else:
-                note = "Everyone has responded."
-            st.markdown(f'<div class="cp-reminder-note">{_esc(note)}</div>', unsafe_allow_html=True)
+    # Wrapped in one container so the top margin applies to the WHOLE row,
+    # not just prog_col1's own HTML - found live: margin-top on
+    # .cp-progress-head only pushed the "Your progress" label down inside
+    # its own column, while prog_col2's Send reminders button (a real
+    # widget with no equivalent margin of its own) stayed flush against
+    # the category cards above, so the row looked unevenly spaced/squashed
+    # on desktop specifically (columns stack with normal gaps on mobile,
+    # which is why this only showed up at desktop widths).
+    with st.container(key="cp_progress_row"):
+        prog_col1, prog_col2 = st.columns([3, 1.6])
+        with prog_col1:
+            st.markdown('<div class="cp-progress-head"><div class="cp-section-label">Your progress</div></div>',
+                         unsafe_allow_html=True)
+        with prog_col2:
+            if other_raters and email_configured:
+                disabled = not any_eligible
+                with st.container(key="cp_secondary_send_reminders"):
+                    if st.button("Send reminders", disabled=disabled, use_container_width=True,
+                                 key="cp_send_reminders_btn"):
+                        msg = _send_reminders_and_report(db, leader_info, incomplete, base_url)
+                        st.session_state['cp_reminder_result'] = msg
+                        st.rerun()
+                if disabled and hours_until_next:
+                    note = f"Available again in {round(hours_until_next)}h."
+                elif incomplete:
+                    note = f"Nudges the {len(incomplete)} who haven't responded yet."
+                else:
+                    note = "Everyone has responded."
+                st.markdown(f'<div class="cp-reminder-note">{_esc(note)}</div>', unsafe_allow_html=True)
 
     if st.session_state.get('cp_reminder_result'):
         st.info(st.session_state.pop('cp_reminder_result'))
 
     stats = _progress_stats_safe(sum(1 for r in other_raters if r.get('completed')), len(other_raters))
     if stats['safe']:
+        if not other_raters:
+            # Real zeros still render below (per the "always show the
+            # numbers, don't hide them behind placeholder text" rule) - this
+            # is just a short explanatory line alongside them, not a
+            # substitute for them.
+            st.caption("Nominate your raters to start tracking responses.")
         _md(f"""
         <div class="cp-stats-strip">
           <div class="cp-stat-block"><div class="cp-num">{stats['invited']}</div><div class="cp-lbl">Raters invited</div></div>
@@ -896,15 +1103,15 @@ def _self_status_card_html(self_rater):
         return _html(f"""
         <div class="cp-status-card cp-done">
           <div class="cp-status-left">
-            <div class="cp-status-icon">&#10003;</div>
+            <div class="cp-status-icon">{_icon('check', size=22)}</div>
             <div class="cp-status-text"><b>Self-Assessment complete</b><span>{subtitle}</span></div>
           </div>
         </div>
         """)
-    return _html("""
+    return _html(f"""
     <div class="cp-status-card">
       <div class="cp-status-left">
-        <div class="cp-status-icon">&#9675;</div>
+        <div class="cp-status-icon">{_icon('radio_button_unchecked', size=22)}</div>
         <div class="cp-status-text"><b>Self-Assessment pending</b><span>Not yet completed</span></div>
       </div>
     </div>
@@ -915,20 +1122,20 @@ def _full360_status_card_html(other_raters):
     completed = sum(1 for r in other_raters if r.get('completed'))
     total = len(other_raters)
     if total == 0:
-        return _html("""
+        return _html(f"""
         <div class="cp-status-card">
           <div class="cp-status-left">
-            <div class="cp-status-icon">&#128340;</div>
+            <div class="cp-status-icon">{_icon('schedule', size=22)}</div>
             <div class="cp-status-text"><b>Full 360 not started</b><span>Nominate your raters to begin</span></div>
           </div>
         </div>
         """)
     stats = _progress_stats_safe(completed, total)
     if completed == total:
-        return _html("""
+        return _html(f"""
         <div class="cp-status-card cp-done">
           <div class="cp-status-left">
-            <div class="cp-status-icon">&#10003;</div>
+            <div class="cp-status-icon">{_icon('check', size=22)}</div>
             <div class="cp-status-text"><b>Full 360 complete</b><span>All responses received</span></div>
           </div>
         </div>
@@ -942,7 +1149,7 @@ def _full360_status_card_html(other_raters):
     return _html(f"""
     <div class="cp-status-card">
       <div class="cp-status-left">
-        <div class="cp-status-icon">&#128340;</div>
+        <div class="cp-status-icon">{_icon('schedule', size=22)}</div>
         <div class="cp-status-text"><b>Full 360 in progress</b><span>{_esc(subtitle)}</span></div>
       </div>
       {pill}
@@ -1095,8 +1302,8 @@ def render_portal_nominate(db, leader_info, existing_raters):
 
         show_csv = st.session_state.get('cp_show_csv', False)
         with st.container(key="cp_ghost_csv_toggle"):
-            if st.button(("Hide CSV upload" if show_csv else "📄 Adding several at once? Upload a CSV instead"),
-                         key="cp_csv_toggle_btn"):
+            if st.button(("Hide CSV upload" if show_csv else "Adding several at once? Upload a CSV instead"),
+                         icon=":material/description:", key="cp_csv_toggle_btn"):
                 st.session_state['cp_show_csv'] = not show_csv
                 st.rerun()
 
@@ -1278,8 +1485,10 @@ def _render_nominated_list_new(db, leader_info, base_url):
                 status = "Invited" if (pending_emails is not None and current_email.strip().lower() not in pending_emails) else "Not yet sent"
                 status_cls = "cp-invited" if status == "Invited" else "cp-notsent"
                 failed = current_email.strip().lower() in failed_emails
-                warn_html = ('<span title="Invitation failed to send" style="color:#B00020;'
-                              'margin-left:6px;">&#9888;</span>') if failed else ""
+                warn_html = (
+                    f'<span title="Invitation failed to send" style="margin-left:6px;">'
+                    f'{_icon("warning", size=16, color="#B00020")}</span>'
+                ) if failed else ""
 
                 rcol1, rcol2 = st.columns([9, 1])
                 with rcol1:
