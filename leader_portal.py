@@ -359,8 +359,16 @@ RATER_REQUIREMENTS = {
     'Boss': {'min': 1, 'max': 2, 'suggested': 1, 'required_nomination': True, 'show_minimum': True},
     'Peers': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True, 'show_minimum': True},
     'DRs': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True, 'show_minimum': True},
+    # 'suggested' is deliberately 0, not 5 - Others has no flat target the way
+    # Peers/DRs do (see CATEGORY_REQ_TEXT below). 'ring_target' is a SEPARATE
+    # number used only for the progress ring's geometry/label, so it can give
+    # a full ring at 5 (matching the other three categories visually) without
+    # implying a flat "5" target in the copy, which would misstate a category
+    # that often can't realistically reach it. Confirmed this doesn't touch
+    # the chip logic below, which reads 'min_if_any' directly, never 'suggested'
+    # or 'ring_target'.
     'Others': {'min': 0, 'max': 10, 'suggested': 0, 'required_nomination': False,
-               'show_minimum': False, 'min_if_any': ANONYMITY_THRESHOLD}
+               'show_minimum': False, 'min_if_any': ANONYMITY_THRESHOLD, 'ring_target': 5}
 }
 
 # Category caption/label pairs and requirement blurbs for the Overview ring
@@ -373,7 +381,7 @@ CATEGORY_REQ_TEXT = {
     'Boss': f"Minimum <b>{RATER_REQUIREMENTS['Boss']['min']}</b>, max {RATER_REQUIREMENTS['Boss']['max']} if matrix reporting",
     'Peers': f"Minimum <b>{RATER_REQUIREMENTS['Peers']['min']}</b>, suggested {RATER_REQUIREMENTS['Peers']['suggested']}",
     'DRs': f"Minimum <b>{RATER_REQUIREMENTS['DRs']['min']}</b>, suggested {RATER_REQUIREMENTS['DRs']['suggested']}",
-    'Others': f"Add at least {RATER_REQUIREMENTS['Others']['min_if_any']} if you use this category",
+    'Others': f"Minimum {RATER_REQUIREMENTS['Others']['min_if_any']}, ideally 4 or 5 if you have them",
 }
 CATEGORY_ACCENT = {'Boss': '#183319', 'Peers': '#183319', 'DRs': '#6b7a63', 'Others': '#DCD8C0'}
 
@@ -421,7 +429,8 @@ GUIDELINE_CATEGORIES = [
         ),
     },
     {
-        'key': 'Others', 'title': 'Others', 'badge': 'Optional, min 3 if used',
+        'key': 'Others', 'title': 'Others',
+        'badge': f"Minimum {RATER_REQUIREMENTS['Others']['min_if_any']}, ideally 4 or 5",
         'body': (
             "Stakeholders, customers, or colleagues from outside your direct chain, if "
             "relevant to your role. Only use this category if you have genuinely relevant "
@@ -433,6 +442,116 @@ GUIDELINE_CATEGORIES = [
             "can't be shown separately without risking that person being identifiable, so it "
             "needs the same minimum as any other category."
         ),
+    },
+]
+
+# Begin Here / Help screen content — copy taken from the concept mockup
+# (assets/Bentley Compass 360 — Begin Here Concept.html), supplied as
+# reference material binding for this build.
+BEGIN_HERE_STEPS = [
+    {
+        'title': 'Add each rater, one at a time, or all at once from a spreadsheet',
+        'body': (
+            "Go to <strong>Nominate Raters</strong> and enter their name, email, and category "
+            "(Boss, Peer, Direct Report, or Other). Click <strong>Add</strong>. This only saves "
+            "the record, nothing is sent to them yet."
+        ),
+        'sub_note': (
+            "Adding several people? Use <b>Upload a CSV instead</b> on the same page to add "
+            "your whole list in one go, rather than typing each one in separately."
+        ),
+    },
+    {
+        'title': 'Repeat until your list is complete',
+        'body': (
+            "Add as many people as you need across each category before sending anything. "
+            "There's no limit on how many times you can come back and add more later, but "
+            "it's easiest to build the full list first."
+        ),
+        'sub_note': None,
+    },
+    {
+        'title': "Check you've met each category's minimum",
+        'body': (
+            'Your rater cards on Overview will show "Requirement met" once each category has '
+            'enough people. If a category still shows "more needed," add more before sending, '
+            "or leave that category empty entirely if it doesn't apply (Others is optional)."
+        ),
+        'sub_note': None,
+    },
+    {
+        'title': 'Click Send Invitations',
+        'body': (
+            "One click sends every pending invitation at once. This is the only point anyone "
+            "actually receives an email, nothing goes out before this."
+        ),
+        'sub_note': None,
+    },
+    {
+        'title': 'Send reminders later, if needed',
+        'body': (
+            'Once responses start coming in, a <strong>Send Reminders</strong> button appears '
+            "next to Your Progress. It nudges everyone who hasn't responded yet in one go, no "
+            "need to chase people individually, and it's limited to once every 48 hours."
+        ),
+        'sub_note': None,
+    },
+]
+
+# Order matches the mockup: the two most likely practical questions after a
+# leader's first session (editing a mistake, adding someone later) come
+# first, ahead of the more explanatory cards.
+BEGIN_HERE_WATCH_CARDS = [
+    {
+        'title': "Got someone's details wrong? Fix it anytime",
+        'items': [
+            "Typo'd an email address, or nominated someone under the wrong category? Click "
+            "<strong>Edit</strong> next to their name on <strong>Nominate Raters</strong> to "
+            "correct it, this works whether or not their invitation's already been sent.",
+        ],
+    },
+    {
+        'title': 'Forgot someone? Add them anytime',
+        'items': [
+            "You're not locked to your original list. Come back to <strong>Nominate Raters</strong> "
+            "whenever you like and add anyone you missed. Clicking <strong>Send Invitations</strong> "
+            "again only sends to whoever's still pending, everyone already invited stays exactly "
+            "as they are, they won't be emailed a second time.",
+        ],
+    },
+    {
+        'title': 'Why the category minimums exist',
+        'items': [
+            "It's not arbitrary, it's what keeps individual feedback anonymous. A category of one "
+            "or two people is too easy to trace back to a single person, so each one needs enough "
+            "responses before it can be shown at all.",
+        ],
+        # A real button, not the mockup's inline <a href="#"> - a raw anchor
+        # here would reintroduce the exact new-tab navigation bug just fixed
+        # elsewhere in this file (see _go_to_view's docstring). Rendered as
+        # a small link-styled control after the card text rather than
+        # inline mid-sentence, since a Streamlit button can't sit inside a
+        # markdown paragraph's own flow.
+        'link_to': ('guidelines', 'See Guidelines for help deciding who to choose'),
+    },
+    {
+        'title': "What your rater list does and doesn't show",
+        'items': [
+            "You'll see whether someone's been <strong>invited</strong>. You will never see "
+            "whether they've personally <strong>responded</strong>, that's deliberate, not a "
+            "missing feature. Response progress only ever shows as a total across each category.",
+        ],
+    },
+    {
+        'title': 'What to check if something looks off',
+        'items': [
+            "Someone says they never received their invitation? Double-check their email address "
+            "in your rater list first, a typo means it goes nowhere, silently.",
+            'A category still shows "more needed" after you\'re sure everyone\'s replied? It '
+            "usually just means responses genuinely haven't come in yet, not that anything's broken.",
+            "Reminder button greyed out? You're inside the 48-hour window, it'll show exactly "
+            "when it's available again.",
+        ],
     },
 ]
 
@@ -450,13 +569,44 @@ PORTAL_CSS = """
      account columns, not one raw HTML div - nav items had to become real
      st.button() calls (see _go_to_view's docstring: Streamlit force-adds
      target="_blank" to every <a> rendered via unsafe_allow_html, breaking
-     in-tab navigation). Green fill + bleed-to-edge margin now apply to the
-     container Streamlit wraps around that key. */
+     in-tab navigation).
+
+     FULL-BLEED WIDTH, NOT A NEGATIVE-MARGIN GUESS: a first version used
+     margin:-1rem -1rem 0 -1rem to cancel Streamlit's own page padding -
+     confirmed live (screenshots at several widths, then root-caused via
+     the DOM chain) that this only ever cancelled the LEFT side. This
+     element is a flex item (display:flex, flex-grow:0, flex-basis:auto)
+     inside Streamlit's own layout, and - same underlying mechanism as the
+     guide-card alignment bug elsewhere in this file - a negative margin
+     on a flex item can shift its start edge but does not reliably force
+     its own computed width to expand past what flex-basis already fixed;
+     here that showed up as the box's LEFT edge reaching x:0 correctly
+     while its RIGHT edge stayed pinned to the padded parent's inner edge,
+     a consistent ~32px shortfall (Streamlit's 16px side padding x2)
+     regardless of viewport width - so it wasn't a "wrong number", the
+     mechanism itself couldn't work here.
+
+     Fixed with the standard full-bleed breakout instead, which escapes a
+     padded/centred parent by positioning relative to the VIEWPORT rather
+     than fighting the parent's own box model: left:50%, pulled back by
+     -50vw, width:100vw. This doesn't care what the parent's padding
+     value is at any given width, so it can't drift out of sync with it
+     again the way a hardcoded margin guess already has once. */
   div[class*="st-key-cp_topbar"] > div{
-    background:#183319;margin:-1rem -1rem 0 -1rem;padding:14px 40px;
+    background:#183319 !important;position:relative !important;left:50% !important;
+    width:100vw !important;max-width:100vw !important;margin-left:-50vw !important;
+    margin-top:-1rem !important;padding:14px 40px !important;box-sizing:border-box !important;
   }
   div[class*="st-key-cp_topbar"] div[data-testid="stHorizontalBlock"]{
     align-items:center;
+  }
+  .cp-topbar-row1{display:flex;align-items:center;justify-content:space-between;}
+  /* Row 2 (nav) sits directly under row 1 (brand/account) - a visible
+     divider line reads more deliberate than bare vertical spacing, and
+     costs nothing since both rows already share the same green
+     background. */
+  div[class*="st-key-cp_topbar_row2"]{
+    margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.14);
   }
   .cp-brand{display:flex;align-items:center;gap:14px;}
   /* Real Bentley wing mark sitting directly on the green topbar - no
@@ -486,8 +636,9 @@ PORTAL_CSS = """
   div[class*="st-key-cp_nav_"] button{
     background:none !important;border:none !important;border-radius:0 !important;
     border-bottom:2px solid transparent !important;font-weight:500 !important;
-    font-size:14.5px !important;padding:6px 4px !important;
+    font-size:13.5px !important;padding:6px 2px !important;white-space:nowrap !important;
   }
+  div[class*="st-key-cp_nav_"] button p{white-space:nowrap !important;}
   div[class*="st-key-cp_nav_active_"] button,
   div[class*="st-key-cp_nav_active_"] button *{
     color:#FFFFFF !important;
@@ -525,35 +676,114 @@ PORTAL_CSS = """
      display-only), not a single raw .cp-grid div - Streamlit's own column
      stacking handles the mobile collapse, so no grid-template-columns
      override is needed in the mobile block below either. */
+  /* REAL BUG FOUND LIVE (confirmed via screenshot, then reproduced by
+     narrowing the viewport): the row's stHorizontalBlock already has
+     align-items:stretch (Streamlit's own flex default), which stretches
+     each st.column's OUTER box to match the tallest sibling - confirmed
+     via getBoundingClientRect. But .cp-card is a plain block div sitting
+     INSIDE that stretched column, with no height rule of its own, so it
+     just took its own intrinsic content height and overflowed past the
+     stretched column box whenever its description wrapped to a second
+     line (Line Manager's "Minimum 1, max 2 if matrix reporting" and
+     Others' "Add at least 3 if you use this category" wrap sooner than
+     Peers/Direct Reports' shorter text, at plausible real widths - not a
+     contrived edge case). Fixed by making the card itself fill 100% of
+     its (already-stretched) column and lay out as a flex column, with the
+     status chip pushed to the bottom via margin-top:auto on
+     .cp-card-foot - so cards match height AND their chips sit on a
+     common baseline regardless of how many lines the description above
+     them took. */
+  /* height:100% on .cp-card alone wasn't enough - confirmed live via a
+     getComputedStyle chain walk: Streamlit wraps each card's raw-HTML
+     markdown in its own stElementContainer > stMarkdown > (unnamed flex
+     div) > stMarkdownContainer chain, and every one of those wrappers is
+     height:auto (sized to its own content) except the outermost
+     stVerticalBlock, which IS correctly stretched to match its tallest
+     sibling column. A percentage height only resolves against the
+     nearest ancestor with a DEFINITE (non-auto) height, so .cp-card's
+     height:100% was resolving against its own auto-height immediate
+     parent and just falling back to its own content height - the four
+     cards measured 264/244/264/244px, not equal, despite this rule.
+     Fixed by explicitly giving every wrapper level in that chain
+     height:100% too, so the definite height on the real stretched column
+     actually propagates all the way down to .cp-card. */
+  div[data-testid="stElementContainer"]:has(.cp-card){height:100%;}
+  div[data-testid="stElementContainer"]:has(.cp-card) > div[data-testid="stMarkdown"]{height:100%;}
+  div[data-testid="stElementContainer"]:has(.cp-card) > div[data-testid="stMarkdown"] > div{height:100%;}
+  div[data-testid="stMarkdownContainer"]:has(.cp-card){height:100%;}
   .cp-card{background:#FFFFFF;border:1px solid #DCD8C0;border-radius:12px;
-    padding:20px 20px 16px;position:relative;overflow:hidden;}
+    padding:20px 20px 16px;position:relative;overflow:hidden;
+    height:100%;display:flex;flex-direction:column;box-sizing:border-box;}
   .cp-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
     background:var(--cp-accent,#183319);}
-  /* "Nominate" link button directly under each card, pulled up to sit
-     flush against it (no visible gap) so the two read as one clickable
-     unit rather than a stray button floating below. */
-  div[class*="st-key-cp_cat_link_"]{margin-top:-9px;}
-  div[class*="st-key-cp_cat_link_"] button,
-  div[class*="st-key-cp_cat_link_"] button *{
-    color:#183319 !important;
-  }
-  div[class*="st-key-cp_cat_link_"] button{
-    background:#FFFFFF !important;border:1px solid #DCD8C0 !important;border-top:none !important;
-    border-radius:0 0 12px 12px !important;font-weight:600 !important;font-size:12.5px !important;
-    padding:6px 10px !important;
-  }
+  /* "Nominate" link button under each card. REAL BUG FIXED, confirmed via
+     screenshot: the previous version pulled the button up flush against
+     the card with a bottom-corner-matching radius, sized to the exact
+     same full column width as the card above it - visually correct in
+     principle, but its own left/right edges then sat exactly where the
+     card's own edges (and the card's ::before accent bar, a 4px strip
+     pinned to left:0) sit, so the button's text/icon rendered as if
+     bleeding into the accent bar rather than reading as a contained
+     control. Fixed by dropping the flush/joined treatment entirely and
+     using the SAME cp_secondary_ button styling already established
+     everywhere else in this design system (white fill, green text,
+     bordered, fully rounded) with normal positive spacing below the card,
+     not overlapping it - "a proper button", not a bare link fused to the
+     card's edge. */
+  div[class*="st-key-cp_secondary_cat_link_"]{margin-top:10px;}
   .cp-card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;}
-  .cp-cat-label{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#6B6B6B;}
+  /* REAL BUG FOUND LIVE, confirmed via getBoundingClientRect at a range of
+     widths, not visible in any single screenshot on its own: the pill's
+     margin-top:auto anchors it to the bottom of the (equal-height) card,
+     but only correctly when every card's own label+description content
+     needs the SAME amount of room. At in-between widths a category with a
+     longer description wraps to more lines than its neighbours in the same
+     row (e.g. at 1000px: Boss and Others wrap their description to 2
+     lines, Peers and Direct Reports stay on 1) - the shorter cards then
+     have real slack for margin-top:auto to absorb, but the taller ones
+     don't, so their content pushes the pill 16px further down than its
+     row-mates. Swept the full multi-column range (the layout collapses to
+     a single stacked column below ~630px, where this doesn't apply) and
+     found the worst real case at ~650-710px width: the category label can
+     wrap to 2 lines ("LINE MANAGER" -> "LINE" / "MANAGER"), the h3 title
+     can wrap to 2 lines too ("Line Manager"/"Direct Reports" wrap, "Peers"/
+     "Others" don't - a SECOND, separate source of the same mismatch, only
+     found by re-measuring after the first fix below still didn't align
+     everything), and the description to 3. Fixed by reserving that
+     worst-case space with min-height on the label, the h3, and the
+     description, rather than letting each card's box shrink to fit however
+     many lines ITS OWN text happens to need at whatever width the viewer
+     has - so the label, the h3 title, and the pill all sit at the
+     identical vertical offset in every card at every width, not just
+     within one row at one width. */
+  .cp-cat-label{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#6B6B6B;
+    display:block;min-height:36px;}
   .cp-ring{position:relative;width:48px;height:48px;flex-shrink:0;}
   .cp-ring svg{transform:rotate(-90deg);}
   .cp-ring-track{stroke:#f1efe4;}
   .cp-ring-progress{stroke:#183319;stroke-linecap:round;}
   .cp-ring-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     font-size:11px;font-weight:700;color:#183319;}
-  .cp-card h3{font-size:16.5px;margin:2px 0 4px;color:#040404;font-weight:700;}
-  .cp-card .cp-req{font-size:12px;color:#6B6B6B;margin-bottom:14px;}
+  .cp-card h3{font-size:16.5px;margin:2px 0 4px;color:#040404;font-weight:700;min-height:68px;}
+  .cp-card .cp-req{font-size:12px;color:#6B6B6B;margin-bottom:14px;min-height:58px;}
   .cp-card .cp-req b{color:#040404;}
-  .cp-card-foot{display:flex;justify-content:space-between;align-items:center;}
+  /* REAL BUG FOUND LIVE, a THIRD source of the same footTop mismatch,
+     found only after the label/h3/description reservations above still
+     left one card out of alignment: the status chip itself
+     ("Requirement met" vs "Nominated" vs "N more needed") wraps to 2
+     lines at the same ~650-710px squeeze where everything else wraps,
+     and a longer chip label wraps while a shorter one doesn't - the
+     foot's own box then grows to fit whichever chip it holds, varying
+     the total reserved-content height per card even though everything
+     above it is now fixed. Reserved on the FOOT container (min-height,
+     content-box - padding-top is separate) rather than on the chip
+     itself, so the pill's own visible size stays its normal compact
+     shape and just sits vertically centred (align-items:center, already
+     set) within the taller reserved row - reserving on the chip directly
+     was tried first and rejected, it made every pill look like an
+     oversized button even when its text fit on one line. */
+  .cp-card-foot{display:flex;justify-content:space-between;align-items:center;margin-top:auto;
+    padding-top:14px;min-height:45px;box-sizing:border-box;}
   .cp-status-chip{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:14px;display:inline-block;}
   .cp-status-chip.cp-met{background:#e7ebe3;color:#183319;}
   .cp-status-chip.cp-pending{background:#f1efe4;color:#8a7a4a;}
@@ -568,24 +798,46 @@ PORTAL_CSS = """
     color:#FFFFFF;font-size:14.5px;}
 
   /* Real st.container(key="cp_guide_card") now, not a raw div (the "Open
-     full guidelines" control had to become a button - see _go_to_view). */
+     full guidelines" control had to become a button - see _go_to_view).
+
+     NO HORIZONTAL PADDING HERE, deliberately - see the guide-items-row
+     comment below for why. Vertical padding + background/border/radius
+     only; the heading row (title + button) carries its OWN horizontal
+     inset instead, via cp_guide_heading_row. */
   div[class*="st-key-cp_guide_card"] > div{
     margin-top:34px;background:#f1efe4;border:1px solid #DCD8C0;
-    border-radius:12px;padding:24px 26px;
+    border-radius:12px;padding:24px 0;
   }
+  div[class*="st-key-cp_guide_heading_row"]{padding:0 26px;margin-bottom:14px;}
   .cp-g-head-title{font-size:15.5px;color:#040404;}
-  /* Guide-list columns MUST align with the rater-category cards below,
-     which sit directly in the page flow with no card padding of their
-     own (cp-grid) - found live: the mockup's guide-list sat inside this
-     card's 26px side padding, so its 4 columns started 26px further right
-     than cp-grid's and were computed against a narrower available width,
-     visibly misaligning "Boss"/"Peers"/etc from the cards underneath them.
-     Cancelling the card's side padding with a matching negative margin
-     (and matching cp-grid's own 18px gap, not the mockup's 16px) makes
-     both grids compute their column tracks against the identical width
-     and start position, so column N of one sits exactly above column N
-     of the other. */
-  .cp-guide-list{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin:0 -26px;}
+  /* Guide items are laid out with real st.columns(4, gap="medium") now,
+     not a raw HTML grid - see the call site's comment (render_portal_
+     overview) for why a CSS-grid approach kept drifting out of alignment
+     with the category cards below whenever their own layout mechanism
+     changed.
+
+     THIS ROW DELIBERATELY HAS NO SIDE PADDING OR MARGIN AT ALL, unlike an
+     earlier attempt that tried to cancel the card's padding with a
+     negative margin. Confirmed live that doesn't work: this row is a flex
+     item inside Streamlit's own stVerticalBlock (display:flex,
+     flex-grow:1, flex-basis:0%), and a flex item's MAIN-AXIS SIZE is
+     computed by the flex algorithm against its own parent's content-box
+     width before margins are applied - a negative margin on a flex item
+     shifts/overlaps visually but does not retroactively enlarge the size
+     st.columns() inside it actually laid out against, unlike a plain
+     block-level div where negative margins reliably expand the box. No
+     amount of margin tuning fixed it (row stayed 688px against the card
+     row's 742px regardless of -26px vs -27px vs targeting the key element
+     itself instead of a child of it). The robust fix was to stop trying to
+     escape the parent's padding after the fact, and instead give the
+     guide CARD no horizontal padding in the first place (above), moving
+     that inset onto only the content that still needs it (the heading
+     row). This row and the un-padded category-card row below it now
+     genuinely share the same available width with nothing to cancel -
+     re-verified live: both rows measured 742px wide with the same x
+     origin, and per-column drift dropped from an accumulating
+     13/26/40px to sub-pixel rounding. */
+  .cp-guide-item{padding:0 26px;}
   .cp-guide-item b{display:block;font-size:13.5px;color:#040404;margin-bottom:3px;}
   .cp-guide-item span{font-size:12px;color:#6B6B6B;}
 
@@ -602,9 +854,23 @@ PORTAL_CSS = """
   .cp-csv-row{display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:14px;
     border-top:1px solid #f1efe4;font-size:13px;color:#6B6B6B;}
   .cp-list-card{background:#FFFFFF;border:1px solid #DCD8C0;border-radius:12px;overflow:hidden;}
+  /* Header alignment MUST match content alignment - found via live report:
+     headers read as centred against the actually-left-aligned row content
+     below them. Root cause wasn't a stray text-align:center rule (there
+     wasn't one to find) but the header/content mismatch was real
+     regardless, so text-align:left is set explicitly here rather than
+     left to inherit from nothing in particular. */
   .cp-list-head{display:grid;grid-template-columns:1.4fr 1.8fr 1fr 1fr;gap:16px;
     background:#f1efe4;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;
-    color:#6B6B6B;padding:12px 22px;}
+    color:#6B6B6B;padding:12px 22px;text-align:left;}
+  /* The Edit column previously had no header label at all - this is its
+     header, in its own st.columns cell (matching the [9, 1] split every
+     content row already uses for its Edit button) rather than a 5th track
+     inside the 4-column grid above, since that grid's own width only ever
+     matched the 9-fraction content column, not the Edit button's column. */
+  .cp-list-head-edit{background:#f1efe4;font-size:11px;font-weight:700;letter-spacing:0.8px;
+    text-transform:uppercase;color:#6B6B6B;padding:12px 22px;text-align:left;height:100%;
+    display:flex;align-items:center;}
   .cp-list-row-html{display:grid;grid-template-columns:1.4fr 1.8fr 1fr 1fr;gap:16px;align-items:center;
     padding:14px 22px;border-bottom:1px solid #f1efe4;}
   /* Field labels (Name/Email/Category/Status) exist in the markup for the
@@ -640,6 +906,36 @@ PORTAL_CSS = """
   .cp-note-card{margin-top:26px;background:#183319;border-radius:12px;padding:24px 28px;color:#FFFFFF;}
   .cp-note-card b{display:block;font-size:15px;margin-bottom:8px;}
   .cp-note-card p{font-size:13.5px;line-height:1.6;color:#DCD8C0;margin:0;}
+
+  /* Begin Here / Help */
+  .cp-eyebrow{font-size:12px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;
+    color:#183319;margin-bottom:10px;}
+  .cp-page-head.cp-begin-here p{max-width:600px;}
+  .cp-step{display:flex;gap:20px;margin-bottom:28px;}
+  .cp-step-num{flex-shrink:0;width:34px;height:34px;border-radius:50%;background:#183319;color:#FFFFFF;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;}
+  /* Direct-child combinator, deliberately - a descendant selector here
+     (.cp-step-body b) would also match the <b> nested inside .cp-sub-note
+     below (sub-note sits inside .cp-step-body too), forcing THAT bold text
+     onto its own block line and breaking its sentence out of the
+     surrounding paragraph flow. Found live: "Upload a CSV instead" was
+     rendering as an isolated bold line instead of inline mid-sentence. */
+  .cp-step-body > b{display:block;font-size:15.5px;color:#040404;margin-bottom:6px;}
+  .cp-step-body p{margin:0;font-size:14px;line-height:1.65;color:#3D3D3D;}
+  .cp-sub-note{margin-top:10px;font-size:13px;color:#6B6B6B;background:#f1efe4;
+    border-radius:8px;padding:10px 14px;line-height:1.5;}
+  .cp-sub-note b{display:inline;color:#040404;}
+  .cp-inline-link{color:#183319;font-weight:700;text-decoration:none;}
+  .cp-divider{height:1px;background:#DCD8C0;margin:36px 0;}
+  .cp-watch-card{background:#FFFFFF;border:1px solid #DCD8C0;border-radius:12px;
+    padding:24px 26px;margin-bottom:16px;}
+  .cp-watch-card b{display:block;font-size:15px;color:#040404;margin-bottom:14px;}
+  .cp-watch-item{display:flex;gap:12px;margin-bottom:12px;font-size:13.5px;line-height:1.55;color:#3D3D3D;}
+  .cp-watch-item:last-child{margin-bottom:0;}
+  .cp-dot{flex-shrink:0;width:6px;height:6px;border-radius:50%;background:#183319;margin-top:7px;}
+  .cp-closing{margin-top:40px;background:#183319;border-radius:12px;padding:22px 26px;color:#FFFFFF;
+    font-size:13.5px;line-height:1.6;}
+  .cp-closing b{color:#DCD8C0;}
 
   /* Streamlit buttons reskinned to match the mockups' .btn family. Two
      namespaces via container key, same pattern already established
@@ -718,19 +1014,18 @@ PORTAL_CSS = """
      to stacked cards with visible field labels, never a horizontal scroll
      or truncated columns. */
   @media (max-width: 700px){
-    /* Topbar columns (brand/nav/account) are real st.columns now, which
-       Streamlit stacks vertically on its own below its internal
-       breakpoint - this just tightens the padding/margins on that stacked
-       result so it doesn't inherit the desktop bar's wide side padding. */
+    /* Topbar row 1 (brand/account) is plain flex HTML, not st.columns, so
+       it needs its own explicit stacking rule at mobile widths - unlike
+       row 2 (nav), which is still real st.columns and Streamlit stacks
+       that vertically on its own below its internal breakpoint. This just
+       tightens the padding/margins on both so neither inherits the
+       desktop bar's wide side padding. */
     div[class*="st-key-cp_topbar"] > div{padding:14px 16px;}
+    .cp-topbar-row1{flex-direction:column;align-items:flex-start;gap:10px;}
+    div[class*="st-key-cp_topbar_row2"]{margin-top:10px;padding-top:10px;}
     div[class*="st-key-cp_nav_"] button{justify-content:center !important;}
-    .cp-account{justify-content:flex-start;margin-top:4px;}
+    .cp-account{justify-content:flex-start;}
     .cp-status-grid{grid-template-columns:1fr;}
-    /* Single column again on mobile, so the desktop cross-grid alignment
-       trick (negative margin cancelling the card's padding) is no longer
-       needed - restore normal inset so item text doesn't sit flush
-       against the card's border. */
-    .cp-guide-list{grid-template-columns:1fr;margin:0;padding:0 4px;}
     .cp-stats-strip{grid-template-columns:1fr 1fr;}
     .cp-stat-block{border-right:none !important;border-bottom:1px solid rgba(255,255,255,0.14);}
     .cp-progress-head{flex-direction:column;align-items:flex-start;gap:10px;}
@@ -784,6 +1079,24 @@ def _render_portal_topbar(leader_info, active_view=None, show_nav=True):
     Shared header for every portal screen (and, without nav, the consent
     gate) - dark green bar, Bentley wing mark, page nav, account badge.
 
+    TWO ROWS, not one - changed 2026-08-27 at the human's suggestion, to
+    fix a real bug: with brand/nav/account sharing one row (a 3-column
+    split, nav getting only the middle 5.4/8.6 of the width), nav buttons
+    had comfortable room at the ~902px width the row was tuned against,
+    but at ~650-750px - a window Streamlit's own native column-stacking
+    breakpoint (~640px) doesn't yet cover - the nav column shrank enough
+    that "Nominate Raters" (white-space:nowrap, per the 4th-nav-item fix
+    below) visibly overflowed its own button and collided with the next
+    one. Splitting removes the actual constraint rather than relocating
+    it: nav now gets the row to itself, so it has roughly 1.6x the room
+    at any given width and never needs to compress in that gap. Row 1
+    (brand left, account right) is plain flex HTML, not st.columns -
+    neither element is interactive, so there was no need for real
+    Streamlit columns there at all. Bonus fix that came free with this:
+    the brand text ("Bentley Compass 360 / Your Leadership Portal") no
+    longer competes with nav+account for row width, so it stops wrapping
+    to three lines at 768-902px (flagged but not fixed in the prior pass).
+
     Nav items are real st.button() calls wired to _go_to_view, not <a>
     tags (see that function's docstring for why) - styled via the
     cp_nav_/cp_nav_active_ container-key CSS below to read as plain text
@@ -801,41 +1114,41 @@ def _render_portal_topbar(leader_info, active_view=None, show_nav=True):
     mark_inner = (f'<img src="{logo_uri}" alt="">' if logo_uri
                   else '<span style="color:#DCD8C0;font-weight:700;font-size:22px;">B</span>')
 
-    with st.container(key="cp_topbar"):
-        if show_nav:
-            col_brand, col_nav, col_account = st.columns([2.3, 3.4, 2.1], vertical_alignment="center")
-        else:
-            col_brand = st.container()
+    account_html = ""
+    if show_nav:
+        account_html = f"""
+          <div class="cp-account">
+            <div class="cp-avatar">{_esc(_initials(leader_info.get('name')))}</div>
+            <div class="cp-name">{_esc(leader_info.get('name'))}</div>
+          </div>
+        """
 
-        with col_brand:
+    with st.container(key="cp_topbar"):
+        with st.container(key="cp_topbar_row1"):
             _md(f"""
-            <div class="cp-brand">
-              <div class="cp-brand-mark">{mark_inner}</div>
-              <div class="cp-brand-text">
-                <div class="cp-b1">Bentley Compass 360</div>
-                <div class="cp-b2">Your Leadership Portal</div>
+            <div class="cp-topbar-row1">
+              <div class="cp-brand">
+                <div class="cp-brand-mark">{mark_inner}</div>
+                <div class="cp-brand-text">
+                  <div class="cp-b1">Bentley Compass 360</div>
+                  <div class="cp-b2">Your Leadership Portal</div>
+                </div>
               </div>
+              {account_html}
             </div>
             """)
 
         if show_nav:
-            views = [('overview', 'Overview'), ('nominate', 'Nominate Raters'), ('guidelines', 'Guidelines')]
-            with col_nav:
-                nav_cols = st.columns(len(views), vertical_alignment="center")
+            views = [('overview', 'Overview'), ('nominate', 'Nominate Raters'),
+                     ('guidelines', 'Guidelines'), ('help', 'Help')]
+            with st.container(key="cp_topbar_row2"):
+                nav_cols = st.columns(len(views), gap="small", vertical_alignment="center")
                 for (key, label), col in zip(views, nav_cols):
                     with col:
                         active = key == active_view
                         with st.container(key=f"cp_nav_{'active_' if active else ''}{key}"):
                             if st.button(label, key=f"cp_nav_btn_{key}", use_container_width=True):
                                 _go_to_view(key)
-
-            with col_account:
-                _md(f"""
-                <div class="cp-account">
-                  <div class="cp-avatar">{_esc(_initials(leader_info.get('name')))}</div>
-                  <div class="cp-name">{_esc(leader_info.get('name'))}</div>
-                </div>
-                """)
 
 
 def render_leader_consent_gate(db, leader_info):
@@ -924,11 +1237,18 @@ def render_leader_consent_gate(db, leader_info):
 
 
 def render_leader_portal(db, leader_info):
-    """Route to the three portal screens by ?view=, after the one-time
-    consent gate. Each screen is its own full render (matching the concept
-    mockups, which are three separate HTML pages), not a client-side tab
-    switch - simpler and avoids extra state machinery for what's
-    fundamentally page navigation."""
+    """Route to the three portal screens by ?view=, after two one-time
+    gates: consent, then Begin Here. Each screen is its own full render
+    (matching the concept mockups, which are three separate HTML pages),
+    not a client-side tab switch - simpler and avoids extra state
+    machinery for what's fundamentally page navigation.
+
+    Gate order is consent first, then Begin Here (the human's explicit
+    call 2026-08-27: consent is the more important of the two). Both are
+    checked from the database, never session state alone, so each is
+    shown once and never forced again - same durability discipline as the
+    locale picker and the rater-facing consent gate in feedback_form.py.
+    """
 
     leader_id = leader_info['id']
 
@@ -938,8 +1258,27 @@ def render_leader_portal(db, leader_info):
 
     st.markdown(PORTAL_CSS, unsafe_allow_html=True)
 
+    # Begin Here shown once, immediately after consent, before whatever
+    # view the leader was actually headed for - deliberately unconditional
+    # on the `view` query param (a leader landing on a deep link they
+    # hadn't visited before still needs the onboarding first, same as
+    # consent does). Marked seen the moment it's shown, not gated behind a
+    # specific button click - unlike consent there's nothing to actively
+    # agree to here, so "shown once" is the whole requirement. Reachable
+    # afterwards, indefinitely, via Help in the nav (render_portal_begin_here
+    # itself is unchanged - this reuses it, it doesn't duplicate it).
+    if not leader_info.get('begin_here_seen_at') and not st.session_state.get('leader_begin_here_seen'):
+        db.set_leader_begin_here_seen(leader_id)
+        st.session_state['leader_begin_here_seen'] = True
+        _render_portal_topbar(leader_info, active_view='help', show_nav=True)
+        st.markdown('<div style="max-width:1240px; margin:0 auto; padding:0 40px 60px;">',
+                    unsafe_allow_html=True)
+        render_portal_begin_here()
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
     view = st.query_params.get('view', 'overview')
-    if view not in ('overview', 'nominate', 'guidelines'):
+    if view not in ('overview', 'nominate', 'guidelines', 'help'):
         view = 'overview'
 
     _render_portal_topbar(leader_info, active_view=view, show_nav=True)
@@ -954,6 +1293,8 @@ def render_leader_portal(db, leader_info):
         render_portal_nominate(db, leader_info, other_raters)
     elif view == 'guidelines':
         render_portal_guidelines()
+    elif view == 'help':
+        render_portal_begin_here()
     else:
         render_portal_overview(db, leader_info, self_rater, other_raters)
 
@@ -995,21 +1336,48 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
 
     # --- Who should you nominate? teaser -----------------------------------
     with st.container(key="cp_guide_card"):
-        g_head_col, g_btn_col = st.columns([4, 1.5], vertical_alignment="center")
-        with g_head_col:
-            st.markdown('<b class="cp-g-head-title">Who should you nominate?</b>', unsafe_allow_html=True)
-        with g_btn_col:
-            with st.container(key="cp_secondary_open_guidelines"):
-                if st.button("Open full guidelines", use_container_width=True, key="cp_open_guidelines_btn"):
-                    _go_to_view('guidelines')
-        _md("""
-      <div class="cp-guide-list">
-        <div class="cp-guide-item"><b>Boss</b><span>Your direct line manager. One is enough.</span></div>
-        <div class="cp-guide-item"><b>Peers</b><span>Colleagues at a similar level who see your day-to-day work.</span></div>
-        <div class="cp-guide-item"><b>Direct Reports</b><span>People who report to you. Aim for a range of tenure.</span></div>
-        <div class="cp-guide-item"><b>Others</b><span>Stakeholders or customers, if relevant to your role.</span></div>
-      </div>
-    """)
+        # This heading row carries its own horizontal padding
+        # (cp_guide_heading_row) - the card itself no longer has any, so
+        # the item row below shares the exact same width as the un-padded
+        # category cards beneath it. See that row's CSS comment for why.
+        with st.container(key="cp_guide_heading_row"):
+            g_head_col, g_btn_col = st.columns([4, 1.5], vertical_alignment="center")
+            with g_head_col:
+                st.markdown('<b class="cp-g-head-title">Who should you nominate?</b>', unsafe_allow_html=True)
+            with g_btn_col:
+                with st.container(key="cp_secondary_open_guidelines"):
+                    if st.button("Open full guidelines", use_container_width=True, key="cp_open_guidelines_btn"):
+                        _go_to_view('guidelines')
+
+        # REAL BUG FOUND LIVE, re-checked rather than assumed fixed: this
+        # used to be a raw HTML grid (.cp-guide-list) with a hand-picked gap
+        # matching what the category cards below USED to use before they
+        # became real st.columns (a separate fix, for the clickable-card
+        # requirement). Streamlit's own column gap ("medium") turned out to
+        # be 32px, not the 18px this was still assuming - confirmed via
+        # getBoundingClientRect on the live page, showing a growing drift
+        # (1px/3px/7px/11px) across the four columns, not the clean
+        # column-for-column alignment it looked like it should have. Fixed
+        # by using the SAME st.columns(4, gap="medium") mechanism here as
+        # the cards below use, so both rows are laid out by the identical
+        # code path and can't silently drift apart again if Streamlit's own
+        # gap value ever changes.
+        #
+        # No wrapping container/padding-cancellation trick needed here any
+        # more - see the .cp-guide-item CSS comment for why an earlier
+        # negative-margin attempt didn't work on a flex item, and why
+        # removing the card's own horizontal padding (instead of fighting
+        # it after the fact) is what actually fixed the alignment.
+        guide_cols = st.columns(4, gap="medium")
+        guide_items = [
+            ("Boss", "Your direct line manager. One is enough."),
+            ("Peers", "Colleagues at a similar level who see your day-to-day work."),
+            ("Direct Reports", "People who report to you. Aim for a range of tenure."),
+            ("Others", "Stakeholders or customers, if relevant to your role."),
+        ]
+        for (title, desc), col in zip(guide_items, guide_cols):
+            with col:
+                _md(f'<div class="cp-guide-item"><b>{_esc(title)}</b><span>{_esc(desc)}</span></div>')
 
     # --- Category ring cards ------------------------------------------------
     rater_counts = {'Boss': 0, 'Peers': 0, 'DRs': 0, 'Others': 0}
@@ -1027,14 +1395,7 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
     # Bosses) - pre-filling a category would undo that already-reasoned
     # safety choice, so the plain link is the right scope here, not a
     # corner cut for time.
-    cat_cols = st.columns(4, gap="medium")
-    for cat, col in zip(['Boss', 'Peers', 'DRs', 'Others'], cat_cols):
-        with col:
-            _md(_category_card_html(cat, rater_counts[cat]))
-            with st.container(key=f"cp_cat_link_{cat}"):
-                if st.button("Nominate", icon=":material/arrow_forward:", use_container_width=True,
-                             key=f"cp_cat_link_btn_{cat}"):
-                    _go_to_view('nominate')
+    _render_category_cards_row(rater_counts, clickable=True)
 
     # --- Your Progress + Send reminders -------------------------------------
     incomplete = [r for r in other_raters if not r.get('completed')]
@@ -1160,7 +1521,22 @@ def _full360_status_card_html(other_raters):
 def _category_card_html(cat, count):
     req = RATER_REQUIREMENTS[cat]
     min_if_any = req.get('min_if_any')
-    target = req['suggested'] or min_if_any or req['min'] or 1
+    # REAL BUG FOUND while confirming this against a constructed 6-nominated
+    # test (per the human's logic-check request 2026-08-27): the target used
+    # to be hardcoded to the suggested/min_if_any/min number alone, with no
+    # regard for whether the leader had actually gone past it - "suggested"
+    # is not a cap (nothing stops nominating more, confirmed separately in
+    # the add-rater form and CSV import, both of which check against the
+    # real 'max', never 'suggested'), but the ring's own denominator didn't
+    # know that. _ring_dashoffset already clamps the ARC itself to a full
+    # circle past 100%, so the ring never visually overflowed - but the
+    # LABEL still showed the stale target, e.g. "6/5" for 6 nominated Peers,
+    # which reads as broken/capped even though the underlying data isn't.
+    # Fixed by taking whichever is larger: a leader who goes past the
+    # suggested number sees "6/6" (a correctly full, correctly labelled
+    # ring), not "6/5".
+    base_target = req.get('ring_target') or req['suggested'] or min_if_any or req['min'] or 1
+    target = max(base_target, count)
     offset = _ring_dashoffset(count, target)
 
     if min_if_any and 0 < count < min_if_any:
@@ -1190,6 +1566,31 @@ def _category_card_html(cat, count):
       <div class="cp-card-foot"><span class="cp-status-chip {chip_cls}">{_esc(chip_text)}</span></div>
     </div>
     """)
+
+
+def _render_category_cards_row(rater_counts, clickable):
+    """
+    The four rater-category cards, shared between Overview (clickable, its
+    original home) and the top of Nominate Raters (read-only - added so a
+    leader mid-nomination doesn't have to bounce back to Overview just to
+    check category progress). Same data, same visual treatment; the
+    difference is entirely the `clickable` flag, not two copies of this
+    markup drifting apart from each other over time.
+
+    Uses real st.columns(4, gap="medium") rather than a raw HTML grid -
+    each card needed a real "Nominate" button under it (making the cards
+    clickable was a separate fix), and that button has to be a real
+    Streamlit widget, which can't live inside a markdown string.
+    """
+    cols = st.columns(4, gap="medium")
+    for cat, col in zip(['Boss', 'Peers', 'DRs', 'Others'], cols):
+        with col:
+            _md(_category_card_html(cat, rater_counts[cat]))
+            if clickable:
+                with st.container(key=f"cp_secondary_cat_link_{cat}"):
+                    if st.button("Nominate", icon=":material/arrow_forward:", use_container_width=True,
+                                 key=f"cp_cat_link_btn_{cat}"):
+                        _go_to_view('nominate')
 
 
 def _do_send_pending_invitations(db, leader_info, pending, base_url):
@@ -1257,6 +1658,14 @@ def render_portal_nominate(db, leader_info, existing_raters):
     for r in existing_raters:
         if r['relationship'] in rater_counts:
             rater_counts[r['relationship']] += 1
+
+    # Read-only category cards, same data/treatment as Overview's - added so
+    # a leader actively nominating doesn't have to bounce back to Overview
+    # just to check category progress. NO "Nominate" link on these (unlike
+    # Overview's): a self-referential link back to the page you're already
+    # standing on adds nothing.
+    st.markdown('<div class="cp-section-label">Your raters, by category</div>', unsafe_allow_html=True)
+    _render_category_cards_row(rater_counts, clickable=False)
 
     _render_nomination_warnings(rater_counts)
 
@@ -1350,14 +1759,33 @@ def _render_nomination_warnings(rater_counts):
     for cat, count in at_risk_groups:
         label = RELATIONSHIP_TYPES.get(cat, cat)
         fold_target = fold_target_text.get(cat, 'another group')
-        st.info(
-            f"You've nominated exactly {count} under **{label}**, which is the "
-            f"minimum needed to report that group on its own. If even one of them "
-            f"doesn't respond it drops below the minimum — their responses won't "
-            f"be lost, but they'd get folded into your {fold_target} "
-            f"group rather than showing up as {label} in their own right. Worth "
-            f"adding one or two more as cover."
-        )
+        if cat == 'Others':
+            # Others' upfront copy (CATEGORY_REQ_TEXT, GUIDELINE_CATEGORIES)
+            # already says "Minimum 3, ideally 4 or 5 if you have them" -
+            # this warning fires at exactly 3, so it must read as a REMINDER
+            # of that, not as new information sprung on the leader right
+            # after they did what they were told. See the human's logic
+            # check 2026-08-27: the old wording (shared with Peers/DRs
+            # below) presented the buffer suggestion as if for the first
+            # time, which read as a gotcha against Others' old "Add at
+            # least 3" copy that never mentioned one.
+            st.info(
+                f"You've nominated exactly {count} under **Others** — as mentioned "
+                f"when you were adding raters, it's worth having one or two more as "
+                f"cover if you can. That's because if even one of them doesn't "
+                f"respond, the group drops below the minimum needed to report "
+                f"Others on its own; their responses won't be lost, but they'd get "
+                f"folded into your Peers or Direct Reports group instead."
+            )
+        else:
+            st.info(
+                f"You've nominated exactly {count} under **{label}**, which is the "
+                f"minimum needed to report that group on its own. If even one of them "
+                f"doesn't respond it drops below the minimum — their responses won't "
+                f"be lost, but they'd get folded into your {fold_target} "
+                f"group rather than showing up as {label} in their own right. Worth "
+                f"adding one or two more as cover."
+            )
 
 
 def _render_csv_import(db, leader_id, existing_raters):
@@ -1446,10 +1874,18 @@ def _render_nominated_list_new(db, leader_info, base_url):
 
     with st.container(key="cp_list_card"):
         st.markdown('<div class="cp-list-card">', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="cp-list-head"><div>Name</div><div>Email</div><div>Category</div><div>Status</div></div>',
-            unsafe_allow_html=True
-        )
+        # Split into the same [9, 1] columns as each content row below, so
+        # the "Edit" header lands directly above the actual Edit buttons
+        # rather than the 4-column header row silently having no label at
+        # all for that fifth, unlabelled column.
+        hcol1, hcol2 = st.columns([9, 1])
+        with hcol1:
+            st.markdown(
+                '<div class="cp-list-head"><div>Name</div><div>Email</div><div>Category</div><div>Status</div></div>',
+                unsafe_allow_html=True
+            )
+        with hcol2:
+            st.markdown('<div class="cp-list-head cp-list-head-edit">Edit</div>', unsafe_allow_html=True)
 
         for idx, entry in enumerate(roster):
             rel = entry.get('relationship')
@@ -1700,3 +2136,82 @@ def render_portal_guidelines():
       scores aren't.</p>
     </div>
     """)
+
+
+def render_portal_begin_here():
+    """Begin Here / Help screen: how-to steps for nominating raters, plus
+    the "Good to know" reference cards. Shown TWICE in the portal's
+    lifecycle, same content both times, no branching in this function:
+    once automatically, as the one-time onboarding gate render_leader_portal
+    shows right after consent (see that function), and every time after
+    that on demand via Help in the top nav (see _render_portal_topbar) -
+    the closing note on this page says as much, so a leader who reads this
+    once doesn't need to remember it, just that Help exists.
+
+    CONTENT SOURCE: assets/Bentley Compass 360 — Begin Here Concept.html,
+    supplied as reference material binding for this build. Two watch-cards
+    (editing mistakes, adding someone later) are deliberately first, per
+    that document - the two most likely practical questions after a
+    leader's first session.
+    """
+    _md("""
+    <div class="cp-page-head cp-begin-here">
+      <div class="cp-eyebrow">Begin Here</div>
+      <h1>Before you nominate your raters</h1>
+      <p>Your Self-Assessment is done, so this is the next stage. Here's exactly how to
+      nominate your raters, followed by a few things worth knowing before you start.</p>
+    </div>
+    """)
+
+    st.markdown('<div class="cp-section-label" style="margin-top:0;">How to nominate your raters</div>',
+                unsafe_allow_html=True)
+
+    for i, step in enumerate(BEGIN_HERE_STEPS, start=1):
+        sub_note_html = (f'<div class="cp-sub-note">{step["sub_note"]}</div>'
+                          if step.get('sub_note') else '')
+        _md(f"""
+        <div class="cp-step">
+          <div class="cp-step-num">{i}</div>
+          <div class="cp-step-body">
+            <b>{step['title']}</b>
+            <p>{step['body']}</p>
+            {sub_note_html}
+          </div>
+        </div>
+        """)
+
+    st.markdown('<div class="cp-divider"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cp-section-label" style="margin-top:0;">Good to know</div>',
+                unsafe_allow_html=True)
+
+    for card in BEGIN_HERE_WATCH_CARDS:
+        items_html = "".join(
+            f'<div class="cp-watch-item"><span class="cp-dot"></span><span>{item}</span></div>'
+            for item in card['items']
+        )
+        _md(f"""
+        <div class="cp-watch-card">
+          <b>{card['title']}</b>
+          {items_html}
+        </div>
+        """)
+        if card.get('link_to'):
+            view, label = card['link_to']
+            with st.container(key=f"cp_ghost_begin_here_link_{view}"):
+                if st.button(label, icon=":material/arrow_forward:", key=f"cp_begin_here_link_btn_{view}"):
+                    _go_to_view(view)
+
+    _md("""
+    <div class="cp-closing">
+      You won't need to find this page again to remember any of this, it's always here
+      under <b>Help</b> in the menu above whenever you need it.
+    </div>
+    """)
+
+    st.markdown('<div style="margin-top:24px;"></div>', unsafe_allow_html=True)
+    cta_col1, cta_col2 = st.columns([3, 1.3])
+    with cta_col2:
+        with st.container(key="cp_primary_begin_here_cta"):
+            if st.button("Go to Overview", icon=":material/arrow_forward:", use_container_width=True,
+                         key="cp_begin_here_cta_btn"):
+                _go_to_view('overview')

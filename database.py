@@ -179,6 +179,13 @@ class Database:
         # asked once and never again once given.
         self._safe_add_column("leaders", "consent_given", "INTEGER DEFAULT 0")
         self._safe_add_column("leaders", "consent_given_at", "TIMESTAMP")
+        # One-time "Begin Here" onboarding gate, shown once immediately after
+        # consent and before the portal proper (Overview/Nominate/Guidelines),
+        # then reachable any time afterwards via Help in the nav. Same
+        # durability pattern as consent_given: checked from the database on
+        # every visit, never session state alone, so it is shown once and
+        # never forced again once seen.
+        self._safe_add_column("leaders", "begin_here_seen_at", "TIMESTAMP")
 
         # Continue with rest of schema
         conn = self.get_connection()
@@ -388,6 +395,19 @@ class Database:
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE leaders SET consent_given = 1, consent_given_at = CURRENT_TIMESTAMP WHERE id = ?
+        """, (leader_id,))
+        conn.commit()
+        conn.close()
+
+    def set_leader_begin_here_seen(self, leader_id):
+        """Record that a leader has been shown the one-time Begin Here
+        onboarding gate. Guarded on IS NULL so it never overwrites the
+        original first-seen timestamp if ever called a second time."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE leaders SET begin_here_seen_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND begin_here_seen_at IS NULL
         """, (leader_id,))
         conn.commit()
         conn.close()
@@ -1162,6 +1182,19 @@ class Database:
         get_nomination_roster either (its own backfill requires a name or
         email), so without this filter they inflated the pending count with
         raters the leader has no way to see or act on.
+
+        CHECKS ONLY THE LATEST INVITATION ATTEMPT PER RATER, not "has this
+        rater ever had a successful send" - a real gap found via live
+        testing (2026-08-26): correcting a typo'd email after the original
+        invitation had already sent successfully triggers a genuine re-send
+        to the corrected address (that part already worked), but if THAT
+        re-send itself then failed, the old success=1 row from the original
+        (wrong-address) send made this query treat the rater as already
+        invited forever after - status stayed "Invited", no way to tell the
+        fix never actually landed. Matching on the single latest email_log
+        row per rater_id (by MAX(id), which is chronological for this
+        table) makes a failed re-send correctly reopen "pending" status,
+        exactly as if it were a first-time failure.
         """
         return self._fetchall("""
             SELECT * FROM raters
@@ -1170,16 +1203,24 @@ class Database:
               AND completed_at IS NULL
               AND email IS NOT NULL
               AND id NOT IN (
-                  SELECT rater_id FROM email_log
-                  WHERE email_type = 'invitation' AND success = 1 AND rater_id IS NOT NULL
+                  SELECT el.rater_id
+                  FROM email_log el
+                  JOIN (
+                      SELECT rater_id, MAX(id) as max_id
+                      FROM email_log
+                      WHERE email_type = 'invitation' AND rater_id IS NOT NULL
+                      GROUP BY rater_id
+                  ) latest ON el.id = latest.max_id
+                  WHERE el.success = 1
               )
             ORDER BY created_at
         """, (leader_id,))
 
     def get_failed_invitation_emails(self, leader_id):
         """
-        Email addresses among this leader's raters that failed to send on
-        their last invitation attempt and have never succeeded since.
+        Email addresses among this leader's raters whose LATEST invitation
+        attempt failed - not "failed at some point and never succeeded
+        since", which is a different, narrower condition.
 
         Used to flag a specific row as needing attention on the portal's
         nomination list, distinct from a row that just hasn't been sent yet -
@@ -1187,18 +1228,31 @@ class Database:
         tell which of several pending people actually needs a fixed email
         address rather than just a resend. Matched on email (email_log.to_email)
         rather than rater_id, since that's what the roster itself is keyed on.
+
+        CHECKS ONLY THE LATEST ATTEMPT PER RATER (by MAX(id) in email_log,
+        chronological for this table), same fix and same reason as
+        get_raters_pending_invitation above: a rater successfully invited
+        once, then corrected, whose re-send to the corrected address then
+        failed, used to be invisible here entirely - their one-time-ever
+        success excluded them from this set forever, so the warning icon
+        never appeared and the leader had no way to know the correction
+        hadn't actually landed. Found via live testing 2026-08-26, not
+        assumed: correct an email after a successful send, force the
+        re-send to fail, confirm the icon appears - it didn't, before this.
         """
         rows = self._fetchall("""
             SELECT DISTINCT el.to_email
             FROM email_log el
             JOIN raters r ON r.id = el.rater_id
+            JOIN (
+                SELECT rater_id, MAX(id) as max_id
+                FROM email_log
+                WHERE email_type = 'invitation' AND rater_id IS NOT NULL
+                GROUP BY rater_id
+            ) latest ON el.id = latest.max_id
             WHERE r.leader_id = ?
               AND el.email_type = 'invitation'
               AND el.success = 0
-              AND el.rater_id NOT IN (
-                  SELECT rater_id FROM email_log
-                  WHERE email_type = 'invitation' AND success = 1 AND rater_id IS NOT NULL
-              )
         """, (leader_id,))
         return {row['to_email'].strip().lower() for row in rows if row.get('to_email')}
 

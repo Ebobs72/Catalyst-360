@@ -1591,6 +1591,450 @@ rebuild itself, worth knowing about if this pattern recurs elsewhere:
   reach the enabled-button and zero-state cases were all removed after
   verification, same discipline as the original build pass.
 
+### Leader Portal: Amendments + Begin Here/Help page — DONE 2026-08-26
+A bundled follow-up covering seven numbered items plus a new Begin Here
+page and its nav link, all verified live (screenshots and computed-style
+inspection, not code review alone), several with real bugs found only
+once actually rendered.
+
+- **Item 1, read-only category cards on Nominate Raters**: `_render_
+  category_cards_row(rater_counts, clickable)` extracted as a shared
+  helper between Overview and Nominate Raters, so both stay wired to the
+  identical rendering path rather than two copies drifting apart. The
+  Nominate Raters copy passes `clickable=False` - no "Nominate" button,
+  since a self-referential link back to the page you're already on adds
+  nothing. Placed above "Add a rater", matching the ask.
+- **Item 2, Nominate button overlapping the card's accent bar**: the
+  previous version pulled the button flush against the card's bottom edge
+  with matching corner radius, sized to the exact same column width as the
+  card above - which meant its own left edge sat exactly where the card's
+  4px accent-bar `::before` sits, reading as bleeding into it. Fixed by
+  dropping the flush/joined treatment and reusing the SAME `cp_secondary_`
+  button styling already used for "Open full guidelines" elsewhere
+  (white fill, green border/text, fully rounded), with ordinary positive
+  spacing (`margin-top:10px`) below the card instead of overlapping it.
+- **Item 3, guide-card alignment - genuinely fixed this time, with the
+  full story of why it kept failing**: the human explicitly asked not to
+  assume a previous attempt worked, and it hadn't. Three attempts, in
+  order, each diagnosed live before moving to the next:
+  1. First "fix" (from the previous session) used `.cp-guide-list{gap:18px}`
+     to match what the category-card grid used to use - but that grid had
+     since become real `st.columns(4, gap="medium")` for the clickable-card
+     requirement, and Streamlit's actual "medium" gap turned out to be
+     32px, confirmed via `getBoundingClientRect`. Converting the guide row
+     to the same `st.columns(4, gap="medium")` mechanism fixed the gap
+     mismatch but not the alignment - a residual growing drift (1/13/26/40px
+     across the four columns) remained.
+  2. Second attempt added a negative margin (`-26px`, then `-27px` to also
+     clear a 1px border) to cancel the guide card's own side padding, on
+     the theory that the row needed to escape its parent's inset to match
+     the un-padded cards below. Measured live: the row's own width never
+     changed (688px vs the card row's 742px, no matter the margin value).
+     Root cause: the row is a flex item inside Streamlit's own
+     `stVerticalBlock` (`display:flex; flex-grow:1; flex-basis:0%`), and a
+     flex item's main-axis size is computed by the flex algorithm against
+     its parent's content-box BEFORE margins apply - a negative margin on
+     a flex item shifts/overlaps visually but does not retroactively
+     enlarge the box `st.columns()` inside it was actually sized against,
+     unlike a plain block-level div where this trick reliably works
+     elsewhere in this file (e.g. the topbar).
+  3. Actual fix: stopped trying to escape the padding after the fact.
+     `cp_guide_card`'s own padding is now vertical-only (`padding:24px 0`);
+     the heading row (title + "Open full guidelines") gets its own
+     horizontal inset via a new `cp_guide_heading_row` wrapper instead, and
+     the item row now shares the literal same un-padded width as the
+     category cards below with nothing to cancel. Re-verified live:
+     `getBoundingClientRect` on all four column pairs matched within 1px
+     (sub-pixel rounding), and a screenshot confirms "Boss/Peers/Direct
+     Reports/Others" sit directly above their matching cards.
+  - Side effect caught in the same pass: `.cp-step-body b{display:block}`
+    (Begin Here, unrelated to this item but the same category of bug) was
+    a descendant selector that also matched the `<b>` nested inside
+    `.cp-sub-note`, forcing "Upload a CSV instead" onto its own isolated
+    bold line instead of flowing inline mid-sentence. Fixed by scoping to
+    `.cp-step-body > b` (direct child only) and giving `.cp-sub-note b` its
+    own explicit `display:inline`.
+- **Items 4 and 5, table header alignment and the missing Edit label**:
+  `.cp-list-head` now sets `text-align:left` explicitly (no single stray
+  rule was found causing the centred look, but the mismatch was real
+  regardless, so it's no longer left to default behaviour). The Edit
+  column had no header at all - added via a matching `st.columns([9, 1])`
+  split at the header row, same ratio the content rows already use for
+  their Edit button column, so "EDIT" lands directly above the actual
+  pencil icons.
+- **Item 6, Begin Here / Help page**: new `render_portal_begin_here()`,
+  content taken from `assets/Bentley Compass 360 — Begin Here Concept.html`
+  (supplied as binding reference material) - 5 numbered how-to steps, a
+  divider, and 5 "Good to know" cards in the mockup's order (editing
+  mistakes and adding-later cards first, per the human's note that these
+  are the two most likely practical questions after a first session).
+  "Help" added as a 4th topbar nav item, which - because all three
+  existing screens already render through the same shared
+  `_render_portal_topbar` - automatically appears on Overview, Nominate
+  Raters, and Guidelines too, satisfying "the other pages already built
+  should also carry the link to the help page" with no separate change
+  needed there.
+  - ONE MOCKUP DEVIATION, same reasoning as the earlier one for category
+    cards: the "See Guidelines" reference inside the category-minimums
+    card is a real `st.button()` (`_go_to_view('guidelines')`), not the
+    mockup's inline `<a href="#">` - a raw anchor there would have
+    reintroduced the exact new-tab bug item 9 (below) exists to fix,
+    since Streamlit force-adds `target="_blank"` to markdown-rendered
+    links regardless of source. Rendered as a small link-styled control
+    after the card's text rather than inline mid-sentence, since a
+    Streamlit button can't sit inside a markdown paragraph's own flow.
+  - REAL BUG FOUND ADDING THE 4TH NAV ITEM: at this project's actual
+    "desktop" preset width (902px, confirmed via `window.innerWidth` -
+    narrower than it sounds, and specifically the width used throughout
+    this project's own desktop testing), four nav buttons at the original
+    font-size/padding/column-ratio wrapped their own labels onto two lines
+    ("Guideline" / "s") rather than fitting on one. Fixed by widening the
+    nav column's share of the topbar (`[2.1, 4.0, 2.1]` → `[1.6, 5.4,
+    1.6]`), shrinking nav font-size slightly (14.5px → 13.5px) and its own
+    padding, adding `white-space:nowrap` so a genuinely-too-narrow future
+    case fails as a clipped label rather than a silent wrap, and using
+    `gap="small"` between nav columns. Re-verified live at exactly 902px
+    (all four items on one line, real spacing) and at 1500px (unchanged).
+- **Item 7, failed re-send after an email correction was invisible**: the
+  diagnosis-only finding from the prior conversation, now actually fixed.
+  `get_raters_pending_invitation` and `get_failed_invitation_emails` both
+  used to key off "has this rater EVER had a successful send" - so a rater
+  invited successfully once, then corrected, whose re-send to the
+  corrected address then failed, stayed permanently invisible to both
+  checks (their one historical success excluded them forever). Both
+  queries now join against a `MAX(id)`-per-`rater_id` subquery over
+  `email_log` (id is chronological for this table) so they check only the
+  LATEST invitation attempt, not every attempt ever made. A failed re-send
+  now correctly flips status back to "Not yet sent" AND surfaces the same
+  warning icon a first-time failure gets - both are the right combined
+  signal ("this needs your attention, here's why"), not just the icon
+  alone.
+  - VERIFIED LIVE END TO END, exactly as the acceptance check asked (not
+    just code inspection): seeded a rater with a genuine prior successful
+    invitation log entry, corrected their email through the real Edit UI
+    with a fake local SMTP target configured (so the automatic re-send
+    genuinely fires and genuinely fails), and confirmed via a fresh page
+    load that the row now shows the warning triangle AND "Not yet sent",
+    with the bottom send-bar correctly counting them as 1 pending. Database
+    checked directly before relying on the UI screenshot, not assumed from
+    it.
+- **Confirmed working, no action needed**: item 9 from the prior audit
+  (same-tab navigation) - re-verified via `tabs_context` across every new
+  navigation path added in this pass (Begin Here's CTA and its Guidelines
+  link, the new nav item itself), tab count never changed.
+- **Full mobile re-sweep** (360/430/600px + desktop) across Overview,
+  Nominate Raters, and the new Begin Here page after all of the above - no
+  regressions against the layout already confirmed in the prior two build
+  passes.
+- Test raters/leaders and the temporary `.streamlit/secrets.toml` used for
+  the item 7 live test were removed after verification; local dev DB
+  confirmed back at its 13-rater baseline before finishing.
+
+### Leader Portal: Two Layout Fixes Found in Live Review — FIXED 2026-08-27
+Two regressions found via live screenshot review after the previous deploy,
+plus a third found mid-fix while re-screenshotting the first one (fixed
+under the human's standing instruction: fix anything else spotted while
+verifying, not just what was asked). All three needed a second (or third)
+pass beyond the first attempt already in the file - re-verifying computed
+values live is what caught it, code review alone would have looked correct
+at every stage.
+
+- **Category cards not actually equal height, despite the CSS already
+  claiming to fix this**: the `.cp-card{height:100%}` rule (added in the
+  prior "Rendering & Navigation Bug Audit" pass, with its own confident
+  comment explaining the fix) turned out not to work. Confirmed live via a
+  `getComputedStyle` chain walk: `height:100%` only resolves against the
+  nearest ancestor with a DEFINITE (non-auto) height, and Streamlit wraps
+  each card's raw-HTML markdown in its own chain of wrapper divs -
+  `stElementContainer` > `stMarkdown` > an unnamed flex div > `stMarkdown-
+  Container` - every one of which is `height:auto`, sized to its own
+  content, except the true per-column `stVerticalBlock` two levels further
+  out, which correctly stretches to match its tallest sibling (Streamlit's
+  own `align-items:stretch` on the row). Because of the auto-height links
+  in between, `.cp-card`'s `height:100%` was resolving against its own
+  auto-height immediate parent and collapsing back to its own content
+  height - the four cards measured 264/244/264/244px at 902px width, not
+  equal, and the previous fix's own height:100% rule had silently never
+  been doing anything. Fixed by explicitly giving every wrapper level in
+  that chain `height:100%` too (targeted by their stable `data-testid`
+  attributes plus `:has(.cp-card)`, not by Streamlit's hashed emotion
+  classes), so the definite height on the real stretched column actually
+  propagates down to `.cp-card`. VERIFIED LIVE with real getBoundingClientRect
+  measurements (not just a screenshot) at 902px, 1000px (the exact width the
+  bug was originally reproduced at), 768px, and confirmed both usages of the
+  shared `_render_category_cards_row` helper (Overview's clickable cards and
+  Nominate Raters' read-only ones) - all four cards measured byte-identical
+  height at every width. Below 768px the cards stack to a single column
+  (no equal-height question applies there), confirmed unaffected at 600/430/
+  360px.
+- **Topbar not spanning full width at mobile/tablet widths, and the
+  full-bleed CSS fix that looked complete didn't take effect either**: the
+  full-bleed breakout (`position:relative;left:50%;width:100vw;margin-left:
+  -50vw`) - the standard, correct pattern for escaping a padded parent - was
+  already in the file from an earlier attempt in this same task, replacing
+  an even earlier negative-margin version that measured provably wrong
+  (missing exactly 32px on the right at every width tested, root-caused to
+  the same "flex item's own width is computed before its margins apply"
+  mechanism that broke the guide-card alignment fix in the prior session -
+  a negative margin on a flex item shifts one edge but can't retroactively
+  enlarge the box). But even the full-bleed version measured 328px wide at
+  360px viewport, not 360px, when re-checked live after a genuine server
+  restart (not just a page reload - Streamlit's file watcher does not
+  auto-rerun on save in this dev setup, so a page reload alone was serving
+  STALE CSS from before the edit; confirmed by reading the live `<style>`
+  tag's actual text content and finding the OLD rule still there after a
+  plain reload, only fixed by stopping and restarting the whole server
+  process). Once genuinely on the new CSS, `width:100vw !important` still
+  computed to 328px, not 360px - traced to a SEPARATE, unrelated property:
+  Streamlit's own `.st-emotion-cache-18kf3ut{width:100%;max-width:100%;...}`
+  rule (non-`!important`, but on the SAME element) sets `max-width:100%`,
+  and `max-width` always caps a used width regardless of what `width` itself
+  says, `!important` on `width` alone doesn't touch a separate `max-width`
+  declaration. Fixed by adding `max-width:100vw !important` alongside the
+  existing `width:100vw !important`. VERIFIED LIVE with real
+  `getBoundingClientRect` measurements (not just visual screenshots, which
+  had misleadingly looked full-width at a glance even when 32px short) at
+  the full required sweep - 360px, 430px, 600px, 768px (tablet, where the
+  bug was first spotted), and 902px (the width the 4th nav item's wrapping
+  fix was tuned against) - confirming `left:0, right:<viewport>, width:
+  <viewport>` exactly at every one, with no regression to the nav-item
+  layout at 902px.
+- **THIRD ISSUE FOUND WHILE SCREENSHOTTING THE FIX ABOVE, not part of the
+  original report but fixed under the same authority - the status pill
+  inside each category card ("Requirement met" / "Nominated" / "N more
+  needed") sat at inconsistent heights within a row**: caught live, not in
+  the original two-item brief, while screenshotting the card-height fix at
+  1000px - two cards with 1-line descriptions had their pill 16px higher
+  than the two with 2-line descriptions, even though the CARDS themselves
+  were already confirmed equal height. Root cause, found in three layers,
+  each only visible after fixing the one before it: `.cp-card-foot`'s
+  `margin-top:auto` correctly anchors the pill to the bottom of the
+  (equal-height) card, but only when every card's content ABOVE the pill
+  needs the same amount of room - it doesn't reserve space, it just
+  distributes whatever's left over, so a card with more text above pushes
+  the pill down further than a neighbour with less. Three independent
+  places this showed up, swept across the full multi-column range down to
+  where it collapses to a single stacked column (~630-640px):
+  1. The description paragraph (`.cp-req`) wraps to a different number of
+     lines per category at a given width (e.g. at 1000px, Boss/Others wrap
+     to 2 lines, Peers/Direct Reports stay on 1).
+  2. Fixing (1) alone still left one width (~650px) misaligned - the
+     CATEGORY LABEL ABOVE it ("LINE MANAGER" vs "COLLEAGUES") *also* wraps
+     to 2 lines independently, and even the h3 TITLE below the ring
+     ("Line Manager"/"Direct Reports" wrap, "Peers"/"Others" don't) - a
+     second and third source of the identical problem, only surfaced by
+     re-measuring after the first attempt still didn't fully align.
+  3. Fixing all three of those still left ONE card off at 650px - the pill
+     TEXT ITSELF wraps to 2 lines when its own label is long enough
+     ("Requirement met" vs "Nominated"), growing the foot container by a
+     different amount per card.
+  Fixed by reserving the worst-case 2-line (3-line for the description)
+  height on each of the four elements via `min-height`, rather than
+  chasing the auto-margin math - `.cp-cat-label`, `.cp-card h3`, and
+  `.cp-req` all reserve enough room that neither the actual wrap count nor
+  the viewport width matters any more, and `.cp-card-foot` (not the pill
+  itself) reserves the room for a 2-line pill so the visible pill stays its
+  normal compact size and just centres within the taller box - reserving
+  on the pill directly was tried first and rejected, it made every pill
+  look like an oversized button even on a single line. VERIFIED LIVE with
+  real `getBoundingClientRect` measurements of `footTop` (not just
+  screenshots) at 1000px, 902px, 768px, and 650px (the worst case that
+  exposed all three layers at once) - all four cards land on the identical
+  pill offset at every one, on both the clickable Overview cards and the
+  read-only Nominate Raters ones. Also re-confirmed clean at 600/430/360px
+  (single column - the equal-height/equal-offset question doesn't apply
+  there, but nothing regressed).
+- **Topbar nav collision at ~640-750px — FIXED 2026-08-27, same session,
+  restructured rather than patched**: flagged above as a different scale
+  of problem needing a real design decision, not a self-contained CSS
+  reservation. The human's own suggestion (asked as a question, not an
+  instruction) was the actual fix: split the single brand/nav/account row
+  into TWO rows - row 1 brand (left) + account (right), row 2 nav alone,
+  full width. This removes the constraint rather than working around it:
+  nav no longer shares its row with brand+account (previously only the
+  middle 5.4/8.6 of the width), so it gets roughly 1.6x the room at any
+  given viewport and never needs to compress in the 640-750px gap between
+  Streamlit's native column-stacking breakpoint and the width the old
+  single-row nav was tuned against. `_render_portal_topbar` in
+  `leader_portal.py` rebuilt around this: row 1 (`cp_topbar_row1`) is
+  plain flex HTML with `justify-content:space-between`, not st.columns -
+  neither brand nor account is interactive, so there was never a need for
+  real Streamlit columns there. Row 2 (`cp_topbar_row2`) keeps the
+  existing real `st.columns(4)` + `st.button()` nav (still needs real
+  widgets for same-tab navigation), now spanning the full bar width, with
+  a subtle `border-top` divider between the two rows.
+  - BONUS FIX THAT CAME FREE: the brand text wrapping to 3 lines at
+    768-902px (flagged, not fixed, in the pill-alignment entry above) is
+    also gone - it no longer competes with nav+account for row width, so
+    it now renders on one line at every width tested.
+  - Row 1 needed its OWN mobile stacking rule (`flex-direction:column`
+    below 700px) since it's raw HTML, not st.columns - Streamlit only
+    auto-stacks its own native column widgets, and row 2's nav still gets
+    that for free since it's still real `st.columns`.
+  - VERIFIED LIVE, not just at the four standard sweep points but
+    specifically at the widths that exposed the original bug: 650px (the
+    original repro width) and 690px (row 1 stacked per the new mobile
+    rule, row 2 still a single Streamlit-native row since its own
+    ~640px native threshold hadn't hit yet) - both show a clean, fully
+    legible nav row with a real 16px gap between every button
+    (`getBoundingClientRect` confirmed, not just visual), no collision.
+    Re-swept 360/430/600/768/902px afterward to confirm no regression -
+    topbar still spans full viewport width at every one (confirmed via
+    `getBoundingClientRect`, not just screenshot), the 902px nav-wrapping
+    fix from the prior session is untouched, and the pill-alignment fix
+    above is unaffected (re-checked live on Nominate Raters after the
+    topbar change). Also checked the one OTHER code path through this
+    same function - the consent gate's `show_nav=False` call, tested
+    against a real leader who hadn't consented yet - renders correctly as
+    a single un-divided row with no account block, no error.
+  - Confirmed same-tab navigation still holds after the restructure
+    (`tabs_context` before/after a real click on "Nominate Raters" - tab
+    count unchanged), since row 2's nav buttons are functionally the same
+    `st.button()` + `_go_to_view` mechanism as before, just relocated.
+- Local dev server restarted from a clean state before each re-measurement
+  in this task, specifically because of the stale-CSS trap found above; no
+  test data was created or needed for any of these fixes, so there was
+  nothing to clean up afterward.
+
+### Begin Here: the one-time onboarding gate was never actually built — FIXED 2026-08-27
+When Begin Here/Help was originally built (see the "Amendments + Begin
+Here/Help page" section above), the spec called for it to show once,
+automatically, before the leader reaches the portal proper - similar to
+the consent gate - and be reachable afterwards via Help in the nav. Only
+the second half got built: `render_portal_begin_here()` existed and Help
+worked, but nothing ever forced it to show automatically. Caught when the
+human asked directly whether it was actually behaving that way, having
+noticed it wasn't while clicking through screenshots for other work -
+confirmed by reading the router (`render_leader_portal` in
+`leader_portal.py`), which only ever gated on `consent_given`, with no
+equivalent check for Begin Here anywhere, and no DB column to back one.
+
+- Gate order, per the human's explicit instruction: consent first, then
+  Begin Here - "the consent one is more important so should come first."
+- New column `leaders.begin_here_seen_at` (`_safe_add_column`, same
+  pattern as `consent_given_at`), and `db.set_leader_begin_here_seen
+  (leader_id)`, guarded `WHERE begin_here_seen_at IS NULL` so a second
+  call (e.g. from a legacy leader who existed before this column did)
+  can't clobber the original first-seen timestamp.
+- `render_leader_portal` now checks it right after the consent check,
+  before reading the `view` query param at all - deliberately
+  unconditional on which view the leader was actually headed for, same
+  reasoning as consent: a leader landing on a deep link they'd never
+  visited before still needs the onboarding first.
+- Marked seen the moment it's SHOWN, not gated behind a specific button
+  click the way consent is. Consent has an affirmative checkbox because
+  there's something to actually agree to; Begin Here is pure information
+  with nothing to agree to, so "shown once" is the whole requirement -
+  marking on display, not on a particular exit action, also means the
+  requirement is met however the leader leaves the page (the CTA, or any
+  other nav item), not only if they happen to click the one button meant
+  for it.
+- `render_portal_begin_here()` itself is completely unchanged - the gate
+  reuses it as-is (topbar shown with full nav, `active_view='help'`, same
+  content, same "Go to Overview" CTA at the bottom) rather than
+  duplicating or forking it, so the gate and the on-demand Help page can
+  never drift apart from each other.
+- VERIFIED LIVE end to end, DB checked directly rather than inferred from
+  the UI alone: loaded leader 1's portal (already consented, brand new
+  column so `begin_here_seen_at` was NULL) - the gate rendered
+  automatically with no `?view=` param needed to trigger it, DB then
+  showed a real timestamp. Reloaded the same portal URL fresh (a genuinely
+  new page load, not a same-session rerun) - went straight to Overview,
+  proving the skip is backed by the database and not just session state.
+  Confirmed Help in the nav still reaches the identical content on demand,
+  same tab. Separately verified the ORDER against a leader who hadn't
+  consented yet (Jordan Reeves): consent gate showed first as expected:
+  checked the box, clicked Continue, and the Begin Here gate appeared
+  immediately after, in the same page load - the full two-gate sequence
+  working end to end, not just each gate tested in isolation. Both test
+  leaders' `consent_given`/`begin_here_seen_at` values were reset to their
+  original state afterward.
+
+### Logic Check: Nominations Beyond the "Suggested" Target — CONFIRMED + ONE REAL BUG FIXED 2026-08-27
+Human's ask: "suggested 5" for Peers/Direct Reports/Others implies a
+target, not a ceiling - confirm nothing silently caps a leader at 5
+who wants to nominate more, and if the ring/chip breaks past that
+number, fix it. Explicitly diagnosis-first: "don't assume either the
+cap or the ring bug exists without checking."
+
+- **Part 1, hidden cap - CONFIRMED NOT PRESENT, no fix needed.** Read
+  every enforcement point: the add-rater form's `at_max` check, CSV
+  import's `_parse_rater_csv`, and the nomination-edit validator
+  `_validate_nomination_change` all check against `RATER_REQUIREMENTS
+  [cat]['max']` (10 for Peers/DRs/Others), never `['suggested']` (5).
+  VERIFIED LIVE, not just read: constructed a real test leader with 5
+  Peers already nominated, added a 6th through the actual browser form
+  (typed name/email, selected the category, clicked +Add) - not
+  blocked, "+Add" was never disabled. Separately called the real
+  `_parse_rater_csv` function directly (not a reimplementation) with 6
+  existing + 2 more via CSV - both imported clean, zero problems. Then,
+  as a sanity check that the REAL max (10) still works correctly and
+  nothing in this check broke it: called the same function with 6
+  existing + 6 more (would total 12) - correctly blocked starting at
+  the row that would exceed 10, with the right message naming the right
+  number. System behaves exactly as documented: no cap at "suggested",
+  real cap only at "max", consistent across every entry point.
+- **Part 2, ring denominator - CONFIRMED, REAL BUG, FIXED.** `_category_
+  card_html`'s `target` used to be hardcoded to the suggested/min_if_any/
+  min number alone, with no regard for whether the leader had actually
+  gone past it. `_ring_dashoffset` already clamped the ARC itself to a
+  full circle past 100%, so the ring never visually overflowed - but the
+  LABEL kept the stale target. VERIFIED LIVE with the constructed 6-Peer
+  leader: before the fix this would have read "6/5"; after, the ring
+  renders as a genuinely full circle labelled "6/6", confirmed via
+  screenshot on both Overview and Nominate Raters (they share the same
+  `_render_category_cards_row` helper). Fixed via `target = max(base_
+  target, count)` - whichever is larger wins, so the denominator can
+  never under-report the actual count. SIDE EFFECT, not asked for but a
+  strict improvement from the same root cause: Boss (suggested=1, but a
+  real hard max of 2) had the identical mislabelling at its own genuine
+  ceiling - 2 Bosses would have shown "2/1". Now correctly shows "2/2".
+  Not separately verified live (no live test leader had 2 Bosses at the
+  time), but it's the same code path, same fix, same guarantee.
+- **Part 3, status chip - CONFIRMED, no fix needed.** Chip logic reads
+  `min_if_any` and `req['min']` directly, never `target` or `count`
+  against `suggested` - there is no upper-bound branch that could flip
+  "Requirement met" to a warning state as count grows. VERIFIED LIVE:
+  the 6-Peer test leader's Peers chip read "Requirement met" throughout,
+  same tone/colour as at 5, no regression.
+- **Part 4, Others copy - contradiction fixed across all three surfaces,
+  live warning reworded.** Every upfront Others surface ("Add at least 3
+  if you use this category") changed to "Minimum 3, ideally 4 or 5 if
+  you have them" - `CATEGORY_REQ_TEXT['Others']` (the Overview/Nominate
+  cards) and `GUIDELINE_CATEGORIES`'s Others `badge` (shortened to
+  "Minimum 3, ideally 4 or 5" for the badge's terser style). Begin
+  Here's "Why the category minimums exist" card was checked and, per the
+  task's own conditional, left untouched - it never names a specific
+  number for Others, only speaks generically about "a category of one
+  or two people". VERIFIED LIVE on all three surfaces via screenshot
+  (category card, Guidelines page). The live in-app warning at exactly
+  3 nominated (`_render_nomination_warnings`) now branches on `cat ==
+  'Others'`: Others gets new wording opening "as mentioned when you were
+  adding raters" so it reads as reinforcement, not a fresh catch; Peers/
+  DRs keep their original wording verbatim (their upfront copy already
+  states the buffer, so there was never a contradiction to fix there).
+  VERIFIED LIVE side by side: constructed a leader with exactly 3 Others
+  AND exactly 3 Direct Reports at once, loaded Nominate Raters, and
+  confirmed both warnings render together with the expected, different
+  wording each - Direct Reports' text unchanged from before this task,
+  Others' text now reinforcing. Ring target for Others changed
+  independently: new `RATER_REQUIREMENTS['Others']['ring_target'] = 5`,
+  consumed by the same `target = max(base_target, count)` fix from Part
+  2 via `req.get('ring_target') or req['suggested'] or ...` - gives a
+  full ring at 5 (visual consistency with the other three categories)
+  without changing the copy's own "4 or 5" range, and without touching
+  the chip logic at all (chip reads `min_if_any` directly, confirmed
+  unaffected). VERIFIED LIVE: Others ring read "3/5" at 3 nominated
+  (proportionate fill, not "3/3"), and still shows a bare "0" with no
+  fraction at zero nominated (the zero-state display condition was left
+  untouched - only the target NUMBER changed, not when a fraction shows
+  at all).
+- Test leader (id 39, "Ring Test Leader") and all its raters/email_log
+  rows were deleted entirely after verification, not just reset - it
+  was created solely for this test, unlike leader 1/Jordan Reeves who
+  are pre-existing baseline fixtures other tests rely on. Leader 1's
+  13-rater baseline confirmed unchanged afterward.
+
 ---
 
 ## 6. Known live bug to fix first
@@ -1768,3 +2212,11 @@ they've reviewed it working on the sandbox.
   throat-clearing, reflexive three-item lists.
 - The human reviews logic directly and makes architectural calls conversationally.
 - On anything irreversible or affecting Mark's live environment: STOP and confirm.
+- STANDING AUTHORITY (given 2026-08-27): when live-testing/screenshotting a
+  fix the human specifically asked for, if something ELSE in that same
+  screenshot looks off, fix it too rather than just flagging it - don't
+  wait to be asked separately. Reserve flagging-without-fixing for issues
+  that are a genuinely different scale of problem (e.g. a design/breakpoint-
+  strategy decision, not a self-contained CSS fix) - see the "third issue"
+  vs. the "NEW OBSERVATION, NOT FIXED" split in the Two Layout Fixes entry
+  above for how that line was actually drawn in practice.
