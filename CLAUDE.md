@@ -2433,6 +2433,152 @@ default chrome for a page with no in-page anchor navigation to serve.
   page renders identically to before (no visual regression from the
   change).
 
+### Bentley Typeface Integration and Live Bold Comparison — BUILT AND LIVE-VERIFIED 2026-08-27, AWAITING IAN'S REVIEW
+Scope: Leader Portal (Overview, Nominate Raters, Guidelines, Begin Here)
+and the feedback forms (self-assessment and rater). Admin Dashboard
+explicitly out of scope, confirmed unchanged. Licensed for this scope
+per Ian's permission from Xiao (Bentley brand hub). Generated Word
+reports are a separate, purely technical problem (python-docx doesn't
+embed fonts) - not touched here, flagged as future work if wanted.
+
+- **`@font-face` integration**: `get_bentley_font_face_css()` in
+  `framework.py` (new, alongside `get_logo_data_uri()`) declares ONLY
+  Light (300) and Regular (400) - deliberately NO 700-weight face for
+  `Bentley-Regular.woff`, since declaring one would tell the browser
+  that weight is covered and suppress its own synthetic bold. Base64-
+  embedded (`data:font/woff;base64,...`), same reasoning as
+  `get_logo_data_uri()`: Streamlit deployment targets don't reliably
+  serve arbitrary static folders over HTTP. `BENTLEY_FONT_STACK` keeps
+  the full fallback chain (`-apple-system, BlinkMacSystemFont, "Segoe
+  UI", Helvetica, Arial, sans-serif`).
+- **Applied via page-specific stylesheets, never touching app.py's own
+  global CSS**: `leader_portal.py`'s `PORTAL_CSS` gained a small
+  f-string prefix (font-face + `font-family` override on headings and
+  buttons, `!important`) concatenated onto the front of the existing
+  ~1500-line plain CSS constant - deliberately not edited internally,
+  to avoid escaping hundreds of pre-existing literal braces.
+  `feedback_form.py` gained an equivalent constant injected at the very
+  top of `render_feedback_form`, before the locale/consent gates, so
+  both of those (not just the paginated survey itself) get the
+  typeface too. This works, and is guaranteed not to leak into Admin
+  Dashboard, because `app.py`'s `main()` is genuine one-route-at-a-time
+  `if/elif` routing - the admin route never calls either function that
+  injects this CSS, so broad-looking selectors are safe by construction,
+  no DOM-scoping needed.
+- **`Bentley-Logotype.woff` deliberately NOT applied anywhere** - its
+  intended use was never confirmed. STILL NEEDS ASKING: is the topbar
+  "BENTLEY COMPASS 360" lockup (leader portal + feedback form headers)
+  the intended use case? Not assumed; not yet answered.
+- **Live comparison page at `?fonttest=1`** (`app.py`,
+  `render_font_comparison()`) - TEMPORARY, unlinked, direct-URL only,
+  remove once Ian picks a treatment. Column A: `'Bentley'` requested at
+  `font-weight:700` with no 700 face declared, so the browser
+  genuinely synthesises it. Column B: `Bentley-Expanded Bold.woff`
+  declared as its own separate family, used directly at its own
+  natural weight (400) - no synthesis, no weight trickery.
+- **A REAL BUG FOUND WHILE VERIFYING THIS LIVE, not caught by syntax
+  checking or a screenshot glance**: the first version rendered as
+  literal escaped HTML text instead of an actual page - the exact
+  "REAL BUG FOUND DURING BUILD" already documented against
+  `leader_portal.py` above (CommonMark treats 4+ leading spaces as a
+  code fence; this file's own 4-space function-body indentation was
+  baked into the f-string). Fixed with `textwrap.dedent(...).strip()`,
+  same as `leader_portal.py`'s `_html()` helper - but dedenting alone
+  turned out NOT sufficient here: a SECOND, different bug remained
+  even after dedenting correctly (verified the dedented string was
+  byte-correct, `<div>` starting at column 0, via a standalone Python
+  check). A single `st.markdown()` call combining a `<style>` block
+  immediately followed by `<div>` content markup still rendered the
+  `<div>` portion as a literal `<pre><code>` block - confirmed via
+  `document.querySelector('.fonttest-wrap')` returning null and
+  `document.querySelector('pre, code')` finding the escaped text
+  instead. Streamlit's client-side markdown renderer appears to close
+  its raw-HTML handling at `</style>` and re-parse what follows as a
+  fresh block, and something about that adjacency (no separate call
+  between them) trips it. Fixed by splitting into two separate
+  `st.markdown()` calls - CSS in its own call, content markup in its
+  own - the same pattern already used everywhere else in this app
+  (`PORTAL_CSS` is always injected separately from the cards it
+  styles). Re-verified live after the fix: `.fonttest-wrap` now found
+  as a real DOM node, screenshot shows two genuine rendered cards, not
+  code-block text.
+- **VERIFIED LIVE, not assumed from code**, across every page in
+  scope, via `document.fonts` (the actual `FontFaceSet` API - reports
+  what's genuinely loaded/rendering, not just what's requested) plus
+  `getComputedStyle`: Overview, Nominate Raters, Guidelines, Begin
+  Here, the rater-form locale picker, the rater consent gate, the
+  self-assessment consent gate (confirmed genuinely different copy
+  from the rater version, per the existing self/rater split), and a
+  real dimension/item page (`.dimension-header`/`.item-text`) all show
+  `computedFontFamily` starting with `Bentley` and
+  `{"family":"Bentley","weight":"400","status":"loaded"}` present in
+  `document.fonts` - the Regular face is genuinely in use, not a
+  silent fallback. The Light (300) face shows `"unloaded"` on every
+  page checked, which is expected, not a fault: nothing currently on
+  these pages renders text at weight 300, and browsers only fetch a
+  font-face's binary data when something actually needs to render at
+  that weight - it is registered and ready, just not yet pulled.
+- **Admin Dashboard confirmed genuinely unchanged**: `?admin=1`
+  computed heading font is `"Source Sans Pro", sans-serif` and
+  `document.fonts` contains zero entries with `family` containing
+  `"Bentley"` at all - not merely visually unchanged, structurally
+  incapable of having changed, per the routing argument above.
+- **Bold comparison page verified live, both columns**: Column A's
+  "Direct Reports" title has computed `font-family: Bentley,
+  -apple-system, sans-serif` at `font-weight: 700`, with
+  `document.fonts` showing only `{"family":"Bentley","weight":"400",
+  "status":"loaded"}` registered for that family - confirming the 700
+  request has no matching face and is genuinely browser-synthesised
+  from the loaded 400 face, not silently falling back to a system
+  font (which would show a completely different family name in
+  `computedFontFamily`, not `Bentley` at all). Column B's title has
+  computed `font-family: "Bentley Expanded Bold", -apple-system,
+  sans-serif` at `font-weight: 400` (no trickery), with
+  `document.fonts` showing `{"family":"Bentley Expanded Bold",
+  "weight":"400","status":"loaded"}` - a genuinely distinct, separate
+  face, actually loaded. `document.fonts.check()` confirmed positive
+  for both. This is the exact failure mode the task explicitly warned
+  about (an earlier out-of-session attempt at this same comparison
+  silently fell back to a generic system font in one column and was
+  briefly mistaken for a valid finding) - not repeated here, caught
+  and fixed before being presented as ready.
+- **No test data left behind**: one throwaway Self-relationship test
+  rater (`fonttestselfver1`, leader 1) was created to verify the
+  self-assessment consent-gate copy differs correctly from the rater
+  version, then deleted immediately after. Nothing else was created
+  for this task.
+- **Logotype question answered by Ian same day: apply it to the topbar
+  lockup.** `get_bentley_logotype_face_css()` added to `framework.py`
+  alongside the others - deliberately under its OWN family name
+  ('Bentley Logotype'), not folded into `BENTLEY_FONT_STACK`, since a
+  display logotype face is not guaranteed to carry the same even Latin
+  glyph coverage as Regular/Light and must stay opt-in per element, not
+  applied broadly by the general typeface rule. Applied to exactly two
+  places, both already carrying the literal "BENTLEY COMPASS 360"
+  wordmark: `leader_portal.py`'s `.cp-brand-text .cp-b1` (the topbar
+  eyebrow line, text-transformed to uppercase by existing CSS) and a
+  new `.feedback-header-title` class added to the three identical
+  `<h1>BENTLEY COMPASS 360</h1>` occurrences in `feedback_form.py`
+  (self-assessment intro, rater form intro, and the third - previously
+  unnamed and unclassed, now given the same class for consistency).
+  VERIFIED LIVE, not assumed: real risk with any logotype webfont is
+  that it defines glyphs only for the brand's own word and renders
+  tofu/garbled boxes for other Latin letters - confirmed via screenshot
+  (both the leader portal topbar and the feedback form header render
+  "BENTLEY COMPASS 360" as a clean, fully legible stylised wordmark,
+  no missing glyphs) AND via `document.fonts` showing
+  `{"family":"Bentley Logotype","weight":"400","status":"loaded"}`
+  with `getComputedStyle` confirming `'Bentley Logotype'` as the
+  actually-resolved font-family on both elements, not a fallback.
+- **Bold treatment (Column A vs B vs neither) still Ian's own call,
+  not decided here** - the comparison page exists precisely so this is
+  judged from real letterforms in his own browser, not inferred from
+  computed-style data alone.
+- NOT YET COMMITTED OR PUSHED, per the standing pattern of only doing
+  so on an explicit separate instruction - the six `.woff` files
+  remain untracked in git alongside the `.py` changes, all needing
+  `git add` together whenever that instruction comes.
+
 ---
 
 ## 6. Known live bug to fix first

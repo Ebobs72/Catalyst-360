@@ -19,7 +19,9 @@ from framework import (
     DEVELOPMENT_PRIORITY_PROMPT, DEVELOPMENT_PRIORITY_MINIMUM,
     DEVELOPMENT_PRIORITY_ACTION_MIN_CHARS,
     get_item_text, get_prompt_text, get_logo_data_uri,
-    SUPPORTED_LOCALES, RTL_LOCALES, dimension_slug
+    SUPPORTED_LOCALES, RTL_LOCALES, dimension_slug,
+    get_bentley_font_face_css, BENTLEY_FONT_STACK,
+    get_bentley_logotype_face_css
 )
 
 # Admin report-ready milestone notifications (self-assessment complete, Full
@@ -54,6 +56,37 @@ SCALE_LABEL_TO_VALUE = {v: str(k) for k, v in SCALE_FREQUENCY.items()}
 # render_feedback_form. Getting this wrong silently drops ratings, so it's
 # handled explicitly rather than left to the English map's .get(..., "") default.
 SCALE_KEY_SUFFIX = {1: 'rarely', 2: 'occasionally', 3: 'sometimes', 4: 'often', 5: 'consistently', 0: 'no_opportunity'}
+
+# Bentley typeface, same reasoning/scope as leader_portal.py's identical
+# block (see PORTAL_CSS there): font-face declarations plus overriding
+# font-family on the same selectors app.py's global stylesheet sets
+# 'Source Sans Pro' on - bare h1-h3, the four button-variant testids, and
+# the handful of classes this file's own markup actually uses
+# (.dimension-header, .item-text, .item-progress-text - checked by grep,
+# not guessed; app.py also defines .main-title/.subtitle/.stat-number/
+# .stat-label but nothing in this file renders those, so overriding them
+# here would be dead weight). Matching selectors + !important + later
+# injection order (rendered from inside render_feedback_form, which only
+# ever runs on the 'feedback' route - Admin Dashboard never receives this
+# stylesheet at all) is what makes this win without touching app.py's
+# shared rule, which Admin also depends on and is out of scope here.
+_BENTLEY_TYPEFACE_CSS = f"""
+<style>
+{get_bentley_font_face_css()}
+{get_bentley_logotype_face_css()}
+h1, h2, h3,
+.dimension-header, .item-text, .item-progress-text,
+button[data-testid="stBaseButton-primary"],
+button[data-testid="stBaseButton-primaryFormSubmit"],
+button[data-testid="stBaseButton-secondary"],
+button[data-testid="stBaseButton-secondaryFormSubmit"] {{
+  font-family: {BENTLEY_FONT_STACK} !important;
+}}
+.feedback-header-title {{
+  font-family: 'Bentley Logotype', {BENTLEY_FONT_STACK} !important;
+}}
+</style>
+"""
 
 
 # ============================================
@@ -257,7 +290,7 @@ def render_locale_picker(db, rater_info):
     st.markdown(f"""
     <div class="feedback-header">
         {logo_html}
-        <h1 style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
+        <h1 class="feedback-header-title" style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
         <p style="font-size: 1.1rem; opacity: 0.9; margin: 0;">
             {'Self-Assessment' if is_self else f'Feedback for <strong>{leader_name}</strong>'}
         </p>
@@ -337,7 +370,7 @@ def render_consent_gate(db, rater_info, locale):
         st.markdown(f"""
         <div class="feedback-header">
             {logo_html}
-            <h1 style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
+            <h1 class="feedback-header-title" style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
         </div>
         """, unsafe_allow_html=True)
 
@@ -524,7 +557,7 @@ def _render_header(db, locale, rater_info, is_self, leader_name, relationship, s
     st.markdown(f"""
     <div class="feedback-header">
         {logo_html}
-        <h1 style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
+        <h1 class="feedback-header-title" style="font-size: 1.8rem; margin-bottom: 0.3rem;">BENTLEY COMPASS 360</h1>
         <p style="font-size: 1.1rem; opacity: 0.9; margin: 0;">
             {self_label if is_self else feedback_for_label}
         </p>
@@ -1242,6 +1275,11 @@ def _render_review_page(db, rater_info, pages, locale, is_self, relationship, le
 
 def render_feedback_form(db, rater_info):
     """Render the feedback form for a rater, one page at a time."""
+
+    # Injected before the locale/consent gates below (not after), so the
+    # Bentley typeface applies to those too, not just the paginated survey
+    # proper - both are reached through this same function and return early.
+    st.markdown(_BENTLEY_TYPEFACE_CSS, unsafe_allow_html=True)
 
     # --- Locale gate: shown once, before any survey content, until the rater
     # has picked a language (raters.locale is set either on their row already

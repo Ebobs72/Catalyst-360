@@ -507,13 +507,109 @@ def get_logo_data_uri(negative=False):
 #    says Bentley. Generate client-facing reports locally to keep them
 #    consistent, or accept the mismatch.
 #
-# The Bentley typeface is proprietary ("BENTLEY TYPE is a trademark of BENTLEY"),
-# so its font files must NOT be committed to this repository to make the cloud
-# case work. That would need a licensing decision, not a code change.
+# LICENSING, UPDATED 2026-08-27: Ian has explicit permission from Xiao
+# (Bentley brand hub) to use this typeface in client-facing, non-public-access
+# situations - this covers the Leader Portal and the feedback forms (see
+# BENTLEY_FONT_STACK below), which is why those font files now DO sit in
+# assets/ and ARE committed. It does NOT cover generating chart images below,
+# which remains a separate, purely TECHNICAL limitation regardless of
+# licensing: matplotlib rasterises charts to PNG at generation time, so the
+# font must be installed on whichever machine is actually running the
+# generation code - Streamlit Cloud doesn't have it installed, licensed or
+# not, so chart text there still falls through this preference list to
+# Helvetica Neue/Arial/DejaVu Sans. Generate client-facing reports locally
+# to keep them consistent, or accept the mismatch. See CLAUDE.md for the
+# Word-report font question specifically (python-docx doesn't embed fonts -
+# a different, unstarted piece of work, not an extension of the UI work
+# BENTLEY_FONT_STACK below covers).
 REPORT_FONT = 'Bentley'
 
 # Tried in order when rendering charts, first one actually installed wins.
 CHART_FONT_PREFERENCE = ['Bentley', 'Bentley TT', 'Helvetica Neue', 'Arial', 'DejaVu Sans']
+
+# ============================================
+# UI TYPEFACE (Leader Portal + feedback forms only)
+# ============================================
+#
+# Separate from REPORT_FONT/CHART_FONT_PREFERENCE above, which are about the
+# Word reports and their charts - genuinely different code paths with
+# genuinely different constraints (a .docx just stores a font NAME; a
+# browser needs the actual font FILE). Scope here is deliberately narrower
+# than "everywhere Bentley Compass 360 renders": the Admin Dashboard is
+# explicitly excluded (internal tool, Ian's own call, not part of the
+# licensed client-facing scope) and so are the generated reports (see the
+# REPORT_FONT comment above - not the same problem, not addressed here).
+#
+# Only Light (300) and Regular (400) exist as real cuts of this width -
+# there is no true bold. Do NOT add a 700-weight @font-face for
+# Bentley-Regular.woff: declaring ANY face at a given weight tells the
+# browser that weight is covered, which suppresses its own synthetic-bold
+# fallback (font-synthesis) for that family - so mislabelling Regular as
+# 700 doesn't make text bolder, it makes requesting bold text FAIL to
+# synthesise anything, silently rendering as plain Regular. This was a
+# real mistake made once already while testing the live comparison this
+# section exists to support - worth remembering if this ever gets touched
+# again.
+BENTLEY_LIGHT_PATH = Path("assets/Bentley-Light.woff")
+BENTLEY_REGULAR_PATH = Path("assets/Bentley-Regular.woff")
+
+# Font stack for use in Streamlit unsafe_allow_html CSS: 'Bentley' first,
+# falling back to the same system-font stack already used across this app's
+# UI CSS if the font ever fails to load, so nothing breaks visually either
+# way.
+BENTLEY_FONT_STACK = (
+    "'Bentley', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+)
+
+
+def font_face_css(family, path, weight=400, style='normal'):
+    """One base64-embedded @font-face block for `path`, under `family`/`weight`.
+
+    Base64-embedded (not a plain url() path to the file on disk) for the same
+    reason get_logo_data_uri above embeds images rather than linking them:
+    there's no guarantee a given Streamlit deployment target serves a static
+    assets folder over HTTP at all, so a browser-fetchable path can't be
+    relied on - embedding the bytes directly works identically everywhere.
+    Returns '' if the file is missing, so callers can compose several of
+    these and degrade gracefully (the font stack's own fallback still
+    applies) rather than crash on a missing asset.
+    """
+    if not path.exists():
+        return ''
+    encoded = base64.b64encode(path.read_bytes()).decode('ascii')
+    return (
+        f"@font-face {{font-family:'{family}';"
+        f"src:url(data:font/woff;base64,{encoded}) format('woff');"
+        f"font-weight:{weight};font-style:{style};font-display:swap;}}\n"
+    )
+
+
+def get_bentley_font_face_css():
+    """@font-face declarations for the two real cuts of the Bentley
+    typeface (Light 300, Regular 400) - see the module comment above for
+    why no 700 weight is declared. Concatenates two font_face_css() calls
+    under the shared 'Bentley' family name so BENTLEY_FONT_STACK's
+    font-weight:300/400 rules resolve to the correct file."""
+    return (
+        font_face_css('Bentley', BENTLEY_LIGHT_PATH, weight=300)
+        + font_face_css('Bentley', BENTLEY_REGULAR_PATH, weight=400)
+    )
+
+
+# Logotype face - the "BENTLEY COMPASS 360" wordmark specifically, NOT a
+# general body/UI font. Confirmed with Ian 2026-08-27 for the topbar lockup
+# (leader portal brand text, feedback form headers) - do not apply this
+# family anywhere else without checking with him first, since a display
+# logotype face is not guaranteed to carry full, evenly-weighted Latin
+# glyph coverage the way Regular/Light do.
+BENTLEY_LOGOTYPE_PATH = Path("assets/Bentley-Logotype.woff")
+
+
+def get_bentley_logotype_face_css():
+    """@font-face for the Bentley Logotype face, under its own family name
+    (deliberately NOT folded into 'Bentley'/BENTLEY_FONT_STACK - this face
+    is for the brand wordmark only, callers must opt in per-element)."""
+    return font_face_css('Bentley Logotype', BENTLEY_LOGOTYPE_PATH, weight=400)
 
 # ============================================
 # THRESHOLDS

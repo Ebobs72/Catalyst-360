@@ -43,7 +43,9 @@ from datetime import datetime, timedelta
 
 from framework import (
     ANONYMITY_THRESHOLD, RELATIONSHIP_TYPES,
-    RELATIONSHIP_INPUT_HELP, normalise_relationship, get_logo_data_uri
+    RELATIONSHIP_INPUT_HELP, normalise_relationship, get_logo_data_uri,
+    get_bentley_font_face_css, BENTLEY_FONT_STACK,
+    get_bentley_logotype_face_css
 )
 # Leaders have no locale column (i18n is rater-only, see CLAUDE.md section 5),
 # so every _t() call in this file passes locale=None and gets the English
@@ -1130,6 +1132,45 @@ PORTAL_CSS = """
   }
 </style>
 """
+
+# Bentley typeface, prepended here rather than interpolated into the huge
+# constant above. PORTAL_CSS above is a PLAIN (non-f) string, deliberately -
+# it's ~1500 lines of CSS full of {..} rule braces, and turning it into an
+# f-string to splice this in would mean escaping every single one of them,
+# fragile and easy to get wrong for no real benefit. This block is small
+# and built fresh instead, then concatenated on front.
+#
+# Scope: font-face declarations (see get_bentley_font_face_css - only Light
+# 300/Regular 400 exist as real cuts, no 700 declared, see that function's
+# docstring for why that matters) plus overriding font-family on the same
+# selectors app.py's global stylesheet sets 'Source Sans Pro' on for this
+# app's headings/buttons (bare h1-h3, the four button-variant testids).
+# Matching those exact selectors, adding !important, and relying on this
+# <style> block landing LATER in the page than app.py's (app.py's runs at
+# import time, before render_leader_portal is ever called) is what makes
+# this win without touching app.py's shared rule at all - which the Admin
+# Dashboard also depends on, and is explicitly out of scope here. Because
+# this only ever gets injected from within render_leader_portal, Admin
+# Dashboard page loads (which never call into this file) never receive
+# this stylesheet regardless of how broad these selectors look in
+# isolation - there's no DOM-level scoping trick needed, just never
+# rendering it there.
+PORTAL_CSS = f"""
+<style>
+{get_bentley_font_face_css()}
+{get_bentley_logotype_face_css()}
+h1, h2, h3,
+button[data-testid="stBaseButton-primary"],
+button[data-testid="stBaseButton-primaryFormSubmit"],
+button[data-testid="stBaseButton-secondary"],
+button[data-testid="stBaseButton-secondaryFormSubmit"] {{
+  font-family: {BENTLEY_FONT_STACK} !important;
+}}
+.cp-brand-text .cp-b1 {{
+  font-family: 'Bentley Logotype', {BENTLEY_FONT_STACK} !important;
+}}
+</style>
+""" + PORTAL_CSS
 
 
 def _go_to_view(view):

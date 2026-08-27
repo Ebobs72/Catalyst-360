@@ -18,13 +18,14 @@ import streamlit as st
 import sqlite3
 import hashlib
 import secrets
+import textwrap
 from datetime import datetime
 import pandas as pd
 import json
 from pathlib import Path
 
 # Import our modules
-from framework import get_logo_data_uri
+from framework import get_logo_data_uri, get_bentley_font_face_css, font_face_css
 from database import Database
 from feedback_form import render_feedback_form
 from admin_dashboard import render_admin_dashboard
@@ -743,7 +744,13 @@ def get_route():
     # Check for admin access
     if 'admin' in params:
         return 'admin', None
-    
+
+    # TEMPORARY: Bentley bold-treatment comparison, see render_font_comparison
+    # docstring. Not linked from anywhere - direct-URL only, remove once the
+    # bold-treatment decision is made.
+    if 'fonttest' in params:
+        return 'fonttest', None
+
     # Default to landing page
     return 'landing', None
 
@@ -782,6 +789,120 @@ def render_landing_page():
                 else:
                     st.error("Invalid code")
 
+
+def render_font_comparison():
+    """TEMPORARY, unlinked review page for the Bentley bold-treatment
+    decision - reachable only via ?fonttest=1, not linked from anywhere in
+    the real UI. Not a permanent feature: remove this route (and the
+    'fonttest' branch in main() below) once Ian has picked a treatment.
+
+    Two real UI elements from the actual build (a category-card title, an
+    eyebrow label, a status chip, a stats-strip number - exact CSS lifted
+    from leader_portal.py's PORTAL_CSS, not approximated), each shown in
+    two bold treatments side by side:
+
+    Column A - genuine BROWSER-SYNTHESISED bold: 'Bentley' requested at
+    font-weight:700, with only the real Light(300)/Regular(400) faces
+    declared for that family (get_bentley_font_face_css() - no 700 face),
+    so the browser has nothing to match at 700 and falls back to its own
+    synthesis (font-synthesis: weight, on by default) against Regular.
+
+    Column B - the real Bentley-Expanded Bold.woff face, declared under
+    its own family name at its own natural weight (400, not 700 - a
+    SEPARATE family, not a weight variant of 'Bentley'), so there is no
+    synthesis and no weight-matching ambiguity: whatever's in that file
+    is exactly what renders.
+
+    This is a JUDGEMENT CALL for Ian to make by looking at real letterforms
+    in his own browser, not something to decide from a screenshot alone -
+    see CLAUDE.md, the Bentley typeface integration task, for why: an
+    earlier attempt at this exact comparison in a sandboxed tool silently
+    fell back to a system font in one column without erroring, and looked
+    like a legitimate difference until caught. Both columns here were
+    re-verified live (computed font-family / document.fonts.check(), not
+    just visual inspection) before this was ever presented as ready.
+    """
+    expanded_bold_css = font_face_css(
+        'Bentley Expanded Bold', Path("assets/Bentley-Expanded Bold.woff"), weight=400
+    )
+    # textwrap.dedent + strip: without this, the function body's own 4-space
+    # Python indentation makes CommonMark treat this whole block as an
+    # indented code fence, so it renders as literal escaped HTML text instead
+    # of an actual page - the exact bug found and fixed across leader_portal.py
+    # (see CLAUDE.md, "REAL BUG FOUND DURING BUILD"). Same fix here.
+    #
+    # SECOND, DIFFERENT BUG FOUND WHILE VERIFYING THIS PAGE LIVE: dedent alone
+    # was not enough. A single st.markdown() call combining a <style> block
+    # followed immediately by <div> content markup still rendered the <div>
+    # portion as a literal escaped <pre><code> block (confirmed via the DOM,
+    # not just a screenshot) even though the <style> block itself rendered
+    # correctly as hidden CSS. Streamlit's client-side markdown renderer
+    # appears to close its raw-HTML-block handling at </style> and re-parse
+    # what follows as a fresh block, and something about that specific
+    # adjacency (style block immediately followed by content, no separate
+    # call) trips it. Splitting into two separate st.markdown() calls - CSS
+    # in its own call, content markup in its own call - is the same pattern
+    # already used everywhere else in this app (PORTAL_CSS is injected
+    # separately from every card it styles) and fixes it: verified live via
+    # document.querySelector('.fonttest-wrap') actually finding a real DOM
+    # node instead of a <pre><code> block.
+    css = textwrap.dedent(f"""
+    <style>
+    {get_bentley_font_face_css()}
+    {expanded_bold_css}
+    .fonttest-wrap {{ max-width: 900px; margin: 2rem auto; font-family: -apple-system, sans-serif; }}
+    .fonttest-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 1.5rem; }}
+    .fonttest-col {{ background: #fff; border: 1px solid #E2E0D8; border-radius: 12px; padding: 28px; }}
+    .fonttest-col h4 {{ margin: 0 0 4px; font-family: -apple-system, sans-serif; color: #183319; }}
+    .fonttest-col .fonttest-sub {{ font-family: -apple-system, sans-serif; color: #6B6B6B;
+      font-size: 12.5px; margin-bottom: 22px; }}
+    .fonttest-label {{ font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+      color: #6B6B6B; margin-bottom: 14px; }}
+    .fonttest-title {{ font-size: 16.5px; font-weight: 700; color: #040404; margin-bottom: 18px; }}
+    .fonttest-chip {{ display: inline-block; font-size: 11.5px; font-weight: 700; padding: 4px 10px;
+      border-radius: 14px; background: #e7ebe3; color: #183319; margin-bottom: 22px; }}
+    .fonttest-num {{ font-size: 32px; font-weight: 700; color: #183319; }}
+    .fonttest-a .fonttest-label, .fonttest-a .fonttest-title,
+    .fonttest-a .fonttest-chip, .fonttest-a .fonttest-num {{
+      font-family: 'Bentley', -apple-system, sans-serif; font-weight: 700;
+    }}
+    .fonttest-b .fonttest-label, .fonttest-b .fonttest-title,
+    .fonttest-b .fonttest-chip, .fonttest-b .fonttest-num {{
+      font-family: 'Bentley Expanded Bold', -apple-system, sans-serif; font-weight: 400;
+    }}
+    </style>
+    """).strip()
+    content = textwrap.dedent("""
+    <div class="fonttest-wrap">
+      <h2 style="color:#183319;">Bentley Bold Treatment — Live Comparison</h2>
+      <p style="color:#505046;">Same four real UI elements, two different ways of getting bold text
+      out of the Bentley typeface. Judge by the actual letterforms below, not this description.</p>
+      <div class="fonttest-grid">
+        <div class="fonttest-col fonttest-a">
+          <h4>A — Synthesised bold</h4>
+          <div class="fonttest-sub">'Bentley' (Regular, 400) requested at font-weight:700 — no bold
+          face declared, so the browser fakes it.</div>
+          <div class="fonttest-label">Optional</div>
+          <div class="fonttest-title">Direct Reports</div>
+          <div class="fonttest-chip">Requirement met</div>
+          <div class="fonttest-num">80%</div>
+        </div>
+        <div class="fonttest-col fonttest-b">
+          <h4>B — Bentley-Expanded Bold.woff</h4>
+          <div class="fonttest-sub">A distinct family, used directly at its own natural weight — no
+          synthesis, no weight trickery.</div>
+          <div class="fonttest-label">Optional</div>
+          <div class="fonttest-title">Direct Reports</div>
+          <div class="fonttest-chip">Requirement met</div>
+          <div class="fonttest-num">80%</div>
+        </div>
+      </div>
+    </div>
+    """).strip()
+    st.markdown(css, unsafe_allow_html=True)
+    st.markdown(content, unsafe_allow_html=True)
+
+
 def main():
     """Main application entry point."""
     route, param = get_route()
@@ -807,7 +928,10 @@ def main():
     
     elif route == 'admin':
         render_admin_dashboard(db)
-    
+
+    elif route == 'fonttest':
+        render_font_comparison()
+
     else:
         render_landing_page()
 
