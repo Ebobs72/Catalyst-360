@@ -353,8 +353,15 @@ Changes from that mockup:
   `completed_at`) IS still implemented and still required: it protects the admin
   path from destroying an already-severed anonymous response.
 - Soft warnings on thin groups, no hard block.
-- Response progress: TOTAL-LEVEL ONLY, gated behind a threshold so it never
-  resolves to a single outstanding person. NO per-group, NO per-person status.
+- Response progress: TOTAL-LEVEL ONLY. NO per-group, NO per-person status - that
+  part still holds and is the real protection. CORRECTED 2026-08-27 (see
+  "Correction: Remove the Your Progress Gating Entirely"): the "gated behind a
+  threshold" clause below has been removed from the actual system - a bare
+  total-level count doesn't name anyone or break down by category, so it was
+  never actually anonymity-sensitive, and gating it (at any threshold) was
+  applying this pattern somewhere its threat model doesn't reach. The stats
+  strip/status card/reminder text now always show real numbers, at any
+  outstanding count including 1.
   (The live `render_progress_section` currently shows per-person named status —
   this MUST be reworked to total-only.)
 - ONE blind "remind everyone still to respond" button: uniform confirmation, no
@@ -2225,7 +2232,16 @@ widths.
 - No test data needed for this fix - verification was against the
   existing sandbox portal_token only.
 
-### Inconsistent Anonymity Gating: Stats Strip vs. Reminder Caption — FIXED 2026-08-27
+### Inconsistent Anonymity Gating: Stats Strip vs. Reminder Caption — FIXED 2026-08-27, SUPERSEDED THE SAME DAY
+CORRECTED by the entry directly below ("Correction: Remove the Your
+Progress Gating Entirely") - the fix documented here (extending the
+same suppression to every element) turned out to be built on a flawed
+premise: this data was never actually anonymity-sensitive in the first
+place, so extending its suppression was consistent but wrong, not
+cautious. Left in place below as the historical record of what was
+tried and why it wasn't the real fix - the gating described here no
+longer exists in the code at all.
+
 Found by the human actually using the rebuilt portal, not hypothetical:
 at `outstanding == 1` the "Your Progress" stats strip correctly fell
 back to vague text ("Responses are coming in"), but the reminder
@@ -2295,6 +2311,85 @@ was defeating what another was deliberately hiding.
   configured()` true so the Send Reminders button would render at all)
   both removed after verification. Leader 1's 13-rater baseline
   confirmed unchanged.
+
+### Correction: Remove the Your Progress Gating Entirely — DONE 2026-08-27
+Supersedes the entry directly above, the same day. Live use surfaced a
+real problem with that fix, and a deeper one behind it.
+
+- **The shallow problem**: suppressing the stats strip only at
+  `outstanding == 1` doesn't hide that fact from someone who saw the
+  real numbers a moment earlier. A leader who sees `outstanding == 2`,
+  gets one more response, and watches the strip go blank has just been
+  told "outstanding is now exactly 1" - via the disappearance itself,
+  not a stated digit, but told all the same. Threshold suppression only
+  works against someone with no prior context; here the leader always
+  has prior context, since they're the one who's been watching this
+  same strip the whole time.
+- **The deeper problem, the actual point of this correction**: this
+  data was never anonymity-sensitive to begin with, so gating it at
+  ANY threshold - fixed correctly or not - was the wrong instinct from
+  the start. The real protections in this system (category-level
+  score/comment thresholds in generated reports, the Nominate Raters
+  table showing only invited/not-sent, never response status) exist to
+  stop content or identity being tied to a specific person. A bare
+  completion count ("12 invited, 10 responded") names no one, breaks
+  down by no category, and reveals not one word of anyone's feedback -
+  the same category of information as a delivery tracker showing "3 of
+  5 delivered". The leader also already knows exactly who's outstanding
+  regardless of what this number shows, since they nominated these
+  people by name themselves - the system was never trying to (and
+  shouldn't try to) prevent that. Applying the anonymity-gating pattern
+  here borrowed a protection from where it genuinely matters and put it
+  somewhere its threat model doesn't reach.
+- **`total < ANONYMITY_THRESHOLD` was reconsidered separately, not kept
+  by default just because it wasn't the one originally reported.**
+  Looked for a genuine reason to keep it that wasn't just "borrowed from
+  the anonymity pattern" - the closest candidate was "a percentage is a
+  noisy, near-meaningless statistic at n=1" (real, but not an anonymity
+  concern), and even that doesn't justify what the gate actually did,
+  which was hide ALL FOUR numbers (invited/responded/rate/outstanding),
+  not just the one derived percentage that's genuinely volatile at low
+  n. No standalone justification survived scrutiny, so it's removed too
+  - same fix, same reasoning, not left in place by default.
+- **Fix**: `_progress_stats_safe` no longer has a `gated`/`safe` branch
+  at all - for any total > 0 it always returns real `invited`/
+  `responded`/`rate`/`outstanding` numbers (the total == 0 case already
+  returned real zeros from an earlier fix and is unchanged). Removed
+  as genuinely dead code once the gating was gone, not left as inert
+  scaffolding: `_progress_summary_text` (the vague-text generator,
+  now uncallable), the `reveal_counts` parameter on `_send_reminders_
+  and_report` and its whole generic-message branch, the `.cp-stats-
+  vague` CSS rule, and the `if stats['safe']` branches in `_full360_
+  status_card_html` and the stats-strip rendering. The SHARED-
+  COMPUTATION architecture from the previous fix stays exactly as
+  built - `render_portal_overview` still computes `overview_stats`
+  once and threads it through the status card, reminder caption, and
+  send-result message - only now it's a single source of truth for the
+  real numbers rather than for whether to hide them, which is the
+  right thing for it to be a single source of truth FOR regardless of
+  which way this correction had gone.
+- VERIFIED LIVE against both the exact originally-reported scenario and
+  the low-total case: a leader with 4 completed + 1 incomplete rater
+  (outstanding == 1, total == 5) now shows real numbers everywhere -
+  status card ("4 of 5 responses received"), reminder caption ("Nudges
+  the 1 who haven't responded yet."), and stats strip (5/4/80%/1) all
+  consistent, all real. A second leader with exactly 1 rater invited
+  (total == 1, below the removed threshold) shows real numbers too
+  (1/0/0%/1), confirming the low-total condition is genuinely gone, not
+  just the outstanding==1 one. Clicked Send Reminders for real (against
+  a fake SMTP target, so it genuinely failed) and confirmed the result
+  message read "1 failed to send — check back or contact your
+  programme coordinator." - the real count restored, matching the
+  pre-gating original behaviour exactly. The other three message
+  branches (sent-only, throttled-only, mixed) verified the same way as
+  the previous task - calling the real `_send_reminders_and_report`
+  directly with `send_bulk_reminders` mocked - confirming all four now
+  unconditionally state real numbers with no `reveal_counts` parameter
+  to vary.
+- Two test leaders (ids 42 "Gate Removed Leader", 43 "Low Total
+  Leader") and the temporary `.streamlit/secrets.toml` used for the
+  live Send Reminders test were removed after verification. Leader 1's
+  13-rater baseline confirmed unchanged.
 
 ---
 

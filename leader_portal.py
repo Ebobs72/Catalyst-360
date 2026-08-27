@@ -16,9 +16,19 @@ Two constraints from that document drive real logic here, not just look:
 1. ANONYMITY RULE: nothing on any screen in this file may show a named
    rater's own response status (opened the link / responded / close to
    finishing). Only the leader's own actions (invited, nominated, category)
-   may be shown per-name. Response counts/rates are aggregate-only, and even
-   in aggregate they stay behind the same gating _progress_summary_text
-   already used - never resolving to one outstanding person by subtraction.
+   may be shown per-name. Response counts/rates ARE aggregate-only (no
+   per-category or per-person breakdown) - but the bare aggregate count
+   itself (e.g. "12 invited, 10 responded") is NOT gated or suppressed at
+   any threshold, including outstanding == 1. CORRECTED 2026-08-27: an
+   earlier version of this file suppressed the aggregate at low totals and
+   at outstanding == 1, borrowing the anonymity pattern from where it
+   genuinely applies (content/identity tied to a person) and applying it
+   somewhere that threat model doesn't reach - a bare completion count
+   names no one and reveals no feedback content. It also didn't actually
+   work: a leader who saw real numbers a moment earlier and then watched
+   them vanish learned exactly what the gating tried to hide, just via the
+   disappearance instead of a stated number. See CLAUDE.md, "Correction:
+   Remove the Your Progress Gating Entirely".
 2. REMINDER ACCURACY: the "Send reminders" control must reflect real
    reminder_sent_at cooldown state, and its result message must say what
    actually happened (sent / still-throttled counts), not a blanket claim.
@@ -139,69 +149,49 @@ def _initials(name):
     return (parts[0][0] + parts[-1][0]).upper()
 
 
-def _progress_summary_text(completed, total):
-    """
-    Total-level-only progress summary — never reveals a per-group or
-    per-person breakdown, and never resolves to a single outstanding (or
-    single respondent) individual by simple subtraction.
-    """
-    if total == 0:
-        return "You haven't nominated any raters yet."
-
-    outstanding = total - completed
-    if outstanding == 0:
-        return ":material/check_circle: All responses received."
-    if total < ANONYMITY_THRESHOLD or outstanding == 1:
-        return ":material/autorenew: Responses are coming in."
-    return f":material/bar_chart: {completed} of {total} responses received."
-
-
 def _progress_stats_safe(completed, total):
     """
     Numbers for the Full 360 status pill and the Your Progress stats strip.
+    Always real numbers, at any total or outstanding count, including
+    outstanding == 1 and totals below ANONYMITY_THRESHOLD.
 
-    TWO DIFFERENT THINGS THIS USED TO CONFLATE, split apart after a live
-    review found the zero-nomination case reading as broken:
-    - total == 0 (nobody nominated yet): there is NOTHING to leak by
-      showing 0/0/0%/0 - zero people means zero risk of resolving to one
-      person by subtraction. This now returns safe=True with real zeros,
-      not the vague fallback sentence, so the stats strip always renders
-      real numbers here, per the "don't hide the numbers behind
-      conditional placeholder text" rule.
-    - total > 0 but below ANONYMITY_THRESHOLD, or outstanding == 1: this
-      IS the anonymity hard floor from CLAUDE.md section 4 ("never show a
-      group of one, or any count/coverage split that resolves to a single
-      person by simple subtraction") and stays gated - showing "11 of 12"
-      would let the leader work out exactly which one person hasn't
-      responded. This is the one legitimate exception to "always show
-      real numbers": there are no safe numbers to show here, not a
-      placeholder standing in for numbers that exist.
+    CORRECTED 2026-08-27 (previously named _progress_stats_safe when it DID
+    gate/suppress at those points - kept the name since every caller already
+    refers to it, but the suppression itself is gone, not just relocated).
+    Two reasons, not one:
+    1. It didn't even achieve what it was trying to. Suppressing only at
+       outstanding == 1 doesn't hide that fact from someone who saw the
+       real numbers a moment earlier (e.g. outstanding == 2) and then
+       watched them go blank after one more response came in - the
+       disappearance itself states "outstanding is now exactly 1" just as
+       plainly as a digit would have.
+    2. The deeper issue: this was never actually anonymity-sensitive to
+       begin with. The real protections in this system (category-level
+       score/comment thresholds in reports, the Nominate Raters table
+       showing only invited/not-sent - never response status) all exist to
+       stop content or identity being tied to a specific person. A bare
+       completion count ("12 invited, 10 responded") names no one, breaks
+       down by no category, and reveals not a word of anyone's feedback -
+       it's the same category of information as a delivery tracker showing
+       "3 of 5 delivered". The leader also already knows exactly who's
+       outstanding regardless of what this number shows, since they
+       nominated these people by name themselves; the system was never
+       trying to (and shouldn't try to) prevent that. Applying the
+       anonymity-gating pattern here borrowed a protection from where it
+       genuinely matters and put it somewhere its threat model doesn't
+       reach. See CLAUDE.md for the full correction.
 
-    Returns a dict:
-      safe=True  -> invited, responded, rate, outstanding are real numbers
-                    (including the all-zero case)
-      safe=False -> those are None; use `text` (from _progress_summary_text)
-                    instead - ONLY reachable when total > 0 and gated for
-                    anonymity, never for a genuine zero state any more.
+    The `total < ANONYMITY_THRESHOLD` condition was reconsidered
+    separately, not just dropped along with the outstanding==1 one - same
+    reasoning applies (no identity/content revealed at low totals either,
+    and no other genuine non-anonymity-derived reason was found to keep
+    it), so it's gone too.
     """
     outstanding = total - completed
     if total == 0:
-        return {
-            'safe': True,
-            'text': None,
-            'invited': 0, 'responded': 0, 'rate': 0, 'outstanding': 0,
-        }
-    gated = total < ANONYMITY_THRESHOLD or outstanding == 1
-    if gated:
-        return {
-            'safe': False,
-            'text': _progress_summary_text(completed, total),
-            'invited': None, 'responded': None, 'rate': None, 'outstanding': None,
-        }
+        return {'invited': 0, 'responded': 0, 'rate': 0, 'outstanding': 0}
     rate = round(100 * completed / total)
     return {
-        'safe': True,
-        'text': None,
         'invited': total, 'responded': completed, 'rate': rate,
         'outstanding': outstanding,
     }
@@ -301,7 +291,7 @@ def _reminder_cooldown_state(incomplete_raters):
     return any_eligible, hours_until_next
 
 
-def _send_reminders_and_report(db, leader_info, incomplete_raters, base_url, reveal_counts=True):
+def _send_reminders_and_report(db, leader_info, incomplete_raters, base_url):
     """
     Send reminders and return an ACCURATE result message.
 
@@ -318,14 +308,11 @@ def _send_reminders_and_report(db, leader_info, incomplete_raters, base_url, rev
     reminders with the same accuracy standard and neither drifts from the
     other independently.
 
-    `reveal_counts` MUST be the same gate as the stats strip/status card
-    (`_progress_stats_safe(...)['safe']`) - found live 2026-08-27 (the
-    human, using the real portal, spotted it): at outstanding == 1 the
-    stats strip correctly hid the number, but clicking Send Reminders
-    still returned "Reminded 1 rater." - one text element on the page
-    defeating what another was deliberately hiding. When False, every
-    branch below states an action/outcome with no number in it at all,
-    not just a differently-worded number.
+    Reports real counts unconditionally - a brief period 2026-08-27 had
+    this take a `reveal_counts` flag and go generic at outstanding == 1,
+    matching the stats strip's own gating at the time. Removed along with
+    that gating: see _progress_stats_safe for the full correction (a bare
+    completion count was never actually anonymity-sensitive).
     """
     emailed = [r for r in incomplete_raters if r.get('email')]
     if not emailed:
@@ -334,24 +321,6 @@ def _send_reminders_and_report(db, leader_info, incomplete_raters, base_url, rev
     sent, throttled, failed, _results = send_bulk_reminders(
         emailed, leader_info['name'], base_url, db
     )
-
-    if not reveal_counts:
-        parts = []
-        if sent:
-            parts.append("Reminder sent to whoever was eligible.")
-        if throttled:
-            if sent:
-                parts.append("Anyone still within their 48-hour window wasn't reminded again.")
-            else:
-                _any_eligible, hours = _reminder_cooldown_state(incomplete_raters)
-                when = f" Try again in about {round(hours)}h." if hours else ""
-                parts.append(f"Still within the 48-hour window — no reminder was sent.{when}")
-        if failed:
-            parts.append(
-                "A reminder failed to send — check back or contact your "
-                "programme coordinator."
-            )
-        return " ".join(parts) if parts else "Nobody to remind."
 
     parts = []
     if sent:
@@ -878,8 +847,6 @@ PORTAL_CSS = """
   .cp-stat-block:last-child{border-right:none;}
   .cp-stat-block .cp-num{font-size:32px;font-weight:700;color:#FFFFFF;line-height:1;}
   .cp-stat-block .cp-lbl{font-size:12.5px;color:#DCD8C0;margin-top:8px;letter-spacing:0.3px;}
-  .cp-stats-vague{background:#183319;border-radius:14px;margin-top:14px;padding:26px 28px;
-    color:#FFFFFF;font-size:14.5px;}
 
   /* Real st.container(key="cp_guide_card") now, not a raw div (the "Open
      full guidelines" control had to become a button - see _go_to_view).
@@ -1413,9 +1380,12 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
     # Computed once, here, and threaded through every element on this page
     # that touches response counts (the Full 360 status card, the reminder
     # note, the Send Reminders result, the stats strip) - a single source
-    # of truth for whether numbers are safe to show, so none of them can
-    # ever disagree with each other again. See the REAL BUG note further
-    # down at the reminder note for what happened when they weren't.
+    # of truth for the real numbers, so none of them can ever show a
+    # different figure than another. This used to also be a single source
+    # of truth for whether to SUPPRESS those numbers; that gating is gone
+    # (see _progress_stats_safe), but the shared-computation architecture
+    # stayed, since it's the right way to keep multiple UI elements in
+    # agreement regardless of what they're agreeing ON.
     overview_stats = _progress_stats_safe(
         sum(1 for r in other_raters if r.get('completed')), len(other_raters)
     )
@@ -1534,15 +1504,13 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
                 with st.container(key="cp_secondary_send_reminders"):
                     if st.button("Send reminders", disabled=disabled, use_container_width=True,
                                  key="cp_send_reminders_btn"):
-                        msg = _send_reminders_and_report(db, leader_info, incomplete, base_url,
-                                                          reveal_counts=overview_stats['safe'])
+                        msg = _send_reminders_and_report(db, leader_info, incomplete, base_url)
                         st.session_state['cp_reminder_result'] = msg
                         st.rerun()
                 if disabled and hours_until_next:
                     note = f"Available again in {round(hours_until_next)}h."
                 elif incomplete:
-                    note = (f"Nudges the {len(incomplete)} who haven't responded yet." if overview_stats['safe']
-                            else "Nudges whoever hasn't responded yet.")
+                    note = f"Nudges the {len(incomplete)} who haven't responded yet."
                 else:
                     note = "Everyone has responded."
                 st.markdown(f'<div class="cp-reminder-note">{_esc(note)}</div>', unsafe_allow_html=True)
@@ -1551,24 +1519,19 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
         st.info(st.session_state.pop('cp_reminder_result'))
 
     stats = overview_stats
-    if stats['safe']:
-        if not other_raters:
-            # Real zeros still render below (per the "always show the
-            # numbers, don't hide them behind placeholder text" rule) - this
-            # is just a short explanatory line alongside them, not a
-            # substitute for them.
-            st.caption("Nominate your raters to start tracking responses.")
-        _md(f"""
-        <div class="cp-stats-strip">
-          <div class="cp-stat-block"><div class="cp-num">{stats['invited']}</div><div class="cp-lbl">Raters invited</div></div>
-          <div class="cp-stat-block"><div class="cp-num">{stats['responded']}</div><div class="cp-lbl">Responded</div></div>
-          <div class="cp-stat-block"><div class="cp-num">{stats['rate']}%</div><div class="cp-lbl">Response rate</div></div>
-          <div class="cp-stat-block"><div class="cp-num">{stats['outstanding']}</div><div class="cp-lbl">Still to respond</div></div>
-        </div>
-        """)
-    else:
-        st.markdown(f'<div class="cp-stats-vague">{_esc(stats["text"].split(" ", 1)[-1] if stats["text"] else "")}'
-                     f'</div>', unsafe_allow_html=True)
+    if not other_raters:
+        # Real zeros still render below (per the "always show the numbers,
+        # don't hide them behind placeholder text" rule) - this is just a
+        # short explanatory line alongside them, not a substitute for them.
+        st.caption("Nominate your raters to start tracking responses.")
+    _md(f"""
+    <div class="cp-stats-strip">
+      <div class="cp-stat-block"><div class="cp-num">{stats['invited']}</div><div class="cp-lbl">Raters invited</div></div>
+      <div class="cp-stat-block"><div class="cp-num">{stats['responded']}</div><div class="cp-lbl">Responded</div></div>
+      <div class="cp-stat-block"><div class="cp-num">{stats['rate']}%</div><div class="cp-lbl">Response rate</div></div>
+      <div class="cp-stat-block"><div class="cp-num">{stats['outstanding']}</div><div class="cp-lbl">Still to respond</div></div>
+    </div>
+    """)
 
 
 def _self_status_card_html(self_rater):
@@ -1599,7 +1562,7 @@ def _full360_status_card_html(other_raters, stats):
     (render_portal_overview) and threaded through here rather than
     recomputed - see that function's `overview_stats` for why: every
     response-count element on the page reads off the same value so none
-    of them can independently drift out of sync with the others' gating."""
+    of them can independently drift out of sync with the others."""
     completed = sum(1 for r in other_raters if r.get('completed'))
     total = len(other_raters)
     if total == 0:
@@ -1620,12 +1583,8 @@ def _full360_status_card_html(other_raters, stats):
           </div>
         </div>
         """)
-    if stats['safe']:
-        subtitle = f"{stats['responded']} of {stats['invited']} responses received"
-        pill = f'<span class="cp-pill">{stats["rate"]}%</span>'
-    else:
-        subtitle = "Responses are coming in"
-        pill = ""
+    subtitle = f"{stats['responded']} of {stats['invited']} responses received"
+    pill = f'<span class="cp-pill">{stats["rate"]}%</span>'
     return _html(f"""
     <div class="cp-status-card">
       <div class="cp-status-left">
