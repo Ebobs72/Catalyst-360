@@ -2574,10 +2574,343 @@ embed fonts) - not touched here, flagged as future work if wanted.
   not decided here** - the comparison page exists precisely so this is
   judged from real letterforms in his own browser, not inferred from
   computed-style data alone.
-- NOT YET COMMITTED OR PUSHED, per the standing pattern of only doing
-  so on an explicit separate instruction - the six `.woff` files
-  remain untracked in git alongside the `.py` changes, all needing
-  `git add` together whenever that instruction comes.
+- COMMITTED AND PUSHED to `sandbox` 2026-08-27 (`bf0dd4f`), on Ian's
+  explicit "Deploy it on sandbox so I can see it rendered there and
+  check" instruction, so he could review `?fonttest=1` in the actual
+  deployed sandbox app rather than only locally. The six `.woff` files
+  went in alongside the `.py` changes.
+
+### Genuine Bold Rollout, and Extending the Bentley Font to Report Charts — DONE 2026-08-27
+Two related pieces, same task. Part 1 finalised the bold-treatment
+decision from the live comparison above (genuine Expanded Bold, not
+browser-synthesised); Part 2 extended Bentley to the server-generated
+report chart images, using the TTF file set (not the WOFF set the UI
+work already uses).
+
+**Part 1 surfaced a much bigger gap than the task itself was about, per
+Ian's own live catch.** Reviewing a screenshot sweep for the bold
+rollout, Ian noticed some text wasn't in Bentley at all and asked
+directly: "Can you check that anywhere text is displayed it is in
+Bentley font? The addition of the font should apply to every single
+instance of text, not just headings or buttons." Investigated rather
+than assumed - confirmed live via `getComputedStyle` that a Streamlit
+BUTTON element correctly showed `font-family: Bentley` (from the
+existing `button[data-testid=...]` rule) while its own inner `<p>`
+label showed `"Source Sans"` (Streamlit's own built-in default, a
+DIFFERENT font from the Google-Fonts "Source Sans Pro" app.py imports
+for its own classes) - Streamlit renders button/widget labels as a `<p>`
+inside a nested `stMarkdownContainer` div, and font-family only
+inherits down through ancestors that don't set their own value;
+Streamlit's own stylesheet sets that `<p>`'s font-family directly,
+breaking inheritance from the button around it. The same gap reached
+every widget label, caption, input/textarea, and rating-scale option
+text in both `leader_portal.py` and `feedback_form.py` - none of it was
+h1-h3, a button element itself, or one of the hand-picked classes from
+the original typeface pass, so none of it was ever actually getting
+Bentley.
+
+- **Fixed with a genuinely universal rule**, replacing the earlier
+  selector-list approach (which had already needed widening once, from
+  h1-h3-only to a `[class*="cp-*"]` wildcard, and STILL missed this):
+  `.stApp, .stApp * { font-family: BENTLEY_FONT_STACK !important; }` in
+  both `PORTAL_CSS` and `_BENTLEY_TYPEFACE_CSS`. Reaches every descendant
+  of Streamlit's own root app container unconditionally, so no current
+  or future Streamlit-internal element type can silently fall outside
+  it the way individual selectors already have twice. `!important` wins
+  against a Streamlit default that isn't itself `!important` (framework
+  defaults essentially never are) without needing to out-specify
+  anything selector by selector.
+- **REQUIRED EXCEPTION, a real regression found and fixed twice before
+  it actually worked**: Material Symbols icons render the literal icon
+  NAME as text ("arrow_forward", "check_circle"...) mapped to a glyph
+  via the "Material Symbols Rounded" icon font specifically - a blanket
+  override replaces that font too, and the result isn't a missing icon,
+  it's the icon's NAME rendering as readable text next to the button
+  label. Two icon code paths, two different failures:
+  - Streamlit's own native `icon=":material/name:"` parameter (19 call
+    sites across both files) renders via `[data-testid="stIconMaterial"]`
+    - fixed with a same-specificity exception rule declared AFTER the
+      broad one, so source order wins the tie (not higher specificity).
+  - `leader_portal.py`'s own `_icon()` helper (used for the status-card
+    checkmark/clock, etc.) sets its icon font via an INLINE style, which
+    should normally beat any external rule regardless of specificity -
+    except it didn't, confirmed live via screenshot: "check"/"schedule"
+    rendered as literal readable text. Root cause: an inline style
+    WITHOUT `!important` loses to an external rule WITH `!important`,
+    regardless of the inline style's normally-higher specificity - a
+    real CSS gotcha, not a typo. The obvious fix (add `!important` to
+    the inline declaration too) does NOT work either: confirmed live via
+    `outerHTML` that Streamlit strips `!important` out of inline `style`
+    attributes entirely during rendering (the `font-family` declaration
+    was completely ABSENT from the rendered span, not merely losing the
+    cascade fight) - not documented anywhere found, discovered by
+    inspecting the actual served DOM after the `!important` fix visibly
+    didn't work. Actual fix: moved `_icon()`'s icon font out of the
+    inline style entirely into a real CSS class (`.cp-icon-glyph` in
+    `PORTAL_CSS`), sidestepping the inline-vs-external precedence
+    question altogether - same mechanism as the `stIconMaterial`
+    exception, same specificity tier, same "declared after the broad
+    rule" reasoning.
+- **Inline `<strong>` tags reconsidered, not carved out.** An earlier
+  version of this task's own reasoning (see the bold-rollout brief)
+  worried genuine Expanded Bold would read as "a distracting, constant
+  width-mismatch" in running body text - consent-gate copy,
+  instructions, "unless you are the direct line manager..." etc. Once
+  `.stApp *` made every element inherit Bentley family, and `<strong>`
+  is bold by browser default, excluding it would have meant giving it
+  back a DIFFERENT, non-Bentley font, directly contradicting "every
+  single instance of text" - and would have needed its own careful
+  weight/font trickery to still look bold without picking up the real
+  700 face. Checked live instead of assumed: genuine Expanded Bold
+  inline mid-sentence reads cleanly at running-text size on both the
+  rater-form intro and the Self consent gate - not distracting or
+  cramped, the original worry didn't materialise in practice. No
+  exception; `<strong>` gets the same treatment as everything else now.
+- **Every page in scope re-swept live** after the fix: Overview,
+  Nominate Raters (including the "Add a Rater" form, its table, and the
+  edit-pencil icons), Guidelines, Begin Here, the rater-form locale
+  picker and consent gate, the self-assessment consent gate, the item
+  pages (including the segmented-control rating scale text - "Rarely or
+  never" through "No opportunity to observe" - previously never covered
+  at all, now genuinely Bentley, confirmed in both unselected and
+  selected states), and the comment box/Continue page. Admin Dashboard
+  re-confirmed genuinely unchanged (`document.fonts` shows zero Bentley
+  entries, heading font still `"Source Sans Pro"`) - structurally
+  guaranteed by the same one-route-at-a-time routing argument as before,
+  re-verified rather than just re-asserted.
+- **Width-increase layout sweep** (the bold-rollout task's own explicit
+  acceptance check) at 360/430/645/902px: card titles, chips, and stats
+  numbers all held up with no overflow. Two things worth noting, not
+  breakage: the Overview "Welcome, Ian Moreton-Thickett" h1 wraps to two
+  lines at full width where it previously fit one (genuine reflow, not
+  overlap - the neighbouring buttons stay correctly aligned) - accepted,
+  not fixed, since a heading wrapping is normal web behaviour, not
+  broken layout. A pre-existing "Nominate" button ("Nomi"/"nate")
+  wrapping at ~600-700px was found in the same sweep and confirmed, via
+  computed style, to be COMPLETELY UNRELATED to this task - the button
+  text was already non-bold and picking up Bentley from the very first
+  typeface pass, unaffected by anything changed today. Flagged as a
+  separate follow-up task rather than fixed here, to stay inside this
+  task's actual scope.
+- Genuine Expanded Bold (weight 700) is now registered as a THIRD real
+  cut of the shared `'Bentley'` family in `get_bentley_font_face_css()`
+  (framework.py), alongside the existing Light (300) and Regular (400) -
+  not a separate family name this time, deliberately: this lets every
+  element already resolving to family 'Bentley' at weight 700 (h1-h3,
+  which browsers bold by default, and every explicit `font-weight:700`
+  rule already using `BENTLEY_FONT_STACK`) pick up the genuine face
+  automatically, with no need to hunt down and individually retarget
+  each "bold moment" selector - card titles, chips ("Requirement met",
+  "N more needed"), stats-strip numbers, section labels all resolve
+  correctly just from existing weight:700 declarations once the real
+  face exists to match against. The old "do NOT add a 700-weight face"
+  warning in that function's docstring was about mislabelling REGULAR as
+  bold (no true bold exists in that width) - Expanded Bold IS a genuine,
+  deliberately heavier-and-wider cut, so labelling it 700 is accurate,
+  not a repeat of that mistake; the docstring was updated to say so
+  rather than left contradicting the new behaviour.
+
+**Part 2, chart fonts - a genuinely different problem, closed for
+good rather than worked around.** The report's charts (radar, item bar
+charts) are rasterised to PNG by matplotlib at generation time, so the
+font only needs to be available on the machine GENERATING the report,
+not whoever later opens the .docx - sidesteps the harder "Word body
+text needs the font installed on the READER's machine" problem
+entirely (still not addressed, still flagged separately). Previously
+this only worked reliably on Ian's own Mac, which happens to have the
+real Bentley OTF family installed system-wide (`resolve_chart_font()`
+checked installed-font NAMES via `CHART_FONT_PREFERENCE`, found
+"Bentley" there, and never found anything on Render) - the "generate
+client-facing reports locally to keep them consistent" caution
+elsewhere in this file exists because of exactly that gap.
+
+- **Genuinely closed, not just documented around**: three TTF files
+  (`Bentley-Regular_web.ttf`, `Bentley-Light_web.ttf`, `Bentley-Expanded
+  Bold_web.ttf`) are committed to `assets/` and loaded DIRECTLY BY FILE
+  PATH via matplotlib's `FontProperties(fname=...)` - identical on every
+  machine regardless of what's installed there, no per-environment
+  inconsistency any more.
+- **REAL BLOCKER FOUND AND WORKED AROUND, not assumed away**: these
+  three TTF files (a different set from the WOFF files already wired up
+  for the web) have a CORRECT family name ("Bentley", "Bentley Light",
+  "Bentley Expanded Bold") on their Macintosh (platform 1) name-table
+  entry, but every Windows-platform (platform 3) name field - family,
+  full name, PostScript name - is the literal DEL control character
+  (U+007F), confirmed directly with `fontTools` (not assumed from
+  matplotlib's behaviour alone). matplotlib/freetype reads the Windows-
+  platform entries for name-based lookup on any non-Mac machine
+  (i.e. Render) - `fm.fontManager.addfont()` on these files registers
+  them under that garbled name, not "Bentley", so the OLD name-based
+  mechanism (`plt.rcParams['font.family'] = 'Bentley'`) would have
+  silently never matched them there. Very likely a deliberate anti-
+  extraction measure from the foundry on this specific "_web" file set,
+  not a bug - the WOFF files used on the actual web pages don't have
+  this problem (name resolution for `@font-face` works differently,
+  browsers don't do the same platform-3-name lookup matplotlib does).
+  Fixed by using `FontProperties(fname=...)` throughout instead of any
+  name-based `rcParams` setting - this bypasses name resolution
+  entirely and loads the file's own glyph/outline data directly, so the
+  name-table corruption doesn't matter for rendering, only for lookup-
+  by-name (which this code no longer does).
+- **Confirmed genuinely the real typeface, not a substituted placeholder
+  - a real, justified concern given a foundry that scrubs names on
+    purpose might also ship deliberately-degraded outlines in a trial/
+    web kit**: decompressed the ALREADY-verified-genuine
+  `Bentley-Regular.woff` (confirmed rendering correctly on the live web
+  pages via `document.fonts`) back to raw TTF with `fontTools` (WOFF
+  decompression is lossless - it recovers the exact original SFNT
+  table data) and compared it byte-for-byte against
+  `Bentley-Regular_web.ttf`: identical glyph count (670), identical
+  units-per-em (1000), and identical bounding box + contour count for
+  the 'B' glyph. Genuinely the same font data, just a different
+  container format - not a placeholder.
+- **`chart_font(size, bold=False)` helper** in `report_generator.py`
+  returns a correctly-SIZED COPY of the shared module-level
+  `CHART_FONT_REGULAR`/`CHART_FONT_BOLD` FontProperties objects (never
+  the shared singleton itself - mutating its size in place would leak
+  into every other call site using it). REQUIRED, not a convenience:
+  confirmed live that matplotlib applies `fontproperties=` AFTER a
+  separate `size=`/`fontsize=` kwarg on the same call, so
+  `set_xticklabels(size=14, fontproperties=CHART_FONT_BOLD)` silently
+  DISCARDS the 14 and falls back to the FontProperties object's own
+  default (10pt) - confirmed by rendering and reading back
+  `label.get_size()`, not assumed from matplotlib's docs. Every text
+  call in `create_radar_chart`/`create_item_bar_chart`/
+  `create_self_only_bar` now goes through `chart_font()` instead of the
+  old `fontsize=`/`fontweight='bold'` kwargs.
+- **Weight mapping**: every element that was ALREADY `fontweight='bold'`
+  in the pre-existing chart code (radar spoke labels, the "1-5" scale
+  numbers, bar-chart group names, bar-value labels like "4.0") now uses
+  `chart_font(size, bold=True)` - genuine Expanded Bold. Everything else
+  (legend text, the numeric x-axis tick labels) uses plain
+  `chart_font(size)` - Regular. `CHART_FONT_LIGHT` is loaded and
+  available but not currently applied anywhere - nothing in these three
+  chart functions has an existing lighter-than-default-weight moment to
+  attach it to, and none was invented for this task. INTERPRETATION
+  FLAG FOR IAN: the task text's own wording ("Use Regular/Light for
+  these [axis labels, legend, dimension labels, bar-value labels]...
+  Expanded Bold only if there's a genuine emphasis point... a title,
+  perhaps") could be read more narrowly than this - as meaning NONE of
+  the current chart text should be Expanded Bold, since none of it is a
+  literal chart title. Went with the broader reading instead (preserve
+  each element's EXISTING bold/non-bold styling, swap in the correct
+  genuine face for whichever weight was already chosen) because the
+  task also says to treat genuine emphasis points "the same way as the
+  UI rollout above" - and bar-value labels/dimension labels are
+  arguably the chart equivalent of Part 1's own named categories
+  (stats numbers, card titles/section headings). Flagged rather than
+  silently decided either way, in case Ian's intent was the narrower
+  reading - easy to change, `chart_font(size, bold=True)` -> `chart_font(size)`
+  at the handful of call sites listed above.
+- **Verified against real generated sample images, not assumed from the
+  code path**: called `create_radar_chart`/`create_item_bar_chart`/
+  `create_self_only_bar` directly with realistic data (9 real dimension
+  names including the long "Building High-Performing Teams" spoke label
+  that has its own documented wrapping history) and inspected the
+  actual PNG output. Genuinely the Bentley typeface, not a fallback -
+  visually distinctive once compared side-by-side, and independently
+  confirmed via the byte-identical-glyph check above, since a visual
+  glance alone was judged not trustworthy enough on its own (a lesson
+  already learned once this same task, on the UI side).
+- **Legibility checked at ACTUAL embed size, not raw PNG resolution -
+  the acceptance check's own explicit requirement**: the radar chart is
+  generated at a 12in-wide figure but embedded in the document at only
+  `CONTENT_WIDTH_IN` (6.27in - a ~0.52x reduction); the item bar chart
+  is generated at 4.5in but embedds at only `ITEM_CHART_WIDTH_IN`
+  (2.9in - a ~0.64x reduction) - a raw glance at the generated PNG at
+  full resolution would have been misleadingly generous, since the text
+  ends up meaningfully smaller once actually placed in the report. Both
+  sample images were resized down to their real embed proportions
+  before judging - dimension labels, the 1-5 scale, group names, and
+  value labels all stayed genuinely legible at that reduced size, no
+  blur or illegibility, on both the radar and the item bar chart. The
+  self-assessment-only bar chart (2.9in embed, smaller still) was
+  checked the same way - legible but genuinely small, consistent with
+  how it already looked before this change (not something Bentley
+  specifically makes worse - this bar has always been tiny by design).
+- Old name-based `resolve_chart_font()`/`CHART_FONT_PREFERENCE`
+  mechanism kept as a LAST-RESORT fallback only (fires if a
+  `BENTLEY_CHART_*_PATH` file is ever missing from disk entirely), not
+  the primary path any more - `CHART_FONT_REGULAR is None` is the actual
+  gate, confirmed non-None in this environment so that fallback branch
+  never executes today.
+- Not touched: Word document BODY text (headings, paragraphs outside
+  chart images) - still the separate, harder "reader's machine needs
+  the font installed" problem, unaddressed, exactly as flagged in the
+  task brief. Admin Dashboard - untouched by either part of this task,
+  re-confirmed rather than just assumed for Part 1.
+- No test data created for this task - all live verification used the
+  existing sandbox portal_token/rater tokens already established as
+  baseline fixtures, plus one throwaway Self-relationship rater
+  (`fontsweepself1`, leader 1) created to re-check the self-assessment
+  consent-gate copy, deleted immediately after. Chart sample images
+  were generated to a local scratchpad directory outside the repo, not
+  committed.
+
+### Two follow-up fixes from Ian's own review — DONE 2026-08-27
+Both caught by Ian looking directly at the sent sample images/reports,
+not flagged by any of the verification above - a reminder that
+generated-and-inspected beats generated-and-assumed-fine even after a
+thorough pass.
+
+- **Radar legend ("Self"/"All Raters") switched to genuine Expanded
+  Bold**, matching every other label on that chart (spoke names, the
+  1-5 scale). It was already genuinely rendering in Bentley Regular
+  before this - verified by pixel-diffing the rendered "All Raters"
+  text against matplotlib's own default font at the identical size
+  (10,624 differing pixels out of the glyph area, not a silent
+  fallback) - but Regular is a visually plain cut next to Expanded
+  Bold, and being the ONLY non-bold text on that specific chart made it
+  read as "not Bentley" at a glance even though it technically was.
+  One-line change: `chart_font(14)` -> `chart_font(14, bold=True)` in
+  `create_radar_chart`'s `ax.legend(...)` call.
+- **Self-Assessment bar chart thickened to match the Full 360's.**
+  Ian's own observation, unprompted: "the bar graphs rendered for the
+  Self-Assessment report are thinner than the bars in the Full 360...
+  plenty of page real estate... to thicken them to the same depth."
+  Confirmed real via direct pixel measurement (scanning the saved PNG
+  for `bentley_green`-coloured rows, not eyeballing): the old
+  `create_self_only_bar` (figsize height 0.65in) produced a 12px-thick
+  bar; a real densest-case (6-bar, every group present) Full 360 item
+  chart's own "Self" bar measured 17px at the same native resolution
+  and the same eventual embed scale (both charts share the same 4.5in
+  native width -> `ITEM_CHART_WIDTH_IN` 2.9in embed width, so comparing
+  raw pixel thickness between them is a fair, direct stand-in for final
+  embedded size). Root cause: matplotlib reserves a roughly FIXED
+  amount of a short figure for x-axis tick-label margin regardless of
+  total figure height, so the earlier 0.4->0.6 bar-height-FRACTION fix
+  (documented above) improved things without ever closing the gap - at
+  a short 0.65in figure most of that height WAS margin, leaving little
+  for the bar itself.
+  - Fixed by raising the figure height specifically (0.65in -> 0.72in),
+    found by empirically sweeping heights and re-measuring against the
+    16-6-bar target rather than computed analytically - the
+    height-to-thickness relationship is NOT linear (0.65->0.85in jumps
+    12px->30px, confirmed, not assumed) because of that fixed margin.
+    Landed on 18px (1px over the 17px target, not under - erring toward
+    Ian's explicit "thicken" direction).
+  - Densest 6-bar Full 360 case was chosen as the deliberate matching
+    target, not the sparser 1-2 bar cases (which run much thicker still
+    - measured 39px - due to a separate, unrelated 0.8in figure-height
+    FLOOR already documented in `create_item_bar_chart` above) - a
+    completed 360 typically shows every group, so that's the
+    genuinely representative comparison for what a leader sees when
+    flipping between their own Self-Assessment and Full 360 reports.
+  - VERIFIED THROUGH THE REAL ADMIN UI, not just the isolated function:
+    regenerated Ian's own real Self-Assessment report via the actual
+    "Generate" button/dropdown, extracted an embedded item-bar image
+    from the resulting .docx, and confirmed it visibly thicker,
+    matching the standalone-function test. Report generated cleanly
+    with no errors; 14 `pageBreakBefore` markers present (dimension/
+    section breaks, consistent with the existing page-break rules), no
+    crash. NOT independently re-verified with a full PyMuPDF page-count
+    diff (the rigour used for larger placement changes elsewhere in
+    this file) - the magnitude here is small (~0.07in of extra height
+    per item, well short of pushing a full extra item onto a new page
+    on its own) and Ian's own "plenty of page real estate" assessment
+    was taken as informed rather than re-litigated from scratch; worth
+    a proper page-diff check if a real self-assessment report is ever
+    seen to reflow unexpectedly.
 
 ---
 

@@ -62,25 +62,79 @@ SCALE_KEY_SUFFIX = {1: 'rarely', 2: 'occasionally', 3: 'sometimes', 4: 'often', 
 # font-family on the same selectors app.py's global stylesheet sets
 # 'Source Sans Pro' on - bare h1-h3, the four button-variant testids, and
 # the handful of classes this file's own markup actually uses
-# (.dimension-header, .item-text, .item-progress-text - checked by grep,
-# not guessed; app.py also defines .main-title/.subtitle/.stat-number/
-# .stat-label but nothing in this file renders those, so overriding them
-# here would be dead weight). Matching selectors + !important + later
-# injection order (rendered from inside render_feedback_form, which only
-# ever runs on the 'feedback' route - Admin Dashboard never receives this
-# stylesheet at all) is what makes this win without touching app.py's
-# shared rule, which Admin also depends on and is out of scope here.
+# (.dimension-header, .item-text, .item-progress-text, .review-item-rating -
+# checked by grep, not guessed; app.py also defines .main-title/.subtitle/
+# .stat-number/.stat-label but nothing in this file renders those, so
+# overriding them here would be dead weight). Matching selectors +
+# !important + later injection order (rendered from inside
+# render_feedback_form, which only ever runs on the 'feedback' route -
+# Admin Dashboard never receives this stylesheet at all) is what makes this
+# win without touching app.py's shared rule, which Admin also depends on
+# and is out of scope here.
+#
+# GENUINE BOLD ROLLOUT, 2026-08-27: get_bentley_font_face_css() now also
+# registers Expanded Bold at weight:700 under this same 'Bentley' family
+# (see framework.py) - so .item-progress-text (the "X%" progress figure,
+# already weight:700 in app.py) and .review-item-rating (the Review page's
+# per-item selected-answer label, also weight:700, newly added to this
+# selector list for that reason - it wasn't in scope for the earlier
+# typeface pass since nothing there was about bold specifically) both
+# automatically pick up the genuine face, with no separate override needed.
+# .dimension-header is NOT weight:700 (confirmed live via computed style,
+# not assumed) - it just reads as emphasised due to the dark green fill and
+# size, so it stays on Regular; forcing it bold would be inventing new
+# emphasis the design doesn't currently have, which this task is not asking
+# for.
+#
+# INLINE <strong> TAGS, RECONSIDERED 2026-08-27: the bold-rollout task's own
+# reasoning explicitly worried about genuine Expanded Bold reading as "a
+# distracting, constant width-mismatch" in running body text (consent-gate
+# copy, instructions, "unless you are the direct line manager..." etc.),
+# and an earlier version of this comment described those <strong> tags as
+# deliberately excluded from the rollout for that reason. Superseded the
+# same day by the broader "every text instance" pass below (.stApp *) -
+# excluding <strong> specifically would have meant giving it back a
+# different, non-Bentley font-family, which contradicts "every single
+# instance of text" and would need its own careful weight/font trickery to
+# still look bold without picking up the real 700 face (not attempted -
+# real complexity for a benefit that didn't hold up). Checked live instead
+# of assumed: genuine Expanded Bold inline mid-sentence (rater-form intro,
+# consent gate) reads cleanly at running-text size, not distracting or
+# cramped - the original worry didn't materialise in practice, so <strong>
+# now gets the same treatment as everything else, no exception.
 _BENTLEY_TYPEFACE_CSS = f"""
 <style>
 {get_bentley_font_face_css()}
 {get_bentley_logotype_face_css()}
-h1, h2, h3,
-.dimension-header, .item-text, .item-progress-text,
-button[data-testid="stBaseButton-primary"],
-button[data-testid="stBaseButton-primaryFormSubmit"],
-button[data-testid="stBaseButton-secondary"],
-button[data-testid="stBaseButton-secondaryFormSubmit"] {{
+/* EVERY TEXT INSTANCE, 2026-08-27 - see the identical rule in
+   leader_portal.py's PORTAL_CSS for the full reasoning: selector-by-
+   selector coverage (h1-h3, the button testids, a handful of named
+   classes) missed Streamlit's own internal markup - a button's own <p>
+   label, widget labels, captions, the rating-scale option text, input/
+   textarea text - none of which are h1-h3, a button element itself, or
+   one of the named classes, so none of it was ever actually getting
+   Bentley. Confirmed live: a button showed family:Bentley on the <button>
+   itself but "Source Sans" (Streamlit's own built-in default) on its
+   inner <p>, since Streamlit's own stylesheet sets that <p>'s font-family
+   directly, breaking inheritance from the button around it.
+   `.stApp *` reaches every descendant of the page unconditionally rather
+   than needing every current and future Streamlit-internal element type
+   named individually - !important beats a Streamlit default that isn't
+   itself !important (framework defaults essentially never are), so this
+   wins without needing to out-specify anything selector by selector.
+   REQUIRED EXCEPTION: Material Symbols icons (every st.button(...,
+   icon=":material/name:") call in this file - 13 of them) render the
+   literal icon name as text inside [data-testid="stIconMaterial"] and
+   map it to a glyph via the "Material Symbols Rounded" icon font
+   specifically - overriding that font would show the literal name
+   ("arrow_forward", "check_circle"...) as readable text next to the
+   button label instead of an icon. Declared AFTER the broad rule since
+   both are single-attribute-selector specificity - later wins the tie. */
+.stApp, .stApp * {{
   font-family: {BENTLEY_FONT_STACK} !important;
+}}
+[data-testid="stIconMaterial"] {{
+  font-family: 'Material Symbols Rounded' !important;
 }}
 .feedback-header-title {{
   font-family: 'Bentley Logotype', {BENTLEY_FONT_STACK} !important;

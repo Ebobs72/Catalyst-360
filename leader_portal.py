@@ -137,22 +137,48 @@ def _icon(name, size=20, color=None):
     Material icon set already established everywhere else in this app.
     `name` is a Material Symbols icon name, e.g. "check_circle", "schedule".
     """
-    # Single quotes around the font name, deliberately - this whole style
-    # string sits inside an HTML style="..." attribute (double-quoted), and
-    # a double-quoted CSS font-family value here would terminate that
-    # attribute early. Confirmed live: this exact bug shipped once already -
-    # the browser parsed style="font-family:"Material Symbols Rounded"..."
-    # as style="font-family:" followed by two bogus boolean attributes
-    # (material="" symbols=""), so the icon rendered as literal text
-    # ("check") instead of the glyph.
+    # font-family moved OUT of this inline style and into a real CSS class
+    # (.cp-icon-glyph, see PORTAL_CSS) 2026-08-27, after a two-step failure
+    # while adding the "every text instance" Bentley rollout's broad
+    # `.stApp * { font-family: ... !important; }` rule:
+    #   1. An inline style WITHOUT !important loses to an external rule
+    #      WITH !important, regardless of the inline style's normally-
+    #      higher specificity - confirmed live via screenshot, "check"/
+    #      "schedule" rendering as literal readable text instead of a
+    #      checkmark/clock glyph.
+    #   2. The obvious fix - add !important to this inline declaration too
+    #      - does NOT work: confirmed live via outerHTML that Streamlit's
+    #      own HTML rendering strips !important out of inline style
+    #      attributes entirely (the font-family declaration was completely
+    #      absent from the rendered span, not merely losing the cascade
+    #      fight), even under unsafe_allow_html=True. Not documented
+    #      anywhere found; discovered by inspecting the actual served DOM
+    #      after the !important fix visibly didn't work.
+    # A real class sidesteps the whole inline-vs-external precedence
+    # question: PORTAL_CSS's `.cp-icon-glyph` rule is a normal external
+    # !important declaration, exactly like the [data-testid="stIconMaterial"]
+    # exception already used for Streamlit's own native icon= parameter -
+    # same mechanism, same specificity tier, same "declared after the
+    # broad rule so source order wins the tie" reasoning.
+    #
+    # Single quotes around the font name in the style string below,
+    # deliberately - this whole attribute is double-quoted, and a
+    # double-quoted CSS value here would terminate it early. Confirmed
+    # live: this exact bug shipped once already - the browser parsed
+    # style="font-family:"Material Symbols Rounded"..." as style="font-
+    # family:" followed by two bogus boolean attributes (material=""
+    # symbols=""), so the icon rendered as literal text ("check") instead
+    # of the glyph. No longer applicable to font-family specifically (it's
+    # not in this string any more), but the file-size/line-height/etc.
+    # properties below don't need quoting either way.
     style = (
-        f"font-family:'Material Symbols Rounded';font-size:{size}px;"
+        f"font-size:{size}px;"
         f'font-weight:400;line-height:1;display:inline-flex;'
         f'align-items:center;justify-content:center;'
     )
     if color:
         style += f'color:{color};'
-    return f'<span style="{style}" translate="no">{name}</span>'
+    return f'<span class="cp-icon-glyph" style="{style}" translate="no">{name}</span>'
 
 
 def _initials(name):
@@ -1159,12 +1185,55 @@ PORTAL_CSS = f"""
 <style>
 {get_bentley_font_face_css()}
 {get_bentley_logotype_face_css()}
-h1, h2, h3,
-button[data-testid="stBaseButton-primary"],
-button[data-testid="stBaseButton-primaryFormSubmit"],
-button[data-testid="stBaseButton-secondary"],
-button[data-testid="stBaseButton-secondaryFormSubmit"] {{
+/* EVERY TEXT INSTANCE, 2026-08-27 - widened from an earlier pass that only
+   targeted h1-h3, the button testids, and a hand-picked "cp-*" wildcard.
+   Caught live: a Streamlit BUTTON element picking up font-family:Bentley
+   (from the old button[data-testid=...] rule) does NOT mean its own label
+   text does too - Streamlit renders that label as a <p> inside a nested
+   <div data-testid="stMarkdownContainer">, and font-family only inherits
+   DOWN through ancestors that don't set their own value; Streamlit's own
+   built-in stylesheet sets an explicit (non-!important) font-family
+   directly on that inner <p>, which breaks the inheritance chain from the
+   button. Same story for widget labels, captions, input/textarea text,
+   checkbox/radio/segmented-control option text - none of it is h1-h3, a
+   button element itself, or a "cp-*" class, so none of it was ever
+   actually reached by the earlier pass, confirmed live via
+   getComputedStyle showing "Source Sans" (Streamlit's own built-in default,
+   a different font from the Google-Fonts "Source Sans Pro" app.py imports
+   for its own classes) on a button's inner <p> despite the button itself
+   correctly showing Bentley.
+   Fixed properly this time with a genuinely universal rule instead of
+   hand-listing selectors again (the exact trap the "cp-*" wildcard was
+   already trying to avoid, just scoped too narrowly): `.stApp *` reaches
+   every descendant of Streamlit's own root app container, so nothing new
+   Streamlit renders internally (a fresh widget type, a nested markdown
+   <p>) can silently fall outside it the way individual selectors already
+   have twice. `!important` wins regardless of specificity against any
+   Streamlit default that doesn't also use !important (framework defaults
+   essentially never do), so this reliably overrides built-in widget
+   styling without needing to out-specify it selector by selector.
+   ONE REQUIRED EXCEPTION, checked before shipping this broadly: Material
+   Symbols icons (every st.button(..., icon=":material/name:") call in
+   this file - 6 of them) render by putting the literal icon NAME as text
+   ("arrow_forward", "edit", "check_circle"...) inside a
+   [data-testid="stIconMaterial"] span and mapping it to a glyph via the
+   "Material Symbols Rounded" icon font specifically. A blanket
+   font-family override would replace that icon font too, and the result
+   is not a missing icon - it's the literal icon name rendering as
+   readable text next to the button label (confirmed by reasoning through
+   the actual DOM structure, matching the exact bug already documented and
+   fixed once for this file's OWN _icon() helper's inline-style version -
+   this is the same failure mode reaching a different, non-inline code
+   path). The exception rule below restores the icon font specifically;
+   it's declared AFTER the broad rule and matches it on specificity
+   (a single attribute selector, same tier as ".stApp *"), so later-wins
+   source order is what makes it take effect, not higher specificity. */
+.stApp, .stApp * {{
   font-family: {BENTLEY_FONT_STACK} !important;
+}}
+[data-testid="stIconMaterial"],
+.cp-icon-glyph {{
+  font-family: 'Material Symbols Rounded' !important;
 }}
 .cp-brand-text .cp-b1 {{
   font-family: 'Bentley Logotype', {BENTLEY_FONT_STACK} !important;

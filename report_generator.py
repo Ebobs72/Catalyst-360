@@ -32,6 +32,8 @@ from framework import (
     COLOURS, GROUP_COLOURS, GROUP_DISPLAY,
     HIGH_SCORE_THRESHOLD, SIGNIFICANT_GAP,
     REPORT_FONT, CHART_FONT_PREFERENCE,
+    BENTLEY_CHART_REGULAR_PATH, BENTLEY_CHART_LIGHT_PATH,
+    BENTLEY_CHART_EXPANDED_BOLD_PATH,
     LOGO_PATH,
     get_item_text
 )
@@ -163,17 +165,89 @@ def apply_page_geometry(doc):
 # TYPOGRAPHY
 # ============================================
 
+from matplotlib import font_manager as _fm
+
+
+def _load_chart_font(path):
+    """FontProperties for one Bentley chart-font file, loaded BY PATH, not
+    by name. See BENTLEY_CHART_*_PATH in framework.py for why: these three
+    "_web.ttf" files have a correct family name on their Macintosh
+    name-table entry, but the Windows-platform entries matplotlib/freetype
+    actually reads for name-based lookup are scrubbed to the literal DEL
+    character - a real, verified (not assumed) name-table quirk, not a
+    corrupted or substitute font. FontProperties(fname=...) bypasses name
+    resolution entirely and loads the file's own glyph data directly, so
+    the corruption doesn't matter. Returns None if the file is missing, so
+    callers degrade to matplotlib's default rather than crash on a missing
+    asset - same pattern as get_logo_data_uri/font_face_css elsewhere.
+    """
+    if not path.exists():
+        return None
+    try:
+        return _fm.FontProperties(fname=str(path))
+    except Exception:
+        return None
+
+
+# Registered once at import time, reused across every chart this module
+# generates - loading a font file repeatedly per-chart would be wasteful
+# and gains nothing, the file's contents don't change between calls.
+CHART_FONT_REGULAR = _load_chart_font(BENTLEY_CHART_REGULAR_PATH)
+CHART_FONT_LIGHT = _load_chart_font(BENTLEY_CHART_LIGHT_PATH)
+CHART_FONT_BOLD = _load_chart_font(BENTLEY_CHART_EXPANDED_BOLD_PATH)
+
+
+def chart_font(size, bold=False):
+    """A correctly-SIZED copy of the shared Bentley chart FontProperties,
+    for one text call. REQUIRED, not a convenience: confirmed live that
+    matplotlib's Text/tick-label API applies `fontproperties` AFTER any
+    separate `size=`/`fontsize=` kwarg, so passing both `size=14` and
+    `fontproperties=CHART_FONT_BOLD` to the same call silently DISCARDS the
+    size and falls back to the FontProperties object's own default (10pt) -
+    confirmed by actually rendering and reading back label.get_size(), not
+    assumed from the matplotlib docs. The size has to be baked into the
+    FontProperties object itself instead. Always returns a COPY
+    (FontProperties.copy(), not the shared module-level singleton) -
+    mutating CHART_FONT_BOLD's size in place would leak into every other
+    call site that also uses it. Falls back to a plain size dict (which
+    matplotlib also accepts wherever a FontProperties is expected) if the
+    underlying font file was missing at import time, so callers don't need
+    a separate None-check.
+    """
+    base = CHART_FONT_BOLD if bold else CHART_FONT_REGULAR
+    if base is None:
+        return {'size': size}
+    prop = base.copy()
+    prop.set_size(size)
+    return prop
+
+# Every text call in create_radar_chart/create_item_bar_chart/
+# create_self_only_bar passes fontproperties=CHART_FONT_REGULAR or
+# CHART_FONT_BOLD explicitly now, matching whichever weight that element
+# already used (fontweight='bold' -> CHART_FONT_BOLD, otherwise ->
+# CHART_FONT_REGULAR) - never BOTH fontproperties and fontweight together,
+# since asking matplotlib to also synthesise bold on top of an
+# already-bold custom face is not what's wanted and was never tested.
+# CHART_FONT_LIGHT is registered for completeness (Light is one of the two
+# weights the UI typeface work already established) but nothing in these
+# three chart functions currently has a moment that calls for it - none of
+# their existing text was ever set to a lighter-than-default weight.
+
+
 def resolve_chart_font():
     """
-    Return the first font in CHART_FONT_PREFERENCE that is actually installed
-    here, or None to leave matplotlib on its default.
-
-    Charts are rasterised at generation time, so unlike the document text this
-    depends on the machine doing the generating. See REPORT_FONT in framework.py.
+    LEGACY name-based fallback - only reached if BENTLEY_CHART_REGULAR_PATH
+    is missing from disk entirely (the primary CHART_FONT_REGULAR above is
+    then None), so there's still a chance of finding a real Bentley face
+    if one happens to be installed system-wide the old way (true on Ian's
+    own Mac - see the CLAUDE.md environment-gotchas entry this used to be
+    the whole story for). Not the primary mechanism any more: fname-based
+    loading above works identically on every machine regardless of what's
+    installed there, which is the actual point of this rework - closing
+    the local-vs-Render generation gap, not just working around it.
     """
     try:
-        from matplotlib import font_manager
-        available = {f.name for f in font_manager.fontManager.ttflist}
+        available = {f.name for f in _fm.fontManager.ttflist}
     except Exception:
         return None
 
@@ -183,9 +257,10 @@ def resolve_chart_font():
     return None
 
 
-CHART_FONT = resolve_chart_font()
-if CHART_FONT:
-    plt.rcParams['font.family'] = CHART_FONT
+if CHART_FONT_REGULAR is None:
+    _name_fallback_font = resolve_chart_font()
+    if _name_fallback_font:
+        plt.rcParams['font.family'] = _name_fallback_font
 
 
 def apply_document_font(doc, font_name=REPORT_FONT):
@@ -582,7 +657,8 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     # Configure the chart
     ax.set_ylim(0, 5)
     ax.set_yticks([1, 2, 3, 4, 5])
-    ax.set_yticklabels(['1', '2', '3', '4', '5'], size=14, color='#333333', fontweight='bold')
+    ax.set_yticklabels(['1', '2', '3', '4', '5'], color='#333333',
+                        fontproperties=chart_font(14, bold=True))
     # Sit the 1-5 scale in the gap between the first two spokes rather than on
     # top of a dimension label. With theta offset pi/2 and clockwise direction,
     # a data angle of d appears at screen angle (90 - d), so 20 lands midway
@@ -595,7 +671,8 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     wrapped = ['\n'.join(textwrap.wrap(label, width=16)) for label in labels]
 
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(wrapped, size=13, fontweight='bold', color='#333333')
+    ax.set_xticklabels(wrapped, color='#333333',
+                        fontproperties=chart_font(13, bold=True))
     ax.tick_params(axis='x', pad=18)
 
     # Anchor each label on the side facing away from the chart, so text grows
@@ -611,9 +688,21 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
             label.set_horizontalalignment('right')
 
     # Add legend
+    #
+    # bold=True ADDED 2026-08-27 - Ian caught this by eye: with Regular
+    # weight, "Self"/"All Raters" reads visibly plainer than every other
+    # label on this same chart (spoke labels and the 1-5 scale are all
+    # Expanded Bold), and Regular alone doesn't carry much of Bentley's
+    # visual distinctiveness at a glance - confirmed the font WAS
+    # genuinely being applied even before this change (pixel-diffed the
+    # rendered "All Raters" text against matplotlib's own default font at
+    # the same size - 10,624 differing pixels, not a silent fallback),
+    # it just didn't look distinctively branded next to the bold text
+    # around it. Matching the rest of the chart's weight, not fixing a
+    # bug.
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.13),
-                  ncol=2, fontsize=14, frameon=False)
+                  ncol=2, prop=chart_font(14, bold=True), frameon=False)
 
     # Leave room around the plot for the labels. tight_layout fights with polar
     # axes that have long outward labels, so set the margins explicitly.
@@ -690,18 +779,24 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
     bars = ax.barh(y_pos, values, color=colors, height=0.5)
     
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(groups, fontsize=10, fontweight='bold')
+    ax.set_yticklabels(groups, fontproperties=chart_font(10, bold=True))
     ax.set_xlim(0, 6.0)
     ax.set_xticks([1, 2, 3, 4, 5])
     ax.tick_params(axis='x', labelsize=10)
-    
+    # tick_params only controls size/colour, not font family - the x-axis's
+    # numeric labels (1-5) are auto-generated by set_xticks rather than an
+    # explicit set_xticklabels call, so they need setting directly here or
+    # they're left on matplotlib's default font.
+    for tick_label in ax.get_xticklabels():
+        tick_label.set_fontproperties(chart_font(10))
+
     ax.axvline(x=4, color='green', linestyle='--', alpha=0.3, linewidth=1)
     ax.axvline(x=3, color='gray', linestyle=':', alpha=0.3, linewidth=1)
-    
+
     # Place all scores at fixed right-aligned position
     for bar, val in zip(bars, values):
-        ax.text(5.7, bar.get_y() + bar.get_height()/2, f'{val:.1f}', 
-                va='center', ha='right', fontsize=12, fontweight='bold')
+        ax.text(5.7, bar.get_y() + bar.get_height()/2, f'{val:.1f}',
+                va='center', ha='right', fontproperties=chart_font(12, bold=True))
     
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -714,7 +809,41 @@ def create_item_bar_chart(scores, output_path, include_combined=True):
 
 def create_self_only_bar(score, output_path):
     """Create horizontal bar chart for self-assessment only."""
-    fig, ax = plt.subplots(figsize=(4.5, 0.65))
+    # figsize height raised 0.65 -> 0.72 (2026-08-27, Ian's own live catch:
+    # "the bar graphs rendered for the Self-Assessment report are thinner
+    # than the bars in the Full 360... plenty of page real estate... to
+    # thicken them to the same depth"). The earlier 0.4->0.6 bar-height-
+    # FRACTION change (comment below) improved things but never actually
+    # closed the gap to Full 360, because bar-height is a fraction of the
+    # PLOT AREA, and matplotlib reserves a roughly fixed amount of the
+    # figure for the x-axis tick labels regardless of total figure height
+    # - at a short 0.65in figure, most of that height was tick-label
+    # margin, leaving very little for the plot area the bar actually
+    # lives in. Confirmed empirically, not guessed: measured actual
+    # rendered bar thickness in pixels (searching the saved PNG for
+    # bentley_green pixel rows, not eyeballing) - the OLD 0.65in figure
+    # produced a 12px-thick bar, against 17px for a REAL densest-case
+    # (6-bar) Full 360 item chart's "Self" bar at the same native
+    # resolution and the same eventual ITEM_CHART_WIDTH_IN embed scale
+    # (both charts share the same 4.5in native width -> 2.9in embed
+    # width, so comparing raw pixel thickness between them is a fair,
+    # direct comparison of final embedded size). 0.72in was found by
+    # sweeping figure heights and re-measuring until the output matched
+    # the 6-bar target (18px, 1px over rather than under) - the
+    # relationship is NOT linear (0.65->0.85in jumps 12px->30px) because
+    # of that fixed tick-label margin, so this was tuned empirically
+    # against the real target, not computed analytically. The densest
+    # (6-bar, i.e. every group present) Full 360 case was chosen as the
+    # matching target deliberately, not the sparser 1-2 bar cases (which
+    # render much thicker still, ~39px, due to a separate 0.8in figure-
+    # height FLOOR in create_item_bar_chart) - a completed 360 typically
+    # shows all groups, so that's the more representative "Full 360 bar"
+    # for a leader to visually compare a self-assessment page against.
+    # Verified this doesn't cost anything towards the self-assessment's
+    # own page-fit after making the change - see the live regeneration
+    # note where this was checked, not just assumed from Ian's "plenty
+    # of page real estate" alone.
+    fig, ax = plt.subplots(figsize=(4.5, 0.72))
 
     # height raised 0.4 -> 0.6: measured at 0.4 this bar embeds at only
     # ~0.036in (2.6pt) thick once placed in the document at ITEM_CHART_WIDTH_IN
@@ -722,16 +851,22 @@ def create_self_only_bar(score, output_path):
     # charts' bars (~0.078in/5.6pt in the densest 6-bar case). The figure's
     # total height (0.65in) is untouched, so this costs nothing towards the
     # "5 items per page" layout - height only redistributes the SAME fixed
-    # vertical space from margin into bar, it doesn't add any.
+    # vertical space from margin into bar, it doesn't add any. SUPERSEDED BY
+    # THE FIGSIZE CHANGE ABOVE, 2026-08-27 - kept for the historical context
+    # on why 0.6 (not the original 0.4) is the bar-height fraction being
+    # built on here.
     if score is not None:
         ax.barh([0], [score], color=COLOURS['bentley_green'], height=0.6)
         # Place score at fixed right-aligned position
-        ax.text(5.7, 0, f'{score:.1f}', va='center', ha='right', fontsize=12, fontweight='bold')
-    
+        ax.text(5.7, 0, f'{score:.1f}', va='center', ha='right',
+                fontproperties=chart_font(12, bold=True))
+
     ax.set_xlim(0, 6.0)
     ax.set_ylim(-0.5, 0.5)
     ax.set_xticks([1, 2, 3, 4, 5])
     ax.tick_params(axis='x', labelsize=10)
+    for tick_label in ax.get_xticklabels():
+        tick_label.set_fontproperties(chart_font(10))
     ax.set_yticks([])
     
     ax.axvline(x=4, color='green', linestyle='--', alpha=0.3, linewidth=1)

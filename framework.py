@@ -511,20 +511,54 @@ def get_logo_data_uri(negative=False):
 # (Bentley brand hub) to use this typeface in client-facing, non-public-access
 # situations - this covers the Leader Portal and the feedback forms (see
 # BENTLEY_FONT_STACK below), which is why those font files now DO sit in
-# assets/ and ARE committed. It does NOT cover generating chart images below,
-# which remains a separate, purely TECHNICAL limitation regardless of
-# licensing: matplotlib rasterises charts to PNG at generation time, so the
-# font must be installed on whichever machine is actually running the
-# generation code - Streamlit Cloud doesn't have it installed, licensed or
-# not, so chart text there still falls through this preference list to
-# Helvetica Neue/Arial/DejaVu Sans. Generate client-facing reports locally
-# to keep them consistent, or accept the mismatch. See CLAUDE.md for the
-# Word-report font question specifically (python-docx doesn't embed fonts -
-# a different, unstarted piece of work, not an extension of the UI work
-# BENTLEY_FONT_STACK below covers).
+# assets/ and ARE committed. It does NOT cover the chart-image mechanism
+# below - a different, separate permission - but the actual scope (Leader
+# Portal + feedback forms) is unaffected by that distinction.
 REPORT_FONT = 'Bentley'
 
-# Tried in order when rendering charts, first one actually installed wins.
+# CHART FONT, REWORKED 2026-08-27 - see report_generator.py's resolve_chart_*
+# functions for the actual implementation. Previously this was a NAME-based
+# preference list, tried against whatever happens to be installed on the
+# generating machine (CHART_FONT_PREFERENCE - Ian's own Mac has the real
+# Bentley OTF family installed system-wide, Streamlit Cloud/Render never
+# did, so chart text was consistent locally and fell back to Helvetica/Arial/
+# DejaVu Sans wherever reports were generated remotely - the "generate
+# client-facing reports locally to keep them consistent" caution elsewhere
+# in this codebase exists because of exactly that gap).
+#
+# Genuinely closed now, not just documented around: three TTF files licensed
+# specifically for this (Bentley-Regular_web.ttf, Bentley-Light_web.ttf,
+# Bentley-Expanded Bold_web.ttf) are committed to assets/ and referenced
+# DIRECTLY BY FILE PATH via matplotlib's FontProperties(fname=...), which
+# works identically on every machine regardless of what's installed there -
+# no name-based lookup, no per-environment inconsistency, no more local-vs-
+# remote generation gap for chart text specifically.
+#
+# NOT name-based on purpose, not just historically: inspected with fontTools,
+# these three TTF files carry a CORRECT family name ("Bentley", "Bentley
+# Light", "Bentley Expanded Bold") on their Macintosh (platform 1) name-table
+# entries, but every Windows-platform (platform 3, the one matplotlib/
+# freetype actually reads for name-based lookup on any non-Mac machine,
+# i.e. Render) name field - family, full name, PostScript name - is the
+# literal DEL control character (U+007F), not a font bug but very likely a
+# deliberate anti-extraction measure from the foundry on this specific "_web"
+# file set. Confirmed live: fm.fontManager.addfont() on these files registers
+# them under that garbled name, not "Bentley" - a name-based rcParams
+# approach (the old CHART_FONT_PREFERENCE mechanism) would silently never
+# match them on Render. fname= bypasses name resolution entirely and loads
+# the font file's own glyph/outline data directly, unaffected by the
+# corrupted name-table entries (confirmed by comparing this TTF's 'B' glyph
+# outline - bounding box and contour count - byte-for-byte against the
+# ALREADY-verified-genuine Bentley-Regular.woff used on the web pages: they
+# matched exactly, proving this is the real typeface despite the name-table
+# corruption, not a substituted placeholder).
+BENTLEY_CHART_REGULAR_PATH = Path("assets/Bentley-Regular_web.ttf")
+BENTLEY_CHART_LIGHT_PATH = Path("assets/Bentley-Light_web.ttf")
+BENTLEY_CHART_EXPANDED_BOLD_PATH = Path("assets/Bentley-Expanded Bold_web.ttf")
+
+# Legacy name-based fallback, kept ONLY for resolve_chart_font()'s "did a
+# real Bentley family somehow get installed on this machine anyway" check -
+# not the primary mechanism any more, see report_generator.py.
 CHART_FONT_PREFERENCE = ['Bentley', 'Bentley TT', 'Helvetica Neue', 'Arial', 'DejaVu Sans']
 
 # ============================================
@@ -540,18 +574,35 @@ CHART_FONT_PREFERENCE = ['Bentley', 'Bentley TT', 'Helvetica Neue', 'Arial', 'De
 # licensed client-facing scope) and so are the generated reports (see the
 # REPORT_FONT comment above - not the same problem, not addressed here).
 #
-# Only Light (300) and Regular (400) exist as real cuts of this width -
-# there is no true bold. Do NOT add a 700-weight @font-face for
-# Bentley-Regular.woff: declaring ANY face at a given weight tells the
-# browser that weight is covered, which suppresses its own synthetic-bold
-# fallback (font-synthesis) for that family - so mislabelling Regular as
-# 700 doesn't make text bolder, it makes requesting bold text FAIL to
-# synthesise anything, silently rendering as plain Regular. This was a
-# real mistake made once already while testing the live comparison this
+# Only Light (300) and Regular (400) exist as real "normal-width" cuts -
+# there is no true bold IN THIS WIDTH. Declaring ANY face at a given weight
+# tells the browser that weight is covered, which suppresses its own
+# synthetic-bold fallback (font-synthesis) for that family - so mislabelling
+# Regular as 700 doesn't make text bolder, it makes requesting bold text
+# FAIL to synthesise anything, silently rendering as plain Regular. Real
+# mistake made once already while testing the live A/B comparison this
 # section exists to support - worth remembering if this ever gets touched
 # again.
+#
+# GENUINE BOLD, DECIDED 2026-08-27 (see the "Genuine Bold Rollout" task in
+# CLAUDE.md): the comparison above resolved in favour of the real Expanded
+# Bold face over browser-synthesised bold - bold is used sparingly here
+# (card titles, chips, stat numbers, section headings), never in running
+# body text, so the wider Expanded design reads as a deliberate accent
+# rather than a constant width-mismatch. BENTLEY_EXPANDED_BOLD_PATH is
+# registered as weight:700 under the SAME 'Bentley' family name (not a
+# separate family) below, specifically so every element that already
+# resolves to family 'Bentley' at weight:700 - h1-h3 (browsers bold
+# headings by default), and every explicit font-weight:700 rule already
+# using BENTLEY_FONT_STACK - picks up the genuine face automatically, with
+# no need to hunt down and individually retarget each selector. This is
+# safe/correct CSS font-matching, not the same mistake as above: that
+# warning was about mislabelling Regular (no true bold exists for IT);
+# Expanded Bold IS a true, deliberately heavier-and-wider cut, so labelling
+# it 700 is accurate, not a mislabel.
 BENTLEY_LIGHT_PATH = Path("assets/Bentley-Light.woff")
 BENTLEY_REGULAR_PATH = Path("assets/Bentley-Regular.woff")
+BENTLEY_EXPANDED_BOLD_PATH = Path("assets/Bentley-Expanded Bold.woff")
 
 # Font stack for use in Streamlit unsafe_allow_html CSS: 'Bentley' first,
 # falling back to the same system-font stack already used across this app's
@@ -585,14 +636,17 @@ def font_face_css(family, path, weight=400, style='normal'):
 
 
 def get_bentley_font_face_css():
-    """@font-face declarations for the two real cuts of the Bentley
-    typeface (Light 300, Regular 400) - see the module comment above for
-    why no 700 weight is declared. Concatenates two font_face_css() calls
-    under the shared 'Bentley' family name so BENTLEY_FONT_STACK's
-    font-weight:300/400 rules resolve to the correct file."""
+    """@font-face declarations for the three cuts of the Bentley typeface
+    used across the UI, all under the shared 'Bentley' family name so
+    BENTLEY_FONT_STACK's font-weight rules resolve to the correct file:
+    Light (300), Regular (400), and - decided 2026-08-27 - Expanded Bold
+    (700), the genuine bold face. See the module comment above for why
+    700 is a real, deliberate face here (not the earlier mislabelling
+    mistake it looks superficially similar to)."""
     return (
         font_face_css('Bentley', BENTLEY_LIGHT_PATH, weight=300)
         + font_face_css('Bentley', BENTLEY_REGULAR_PATH, weight=400)
+        + font_face_css('Bentley', BENTLEY_EXPANDED_BOLD_PATH, weight=700)
     )
 
 
