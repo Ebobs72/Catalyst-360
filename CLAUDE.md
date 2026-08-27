@@ -2391,6 +2391,48 @@ real problem with that fix, and a deeper one behind it.
   live Send Reminders test were removed after verification. Leader 1's
   13-rater baseline confirmed unchanged.
 
+### Disable Streamlit's Default Heading Anchor Links — DONE 2026-08-27
+Hovering over a card heading ("Direct Reports" etc.) showed a small
+link icon - Streamlit's automatic heading-anchor behaviour, stray
+default chrome for a page with no in-page anchor navigation to serve.
+
+- Confirmed live, not assumed, which headings this actually reaches:
+  every `<h1>`-`<h3>` in this file is raw HTML rendered via
+  `unsafe_allow_html=True` (this file uses no `st.header`/`st.subheader`/
+  `st.title` at all), and Streamlit still injects the anchor machinery
+  (`id="direct-reports"`, a wrapping `stHeadingWithActionElements`, a
+  hover-revealed `stHeaderActionElements` link) onto those too - not
+  only onto headings created via its own Markdown `#`/`##` syntax or
+  its dedicated heading widgets. Confirmed via the rendered DOM
+  (`outerHTML` on a live card heading), not inferred from Streamlit's
+  docs.
+- Checked for a global/config.toml equivalent before defaulting to a
+  per-call fix, per the brief's own preference - read the installed
+  Streamlit 1.60.0 source directly (`elements/markdown.py` and
+  `config.py`) rather than guessing: `st.markdown()` takes a real
+  `anchors: bool = True` keyword parameter, but there is no
+  config.toml/global setting for it anywhere in `config.py` - the
+  per-call keyword is the only mechanism Streamlit exposes.
+- Fixed at this file's own single choke point instead of touching
+  every heading individually: `_md()` (the one helper every top-level
+  HTML block in this file already goes through - confirmed by grep
+  that all six h1-h3 call sites route through it, none render via a
+  separate raw `st.markdown()`) now passes `anchors=False`. One
+  four-character change covers every heading on every screen at once,
+  which is the actual "fix it once globally for these pages" the brief
+  asked for, given Streamlit itself has no coarser lever.
+- VERIFIED LIVE on all four named surfaces (Overview, Nominate Raters,
+  Guidelines, Begin Here) plus the consent gate (touched by the same
+  fix, not separately named in the brief but worth confirming): every
+  `h1`-`h6` on each page now has no `stHeaderActionElements` child at
+  all - not merely hidden by CSS, genuinely absent from the DOM, which
+  is stronger than "no visible icon" (a hover binding could not
+  possibly attach to hide/show an element that was never rendered).
+  Cross-checked against a real screenshot with the cursor hovering
+  directly over "Direct Reports" - no icon. Confirmed the rest of each
+  page renders identically to before (no visual regression from the
+  change).
+
 ---
 
 ## 6. Known live bug to fix first

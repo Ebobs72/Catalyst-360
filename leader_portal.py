@@ -98,9 +98,24 @@ def _html(fragment):
 
 
 def _md(fragment):
-    """st.markdown(_html(fragment), unsafe_allow_html=True) - the single
-    call site every top-level HTML block in this file should go through."""
-    st.markdown(_html(fragment), unsafe_allow_html=True)
+    """st.markdown(_html(fragment), unsafe_allow_html=True, anchors=False) -
+    the single call site every top-level HTML block in this file should go
+    through, including every h1-h3 in this file (confirmed by grep - none
+    render via a separate raw st.markdown() call).
+
+    anchors=False disables Streamlit's automatic heading-anchor-link icon
+    (the small link glyph that appears on hover, with a matching #id added
+    to the heading and jumped-to on click). Confirmed live: Streamlit
+    applies this to ANY h1-h6 tag rendered through st.markdown, including
+    raw HTML passed via unsafe_allow_html - not just headings created via
+    its own Markdown '#' syntax or st.header()/st.subheader(). It's
+    stray default chrome here, not a deliberate feature: this app has no
+    in-page anchor navigation for these headings to serve. There is no
+    global/config.toml equivalent (checked the installed Streamlit 1.60.0
+    source directly - anchors is a per-call keyword on st.markdown only,
+    nothing in config.py), so fixing it once here, at this file's single
+    HTML-rendering choke point, is the actual global fix available."""
+    st.markdown(_html(fragment), unsafe_allow_html=True, anchors=False)
 
 
 def _icon(name, size=20, color=None):
