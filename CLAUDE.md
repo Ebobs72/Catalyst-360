@@ -2225,6 +2225,77 @@ widths.
 - No test data needed for this fix - verification was against the
   existing sandbox portal_token only.
 
+### Inconsistent Anonymity Gating: Stats Strip vs. Reminder Caption — FIXED 2026-08-27
+Found by the human actually using the rebuilt portal, not hypothetical:
+at `outstanding == 1` the "Your Progress" stats strip correctly fell
+back to vague text ("Responses are coming in"), but the reminder
+caption two inches below it stated the identical fact in plain digits -
+"Nudges the 1 who haven't responded yet." One text element on the page
+was defeating what another was deliberately hiding.
+
+- **Swept for every other instance, not just the reported one.** Found a
+  SECOND real leak in the same feature: `_send_reminders_and_report`
+  (the message shown after actually clicking Send Reminders) also
+  stated bare counts in every branch - "Reminded 1 rater.", "All 1
+  rater still within their 48-hour window...", "1 failed to send...".
+  At `outstanding == 1` any of these would have shown "1" just as
+  plainly as the caption did. The Full 360 status card (the "X of Y
+  responses received" / percentage pill near the top of Overview) was
+  checked and confirmed ALREADY correctly gated via the same
+  `_progress_stats_safe` call - no change needed there, but see below
+  for why it's now wired to the same value as everything else rather
+  than merely reaching the same answer independently. Nominate Raters
+  was checked too - it renders no response-count text at all (only
+  nomination counts, which are the leader's own action and explicitly
+  outside this rule per CLAUDE.md section 4), so nothing to fix there.
+  The admin dashboard's Links & Tracking view was deliberately NOT
+  touched - real per-rater response status there is a documented,
+  legitimate exemption (the administrator, not the leader), unrelated
+  to this leak.
+- **Confirmed the exact trigger condition, not assumed**: `_progress_
+  stats_safe`'s `gated = total < ANONYMITY_THRESHOLD or outstanding ==
+  1` - the same condition already driving the stats strip and status
+  card.
+- **Fix, per the human's own recommendation (option 1: extend the
+  protection, don't loosen it)**: `render_portal_overview` now computes
+  `_progress_stats_safe(...)` exactly ONCE, into `overview_stats`, at
+  the top of the function, and threads that single value through every
+  element that touches response counts - the Full 360 status card (now
+  takes `stats` as a parameter instead of recomputing it), the reminder
+  caption, and `_send_reminders_and_report` (gained a `reveal_counts`
+  parameter). This isn't just "compute the same gate twice, correctly" -
+  a single shared value is what makes it structurally impossible for
+  any of these to independently drift out of sync with each other
+  again, which is exactly the category of bug this task exists to fix.
+  When `reveal_counts=False`, every branch of the send-reminders result
+  message states an action/outcome with literally no number in it, not
+  a differently-worded number - "Reminder sent to whoever was eligible."
+  / "Still within the 48-hour window — no reminder was sent." / "A
+  reminder failed to send...".
+- VERIFIED LIVE, both the reported case and the fix: constructed a real
+  test leader with 4 completed + 1 incomplete rater (outstanding == 1,
+  total == 5, so the ONLY gating reason is the outstanding==1 branch,
+  matching the human's exact reported scenario, not the low-total one) -
+  screenshotted the full Overview page after the fix and confirmed NO
+  numeric outstanding/responded count appears anywhere on it (status
+  card, reminder caption, stats strip all read generically). Clicked
+  Send Reminders for real against a fake local SMTP target (so it
+  genuinely failed) and confirmed the result message read "A reminder
+  failed to send — check back or contact your programme coordinator." -
+  no count. The other three message branches (sent-only, throttled-only,
+  mixed) aren't reachable live without a working SMTP listener, so
+  verified by calling the real `_send_reminders_and_report` function
+  directly (not a reimplementation) with `send_bulk_reminders`
+  monkey-patched to return each tally, confirming both `reveal_counts=
+  True` (unchanged from before - still states real numbers, e.g.
+  "Reminded 1 rater.") and `reveal_counts=False` (fully generic, zero
+  digits) for all four branches.
+- Test leader (id 41, "Gate Test Leader") and the temporary
+  `.streamlit/secrets.toml` (fake SMTP, needed to make `is_email_
+  configured()` true so the Send Reminders button would render at all)
+  both removed after verification. Leader 1's 13-rater baseline
+  confirmed unchanged.
+
 ---
 
 ## 6. Known live bug to fix first

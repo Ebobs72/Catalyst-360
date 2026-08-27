@@ -301,7 +301,7 @@ def _reminder_cooldown_state(incomplete_raters):
     return any_eligible, hours_until_next
 
 
-def _send_reminders_and_report(db, leader_info, incomplete_raters, base_url):
+def _send_reminders_and_report(db, leader_info, incomplete_raters, base_url, reveal_counts=True):
     """
     Send reminders and return an ACCURATE result message.
 
@@ -317,6 +317,15 @@ def _send_reminders_and_report(db, leader_info, incomplete_raters, base_url):
     tally as the admin dashboard's equivalent fix, so both portals report
     reminders with the same accuracy standard and neither drifts from the
     other independently.
+
+    `reveal_counts` MUST be the same gate as the stats strip/status card
+    (`_progress_stats_safe(...)['safe']`) - found live 2026-08-27 (the
+    human, using the real portal, spotted it): at outstanding == 1 the
+    stats strip correctly hid the number, but clicking Send Reminders
+    still returned "Reminded 1 rater." - one text element on the page
+    defeating what another was deliberately hiding. When False, every
+    branch below states an action/outcome with no number in it at all,
+    not just a differently-worded number.
     """
     emailed = [r for r in incomplete_raters if r.get('email')]
     if not emailed:
@@ -325,6 +334,24 @@ def _send_reminders_and_report(db, leader_info, incomplete_raters, base_url):
     sent, throttled, failed, _results = send_bulk_reminders(
         emailed, leader_info['name'], base_url, db
     )
+
+    if not reveal_counts:
+        parts = []
+        if sent:
+            parts.append("Reminder sent to whoever was eligible.")
+        if throttled:
+            if sent:
+                parts.append("Anyone still within their 48-hour window wasn't reminded again.")
+            else:
+                _any_eligible, hours = _reminder_cooldown_state(incomplete_raters)
+                when = f" Try again in about {round(hours)}h." if hours else ""
+                parts.append(f"Still within the 48-hour window — no reminder was sent.{when}")
+        if failed:
+            parts.append(
+                "A reminder failed to send — check back or contact your "
+                "programme coordinator."
+            )
+        return " ".join(parts) if parts else "Nobody to remind."
 
     parts = []
     if sent:
@@ -1383,6 +1410,16 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
 
     base_url = st.session_state.get('portal_base_url', get_app_base_url())
 
+    # Computed once, here, and threaded through every element on this page
+    # that touches response counts (the Full 360 status card, the reminder
+    # note, the Send Reminders result, the stats strip) - a single source
+    # of truth for whether numbers are safe to show, so none of them can
+    # ever disagree with each other again. See the REAL BUG note further
+    # down at the reminder note for what happened when they weren't.
+    overview_stats = _progress_stats_safe(
+        sum(1 for r in other_raters if r.get('completed')), len(other_raters)
+    )
+
     head_col, add_col, send_col = st.columns([3, 1, 1.3])
     with head_col:
         _md(f"""
@@ -1407,7 +1444,7 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
 
     # --- Status cards -----------------------------------------------------
     self_html = _self_status_card_html(self_rater)
-    full360_html = _full360_status_card_html(other_raters)
+    full360_html = _full360_status_card_html(other_raters, overview_stats)
     st.markdown(f'<div class="cp-status-grid">{self_html}{full360_html}</div>', unsafe_allow_html=True)
 
     # --- Who should you nominate? teaser -----------------------------------
@@ -1497,13 +1534,15 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
                 with st.container(key="cp_secondary_send_reminders"):
                     if st.button("Send reminders", disabled=disabled, use_container_width=True,
                                  key="cp_send_reminders_btn"):
-                        msg = _send_reminders_and_report(db, leader_info, incomplete, base_url)
+                        msg = _send_reminders_and_report(db, leader_info, incomplete, base_url,
+                                                          reveal_counts=overview_stats['safe'])
                         st.session_state['cp_reminder_result'] = msg
                         st.rerun()
                 if disabled and hours_until_next:
                     note = f"Available again in {round(hours_until_next)}h."
                 elif incomplete:
-                    note = f"Nudges the {len(incomplete)} who haven't responded yet."
+                    note = (f"Nudges the {len(incomplete)} who haven't responded yet." if overview_stats['safe']
+                            else "Nudges whoever hasn't responded yet.")
                 else:
                     note = "Everyone has responded."
                 st.markdown(f'<div class="cp-reminder-note">{_esc(note)}</div>', unsafe_allow_html=True)
@@ -1511,7 +1550,7 @@ def render_portal_overview(db, leader_info, self_rater, other_raters):
     if st.session_state.get('cp_reminder_result'):
         st.info(st.session_state.pop('cp_reminder_result'))
 
-    stats = _progress_stats_safe(sum(1 for r in other_raters if r.get('completed')), len(other_raters))
+    stats = overview_stats
     if stats['safe']:
         if not other_raters:
             # Real zeros still render below (per the "always show the
@@ -1555,7 +1594,12 @@ def _self_status_card_html(self_rater):
     """)
 
 
-def _full360_status_card_html(other_raters):
+def _full360_status_card_html(other_raters, stats):
+    """`stats` is `_progress_stats_safe(...)`, computed ONCE by the caller
+    (render_portal_overview) and threaded through here rather than
+    recomputed - see that function's `overview_stats` for why: every
+    response-count element on the page reads off the same value so none
+    of them can independently drift out of sync with the others' gating."""
     completed = sum(1 for r in other_raters if r.get('completed'))
     total = len(other_raters)
     if total == 0:
@@ -1567,7 +1611,6 @@ def _full360_status_card_html(other_raters):
           </div>
         </div>
         """)
-    stats = _progress_stats_safe(completed, total)
     if completed == total:
         return _html(f"""
         <div class="cp-status-card cp-done">
