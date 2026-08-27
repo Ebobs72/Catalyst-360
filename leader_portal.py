@@ -229,9 +229,12 @@ def _format_completion_date(raw_timestamp):
 
 def _ring_dashoffset(count, target):
     """
-    SVG stroke-dashoffset for the category progress rings (r=19,
-    circumference 2*pi*19 ≈ 119.4, matching the concept mockup's markup
-    exactly so the same ring geometry/CSS applies unchanged).
+    SVG stroke-dashoffset for the category progress rings (r=24,
+    circumference 2*pi*24 ≈ 150.8). Sized up from the concept mockup's
+    original r=19/119.4 on 2026-08-27, alongside moving the ring to
+    always sit on its own line below the category label (see
+    .cp-card-top) - freed from squeezing beside label text at every
+    width, there was room to make it a bit bigger and more legible.
 
     Ring shows NOMINATED count toward the category's suggested number (or,
     for Others, toward min_if_any once anyone's been added) - never response
@@ -240,7 +243,7 @@ def _ring_dashoffset(count, target):
     response-progress ring, which would put per-category response data on a
     screen the anonymity rule doesn't clearly license it for.
     """
-    circumference = 119.4
+    circumference = 150.8
     if target <= 0:
         fraction = 1.0 if count > 0 else 0.0
     else:
@@ -379,9 +382,18 @@ RATER_REQUIREMENTS = {
 CATEGORY_CAPTION = {'Boss': 'Line Manager', 'Peers': 'Colleagues', 'DRs': 'Your Team', 'Others': 'Optional'}
 CATEGORY_REQ_TEXT = {
     'Boss': f"Minimum <b>{RATER_REQUIREMENTS['Boss']['min']}</b>, max {RATER_REQUIREMENTS['Boss']['max']} if matrix reporting",
-    'Peers': f"Minimum <b>{RATER_REQUIREMENTS['Peers']['min']}</b>, suggested {RATER_REQUIREMENTS['Peers']['suggested']}",
-    'DRs': f"Minimum <b>{RATER_REQUIREMENTS['DRs']['min']}</b>, suggested {RATER_REQUIREMENTS['DRs']['suggested']}",
-    'Others': f"Minimum {RATER_REQUIREMENTS['Others']['min_if_any']}, ideally 4 or 5 if you have them",
+    'Peers': (f"Minimum <b>{RATER_REQUIREMENTS['Peers']['min']}</b>, suggested {RATER_REQUIREMENTS['Peers']['suggested']}, "
+               f"up to {RATER_REQUIREMENTS['Peers']['max']} if needed"),
+    'DRs': (f"Minimum <b>{RATER_REQUIREMENTS['DRs']['min']}</b>, suggested {RATER_REQUIREMENTS['DRs']['suggested']}, "
+            f"up to {RATER_REQUIREMENTS['DRs']['max']} if needed"),
+    # Deliberately NOT the same flat "suggested 5" pattern as Peers/DRs -
+    # Others typically draws from a smaller, more constrained pool (named
+    # stakeholders/customers), so the softer "4 or 5 if you have them"
+    # sets more honest expectations. The cap (10) is genuinely the same
+    # number as Peers/DRs though, confirmed identical and confirmed safe
+    # to state - see the nomination-cap diagnostic in the history above.
+    'Others': (f"Minimum {RATER_REQUIREMENTS['Others']['min_if_any']}, ideally 4 or 5 if you have them, "
+               f"up to {RATER_REQUIREMENTS['Others']['max']} if needed"),
 }
 CATEGORY_ACCENT = {'Boss': '#183319', 'Peers': '#183319', 'DRs': '#6b7a63', 'Others': '#DCD8C0'}
 
@@ -403,7 +415,9 @@ GUIDELINE_CATEGORIES = [
         ),
     },
     {
-        'key': 'Peers', 'title': 'Peers', 'badge': 'Minimum 3, suggested 5',
+        'key': 'Peers', 'title': 'Peers',
+        'badge': (f"Minimum {RATER_REQUIREMENTS['Peers']['min']}, suggested {RATER_REQUIREMENTS['Peers']['suggested']}, "
+                  f"up to {RATER_REQUIREMENTS['Peers']['max']} if needed"),
         'body': (
             "Colleagues at a similar level who see your day-to-day work, ideally from more "
             "than one part of the business, not just people on your immediate team."
@@ -416,7 +430,9 @@ GUIDELINE_CATEGORIES = [
         ),
     },
     {
-        'key': 'DRs', 'title': 'Direct Reports', 'badge': 'Minimum 3, suggested 5',
+        'key': 'DRs', 'title': 'Direct Reports',
+        'badge': (f"Minimum {RATER_REQUIREMENTS['DRs']['min']}, suggested {RATER_REQUIREMENTS['DRs']['suggested']}, "
+                  f"up to {RATER_REQUIREMENTS['DRs']['max']} if needed"),
         'body': (
             "People who report to you. Aim for a range, someone who's been in your team for "
             "years, someone newer, someone from a different function if your team spans more "
@@ -430,7 +446,8 @@ GUIDELINE_CATEGORIES = [
     },
     {
         'key': 'Others', 'title': 'Others',
-        'badge': f"Minimum {RATER_REQUIREMENTS['Others']['min_if_any']}, ideally 4 or 5",
+        'badge': (f"Minimum {RATER_REQUIREMENTS['Others']['min_if_any']}, ideally 4 or 5 if you have them, "
+                  f"up to {RATER_REQUIREMENTS['Others']['max']} if needed"),
         'body': (
             "Stakeholders, customers, or colleagues from outside your direct chain, if "
             "relevant to your role. Only use this category if you have genuinely relevant "
@@ -731,7 +748,34 @@ PORTAL_CSS = """
      not overlapping it - "a proper button", not a bare link fused to the
      card's edge. */
   div[class*="st-key-cp_secondary_cat_link_"]{margin-top:10px;}
-  .cp-card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;}
+  /* REAL BUG FOUND LIVE 2026-08-27 (the human spotted it in a screenshot
+     at a width none of the prior sweeps happened to land on): with the
+     label and ring side by side, the ring got pushed past the card's
+     own right edge at a narrow band of widths between the 4-column
+     layout's collapse point and where everything comfortably fits
+     (~640-700px, confirmed via getBoundingClientRect). Root cause: the
+     ring is a fixed 48px with flex-shrink:0 (an SVG ring can't usefully
+     shrink), and the category label is sometimes a single unbreakable
+     word ("COLLEAGUES", "OPTIONAL") with no space to wrap at, so when
+     both items' combined natural width exceeded the row's,
+     justify-content:space-between had no spare space to remove and the
+     ring just overflowed with nothing to stop it. A first fix
+     (flex-wrap, letting the ring drop to its own line only when it
+     didn't fit) stopped the overflow but traded it for a DIFFERENT
+     problem: whether the ring wrapped now depended on each card's own
+     label text length, so at some widths (e.g. 768-902px) two cards
+     showed the ring beside the label and the other two showed it below
+     - a row of four cards that no longer matched each other, confirmed
+     via the same measurements.
+     FIX (the human's own suggestion, simpler than either attempt
+     above): stop trying to fit them side by side at all. The ring
+     always sits on its own line below the label now, at every width -
+     removes the whole category of "does this fit today" bug rather
+     than chasing it, and every card is now guaranteed identical
+     regardless of width or label length. Freed from squeezing beside
+     label text, the ring also grew (48px -> 60px, r 19 -> 24) - see
+     _ring_dashoffset and the SVG markup in _category_card_html. */
+  .cp-card-top{display:flex;flex-direction:column;align-items:flex-start;gap:12px;margin-bottom:12px;}
   /* REAL BUG FOUND LIVE, confirmed via getBoundingClientRect at a range of
      widths, not visible in any single screenshot on its own: the pill's
      margin-top:auto anchors it to the bottom of the (equal-height) card,
@@ -758,14 +802,27 @@ PORTAL_CSS = """
      within one row at one width. */
   .cp-cat-label{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#6B6B6B;
     display:block;min-height:36px;}
-  .cp-ring{position:relative;width:48px;height:48px;flex-shrink:0;}
+  .cp-ring{position:relative;width:60px;height:60px;flex-shrink:0;}
   .cp-ring svg{transform:rotate(-90deg);}
   .cp-ring-track{stroke:#f1efe4;}
   .cp-ring-progress{stroke:#183319;stroke-linecap:round;}
   .cp-ring-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    font-size:11px;font-weight:700;color:#183319;}
+    font-size:13px;font-weight:700;color:#183319;}
   .cp-card h3{font-size:16.5px;margin:2px 0 4px;color:#040404;font-weight:700;min-height:68px;}
-  .cp-card .cp-req{font-size:12px;color:#6B6B6B;margin-bottom:14px;min-height:58px;}
+  /* min-height bumped 58px -> 98px 2026-08-27: the "Final Category
+     Guidance Copy" pass lengthened all three non-Boss descriptions
+     (added ", up to 10 if needed"; Others' own text grew further still,
+     from "...if you have them" to that plus the same suffix). Re-swept
+     the same worst-case width range this reservation was originally
+     tuned against (630-710px, the narrowest multi-column squeeze before
+     Streamlit's own native column-stacking takes over) and found Others'
+     longer text now needs up to 5 lines (96px) there, not the 3 lines
+     (58px) the old copy needed - confirmed via a natural-height probe
+     (an off-screen clone at the real column width, bypassing the
+     flex-shrink that was otherwise silently clipping the visible text
+     to less than it needed). Re-verify this number again if any of
+     these three strings changes length again. */
+  .cp-card .cp-req{font-size:12px;color:#6B6B6B;margin-bottom:14px;min-height:98px;}
   .cp-card .cp-req b{color:#040404;}
   /* REAL BUG FOUND LIVE, a THIRD source of the same footTop mismatch,
      found only after the label/h3/description reservations above still
@@ -895,10 +952,29 @@ PORTAL_CSS = """
     padding:26px 28px;margin-bottom:18px;position:relative;overflow:hidden;}
   .cp-cat-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
     background:var(--cp-accent,#183319);}
-  .cp-cat-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:12px;}
+  /* flex-wrap added 2026-08-27: the badge text grew considerably in the
+     "Final Category Guidance Copy" pass (e.g. Others' badge went from
+     "Minimum 3, ideally 4 or 5" to "...up to 10 if needed" appended), and
+     at narrow widths the row no longer had room for both the title and
+     the (white-space:nowrap) badge on one line. Confirmed live at 430px:
+     the badge's own measured right edge sat past the card's right edge
+     despite the card's overflow:hidden, while the title got squeezed
+     into an unreadable "Ot/he/rs" - a flex row with no wrap forces BOTH
+     children to fight for space when together they exceed it, and a
+     nowrap child can't shrink to help. Wrapping lets the badge drop to
+     its own line below the title instead, so neither is squeezed. */
+  .cp-cat-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:12px;
+    flex-wrap:wrap;}
   .cp-cat-top h2{font-size:18px;margin:0;color:#040404;font-weight:700;}
+  /* white-space:nowrap dropped 2026-08-27: at 360px even the badge ALONE
+     on its own row (after the cp-cat-top flex-wrap fix above) was still
+     wider than the card - Others' longest badge text has nowhere left to
+     shrink to if it can't wrap internally too. Plain wrapping (the
+     default) still renders as a single line whenever there's room, so
+     this doesn't change how the shorter Boss/Peers/DRs badges look at
+     any width that already worked. */
   .cp-req-badge{font-size:12px;font-weight:700;padding:5px 12px;border-radius:20px;
-    background:#e7ebe3;color:#183319;white-space:nowrap;}
+    background:#e7ebe3;color:#183319;max-width:100%;}
   .cp-cat-card p{font-size:14px;line-height:1.6;color:#3D3D3D;margin:0 0 12px;}
   .cp-cat-card .cp-tip{font-size:13px;color:#6B6B6B;background:#f1efe4;border-radius:8px;
     padding:10px 14px;margin-top:8px;}
@@ -1553,10 +1629,10 @@ def _category_card_html(cat, count):
       <div class="cp-card-top">
         <span class="cp-cat-label">{_esc(CATEGORY_CAPTION[cat])}</span>
         <div class="cp-ring">
-          <svg width="48" height="48">
-            <circle class="cp-ring-track" cx="24" cy="24" r="19" stroke-width="5" fill="none"/>
-            <circle class="cp-ring-progress" cx="24" cy="24" r="19" stroke-width="5" fill="none"
-              stroke-dasharray="119.4" stroke-dashoffset="{offset}"/>
+          <svg width="60" height="60">
+            <circle class="cp-ring-track" cx="30" cy="30" r="24" stroke-width="6" fill="none"/>
+            <circle class="cp-ring-progress" cx="30" cy="30" r="24" stroke-width="6" fill="none"
+              stroke-dasharray="150.8" stroke-dashoffset="{offset}"/>
           </svg>
           <div class="cp-ring-label">{count}{f"/{target}" if req['suggested'] or (min_if_any and count) else ""}</div>
         </div>
@@ -1761,8 +1837,9 @@ def _render_nomination_warnings(rater_counts):
         fold_target = fold_target_text.get(cat, 'another group')
         if cat == 'Others':
             # Others' upfront copy (CATEGORY_REQ_TEXT, GUIDELINE_CATEGORIES)
-            # already says "Minimum 3, ideally 4 or 5 if you have them" -
-            # this warning fires at exactly 3, so it must read as a REMINDER
+            # already says "Minimum 3, ideally 4 or 5 if you have them, up
+            # to 10 if needed" - this warning fires at exactly 3, so it
+            # must read as a REMINDER
             # of that, not as new information sprung on the leader right
             # after they did what they were told. See the human's logic
             # check 2026-08-27: the old wording (shared with Peers/DRs

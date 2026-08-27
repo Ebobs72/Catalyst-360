@@ -2035,6 +2035,196 @@ cap or the ring bug exists without checking."
   are pre-existing baseline fixtures other tests rely on. Leader 1's
   13-rater baseline confirmed unchanged afterward.
 
+### Diagnose: Is the Nomination Cap Deliberate, and Can the Anonymity Fold Ever Collide With It? — DIAGNOSED 2026-08-27, NOTHING CHANGED
+Three questions, diagnosis only, no fix or copy change made - none was
+needed. Findings below are load-bearing for any future Guidelines
+copy work around the nomination cap, so recorded here rather than
+just answered in chat and lost.
+
+- **Is 10 deliberate or arbitrary?** ARBITRARY, with high confidence.
+  Traced `RATER_REQUIREMENTS['max']` back through the entire git
+  history: the very first commit (`2bcbf35`, a bulk "Add files via
+  upload" with no authored reasoning) already had `max: 10` for
+  Peers/DRs/Others, with no comment anywhere near it. Every commit
+  since that has touched this dict - most significantly `1737e2d`
+  ("Rework instrument, anonymity handling..."), which deliberately
+  changed DRs from optional (`min: 0`) to required (`min: 3`) and added
+  `min_if_any` for Others, both with real documented anonymity
+  reasoning - left `max: 10` completely untouched. No commit message,
+  code comment, or prior CLAUDE.md entry has ever explained why 10
+  specifically. Contrast with `min` (3, tied directly to
+  `ANONYMITY_THRESHOLD`) and `suggested` (5, reasoned about explicitly
+  in the "Nominations Beyond the 'Suggested' Target" entry above): both
+  have a real, traceable rationale; `max` has never had one, in this
+  system's entire history. Reads as a generous-but-arbitrary guard
+  rail (large enough nobody realistic hits it, small enough to catch a
+  fat-fingered CSV import), not a considered recommendation. NOT worth
+  publicising in Guidelines as "maximum 10" in a way that implies a
+  real, deliberated ceiling - if it's surfaced at all, it should read
+  as a soft technical backstop, not a number anyone chose for a reason.
+- **Does Others share the same cap as Peers/DRs?** YES, confirmed
+  directly from the dict, not assumed: `Peers: max 10`, `DRs: max 10`,
+  `Others: max 10` - identical, and has been since the very first
+  commit. Boss is the sole outlier at `max: 2`, which - unlike the
+  other three - IS explained everywhere it appears ("max 2 if matrix
+  reporting"), a genuinely different, deliberate, already-surfaced
+  number.
+- **Can the anonymity fold ever collide with the nomination cap?**
+  NO - traced and empirically verified, not inferred. `get_leader_
+  feedback_data` in `database.py` is PURELY a SELECT + in-memory
+  Python aggregation: it reads `raters.relationship` fresh on every
+  call and folds via `map_group()`, a pure function whose output only
+  ever lives in local variables for that one function call. There is
+  no `UPDATE`/`INSERT` touching `raters` anywhere in it - nothing is
+  ever physically recategorised in storage. Every score list
+  (`item_scores[item_num][mapped_group].append(...)`) and every
+  comment list (`comments['keep'].append(...)`) is a plain unbounded
+  Python list with `sum()/len()` averaging - no size check, no cap,
+  anywhere in the aggregation OR in `report_generator.py`'s table
+  rendering (`row[1].text = str(response_counts[group])` - a group
+  count is just printed as text, however large).
+  - VERIFIED LIVE with the exact scenario the human described:
+    constructed a leader with 9 completed Direct Reports and 2
+    completed Peers (real `ratings` rows too, DRs scored 4, Peers
+    scored 2, so the averaging math had real data to prove itself
+    against), 0 Others, then called the REAL `get_leader_feedback_data`
+    function directly (not a reimplementation). Result: `response_
+    counts['DRs'] = 11` - genuinely exceeding the nomination cap of
+    10 - with `hidden_groups: ['Peers']`, `others_fold_target: 'DRs'`,
+    and item 1's DRs score correctly computed as 3.6 (the true
+    weighted mean of all 11 responses: (9×4 + 2×2)/11 = 3.636…,
+    confirming every folded response was actually counted, not
+    truncated at some limit). Read `raters.relationship` directly from
+    the database immediately after: both Peer rows still said
+    `'Peers'`, completely unchanged - the fold never touched storage.
+  - Went one step further and fed that exact returned data into the
+    REAL `add_response_summary` function from `report_generator.py`
+    (not a mock), rendering an actual docx table: "Direct Reports | 11"
+    printed cleanly, Total row correctly 11, no crash, no truncation.
+  - Confirmed definitively: the nomination cap (data-entry constraint,
+    enforced at add/CSV-import time against `raters` as rows are
+    created) and the anonymity fold (reporting constraint, computed
+    fresh at report-generation time from whatever `raters` currently
+    contains) operate on different data at different times and cannot
+    interact, let alone collide. A folded group CAN legitimately
+    display a number larger than any single category's cap - this is
+    normal, safe, and already proven to render correctly.
+  - Test leader (id 40, "Fold Test Leader") and all its raters/ratings/
+    email_log rows deleted entirely after verification. Leader 1's
+    13-rater baseline confirmed unchanged.
+
+### Final Category Guidance Copy — DONE 2026-08-27, two real layout bugs found and fixed along the way
+Content-only change, per the human's explicit brief and the diagnostic
+findings above: Peers/DRs now read "Minimum 3, suggested 5, up to 10 if
+needed"; Others reads "Minimum 3, ideally 4 or 5 if you have them, up
+to 10 if needed" - three distinct strings, not a shared template, since
+Others deliberately keeps its own softer framing. Boss's copy
+("Minimum 1, max 2 if matrix reporting" / "1 required, max 2") is
+untouched - confirmed via grep after editing, not just by not touching
+it. Applied to `CATEGORY_REQ_TEXT` (Overview/Nominate Raters cards) and
+`GUIDELINE_CATEGORIES`'s `badge` field (Guidelines page) - this
+supersedes the shortened badge wording from the prior "Nominations
+Beyond the 'Suggested' Target" pass; this task's brief explicitly asked
+for the exact wording verbatim across all surfaces, not a terser
+badge-specific variant. Begin Here checked again and confirmed
+unchanged, correctly: it still names no specific numbers for any of
+these three categories.
+
+Two real, previously-invisible layout bugs surfaced by lengthening this
+copy, both found live (not assumed) and both fixed under the same
+screenshot-driven authority as earlier sessions:
+
+- **Category cards (Overview/Nominate): the equal-height/pill-alignment
+  fix from two tasks ago silently stopped covering the new worst
+  case.** That fix reserved a fixed 58px (3 lines) for `.cp-req`, sized
+  against the OLD copy. Others' new, longer text needs up to 5 lines
+  (96px) at the same ~630-710px squeeze width the reservation was
+  originally tuned against - confirmed via a natural-height probe (an
+  off-screen clone of the text at the real column width, since the
+  visible element was being silently flex-shrunk below what it actually
+  needed, clipping text with no visual overflow indicator). Bumped
+  `.cp-req`'s `min-height` to 98px. Re-verified the entire original
+  sweep (360/430/600/645/710/768/902px) with `scrollHeight >
+  clientHeight` overflow checks at each, not just visual screenshots.
+- **Guidelines page: the title+badge header row had no wrapping
+  behaviour at all**, and had never needed any before - the old badge
+  text always fit beside the title on one line at every width tested.
+  At 430px the new, longer Others badge forced the title into an
+  unreadable "Ot/he/rs" vertical sliver while the badge itself measured
+  past the card's own right edge (confirmed via `getBoundingClientRect`
+  comparison, not just eyeballed) despite the card's `overflow:hidden`.
+  Fixed in two steps, each addressing a distinct symptom: `flex-wrap:
+  wrap` on `.cp-cat-top` let the badge drop to its own line instead of
+  fighting the title for space on one row - this alone fixed everything
+  down to 430px, but at 360px the badge ALONE, on its own row, was
+  still wider than the card, because it was still `white-space:nowrap`
+  and had nowhere left to shrink to. Dropped `nowrap` (the default
+  `normal` still renders as one line whenever there's room, so nothing
+  changed at wider widths) and added `max-width:100%` as a backstop.
+  Re-verified at 360/430/768/902px via direct badge-vs-card
+  `getBoundingClientRect` comparison plus screenshots - no overflow
+  anywhere, and the shorter Boss/Peers/DRs badges at wider widths render
+  identically to before (same single-line height, confirmed).
+
+No test data needed creating or cleaning up for this task - all
+verification was against the existing sandbox portal_token, reading and
+resizing only.
+
+### Category card ring pushed outside its card at ~640-700px — FIXED 2026-08-27, two attempts before the real fix
+Found by the human directly in a screenshot from the task above (a width
+none of that task's own sweeps happened to land on) - the progress ring
+in a category card (label + ring side by side, `.cp-card-top`) was
+visibly sitting partly outside the card's right edge at a narrow band of
+widths.
+
+- **Root cause, confirmed via `getBoundingClientRect`, not assumed**:
+  the ring is a fixed 48px box with `flex-shrink:0` (an SVG ring can't
+  usefully shrink), and the category label is sometimes a single
+  unbreakable word ("COLLEAGUES", "OPTIONAL") with no space to wrap at,
+  so a flex item's default `min-width:auto` stops the label shrinking
+  below that word's own width either. At widths where the two items'
+  combined natural width exceeded the row's, `justify-content:space-
+  between` had no spare space left to remove - it can't create a
+  negative gap, so the ring just overflowed with nothing to stop it.
+  Reproduced precisely: Peers overflowed at every width from ~640-700px
+  (worst case 13.3px past the edge at 645px), Others came within a few
+  px without quite crossing.
+- **First fix attempt, `flex-wrap` on `.cp-card-top`**: let the ring
+  drop to its own line only when it didn't fit beside the label. This
+  genuinely stopped the overflow (confirmed, zero overflow across the
+  full sweep) but traded it for a DIFFERENT problem, found immediately
+  by re-checking wider widths that were previously fine: whether the
+  ring wrapped now depended on each card's OWN label text length, not
+  the row's width alone - at 768px and 902px, "LINE MANAGER"/
+  "COLLEAGUES" wrapped the ring below while "YOUR TEAM"/"OPTIONAL" kept
+  it beside the label, so the row of four cards no longer matched each
+  other. Confirmed via the same `getBoundingClientRect` measurements,
+  not just eyeballed - this was a real regression this fix introduced,
+  not a pre-existing issue newly noticed.
+- **Actual fix, the human's own suggestion**: stop trying to fit label
+  and ring side by side at any width - put the ring on its own line
+  below the label ALWAYS, removing the whole category of "does this fit
+  today" bug rather than chasing it further. `.cp-card-top` changed from
+  a `justify-content:space-between` row to a simple `flex-direction:
+  column` stack. Since the ring no longer needs to squeeze beside label
+  text at any width, it grew too (48px -> 60px, r 19 -> 24, matching
+  `_ring_dashoffset`'s circumference 119.4 -> 150.8 and the SVG markup
+  in `_category_card_html`) - bigger and more legible, at the human's
+  suggestion once the layout no longer constrained it.
+- VERIFIED LIVE at every width in the standard sweep plus the exact
+  widths that exposed both the original bug and the flex-wrap
+  regression (360/430/600/645/690/768/902px): all four cards now measure
+  byte-identical ring position relative to their own card at every
+  single width (confirmed via `getBoundingClientRect` diff, not just
+  screenshots) - genuinely impossible for the ring to ever be pushed out
+  again, since it no longer shares a row with anything that could push
+  it. Re-confirmed the pill-alignment fix from two tasks ago still holds
+  with the taller card-top (footTop identical across all four cards).
+  Checked both usages of the shared card-rendering code (Overview's
+  clickable cards, Nominate Raters' read-only ones).
+- No test data needed for this fix - verification was against the
+  existing sandbox portal_token only.
+
 ---
 
 ## 6. Known live bug to fix first
