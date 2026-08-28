@@ -2942,6 +2942,140 @@ resolved by this change) - this is scoped to Self only.
   are completely unaffected. Both test raters deleted after
   verification; leader 1's 13-rater baseline confirmed unchanged.
 
+### New Production Environment: Branch, Domain, and a Real Incident — 2026-08-28
+The real October cohort deployment. A new `production` branch, a new Render
+service, and a new Turso database - genuinely separate from both `main`
+(Mark's, untouched) and `sandbox` (still the working/test environment).
+
+- **Step 1, confirmed before touching anything**: Mark's original deployment
+  (`main` branch) is still live and connected. Directly checked (not
+  assumed): navigated to `catalyst-360-arbncruhflmazjemep8uzh.streamlit.app`
+  (the `DEFAULT_BASE_URL` in `email_sender.py`) - genuinely live, and its
+  masthead/tab title still reads "The 360 Development Catalyst", the
+  pre-white-label name that only ever existed pre-2026-08-04 and has never
+  been merged past `sandbox` - strong evidence `main` hasn't been touched
+  since original setup. Ian then confirmed directly from the Streamlit
+  dashboard: `main` is live and connected. Per the resulting risk (a new
+  production branch reusing `main` or being merged into it could
+  accidentally redeploy Mark's environment), created a genuinely new
+  `production` branch from `sandbox`'s HEAD (not from `main`, which is
+  stale and pre-dates the white-label rename, the typeface work, and
+  everything else built since) and pushed it to origin.
+- **Step 2, domain routing - confirmed empirically, not assumed**: checked
+  the actual public DNS for `thedevelopmentcatalyst.co.uk` directly (`dig`,
+  no credentials needed - DNS is public). Confirmed Ian's own assumption
+  held: SPF (`v=spf1 include:spf.protection.outlook.com -all`) sits on the
+  root domain, DMARC on `_dmarc.<root>`, DKIM on `selectorN._domainkey.<root>`
+  (Microsoft 365's own delegation pattern) - none of them reference the
+  `portal` subdomain specifically, so repointing `portal`'s CNAME to a new
+  Render service touches none of this authentication setup. Also confirmed
+  the registrar is GoDaddy (`ns71/72.domaincontrol.com`), matching the
+  GoDaddy M365 reference already in `admin_dashboard.py`'s SMTP help text.
+  Flagged a real ordering dependency: repointing `portal` needs the new
+  production Render service's own hostname first, so Step 3 (create the
+  service) has to happen before Step 2 can actually be finished - both
+  need Ian's own hands-on access to Render + GoDaddy, which this session
+  has no credentials or connected tool for.
+
+### Real Incident: `load_demo_data_if_empty()` Silently Seeded the New Production Database
+Found via Ian's own question, not caught by any process here first: "Is
+there any seed script... that could run automatically... particularly
+anything that might fire on first startup against a database it detects
+as empty?" - asked specifically because he'd found unexpected data on the
+brand-new production database and wanted the mechanism identified and
+explained BEFORE anything was deleted, not the reverse.
+
+- **The mechanism**: `load_demo_data_if_empty()` in `app.py`, called
+  unconditionally at module top level (`load_demo_data_if_empty()`, no
+  guard). It checks `len(leaders) == 0` and, if true, inserts three fully-
+  scored demo leaders (Sarah Mitchell, James Thompson, Emma Richardson)
+  with complete synthetic Full 360 data across all 45 items -
+  `np.random.seed(42)` makes this fully deterministic, not occasional.
+  This runs as a side effect of Streamlit executing `app.py`, identical
+  behaviour on any host, any empty database - nothing Render-specific
+  about it (checked: no `render.yaml`/`Procfile`/`start.sh` in the repo to
+  find a Pre-Deploy Command in anyway). The very first request served by
+  the new production service - Ian checking it, a health check, anything -
+  hit the empty table and fired it instantly.
+- **A REAL, REPRODUCIBLE RELIABILITY BUG surfaced while investigating,
+  not just the "fires unexpectedly" problem**: on BOTH production and
+  (checked afterward) sandbox, only Sarah Mitchell was ever actually
+  created - never James Thompson or Emma Richardson. On production,
+  confirmed precisely via row counts: all 13 of Sarah Mitchell's intended
+  raters were created (the "add all raters" loop completed), but only the
+  first 6 (Self, Boss, 4×Peers) got `submit_feedback()` called on them
+  before something stopped the whole function - the 5 DRs and 2 Others
+  raters exist as bare rows with zero ratings/comments. Sandbox's own
+  leftover (`id=1`, `created_at` 2026-08-05 - present since very early in
+  this project, sitting undetected alongside real test data this whole
+  time) shows the IDENTICAL pattern: only Sarah Mitchell, nothing further.
+  Two independent occurrences stopping at the exact same point is real
+  evidence this function does not reliably run to completion against a
+  remote Turso database - most likely a transient failure on one of the
+  many per-rater network round-trips (each `submit_feedback()` call is a
+  real remote write, not a local file operation), not a logic bug specific
+  to DRs/Others (read through the ratings/comments generation code for
+  both - nothing in it behaves differently for those relationship types).
+  Not fixed here beyond the opt-in gate below - worth knowing before
+  anyone relies on `SEED_DEMO_DATA=true` for a real demo: verify all three
+  leaders actually appear rather than assuming a clean run.
+- **Confirmed NOT a notification-email risk**: `db.submit_feedback()` in
+  `database.py` is pure data (ratings, comments, mark-complete, sever) -
+  the admin-notification triggers live in `feedback_form.py`'s UI flow,
+  never in `database.py` itself. Since the seed calls `submit_feedback()`
+  directly, bypassing that UI layer entirely, this could not have sent
+  Ian a stray "Full 360 ready" email.
+- **Fix, per Ian's explicit instruction: gate, don't delete.** The
+  capability is genuinely useful (a fresh dev environment, a one-off demo,
+  testing the admin dashboard with something to look at) - the bug was
+  never the function existing, it was firing itself silently the moment a
+  table happened to be empty. `load_demo_data_if_empty()` now returns
+  immediately unless `SEED_DEMO_DATA` is set to `"true"` in the
+  environment - checked BEFORE the `get_all_leaders()` query even runs, so
+  a production deployment that never sets this variable can never trigger
+  it, regardless of how empty its database is. VERIFIED LIVE both
+  directions, not assumed from reading the code: imported the real
+  `app.py` (not a reimplementation) against a genuinely fresh empty
+  database with no flag set - 0 leaders, confirmed the gate holds; against
+  another fresh database with `SEED_DEMO_DATA=true` - all 3 demo leaders
+  appeared exactly as before, confirming the capability is fully
+  preserved, not removed.
+- **Production cleanup, done via Ian's own hands via Turso's SQL console -
+  no credentials shared into this session, consistent with how every
+  database change in this project has been handled.** Confirmed the
+  precise leader ID and full dependent-row counts first (`raters`:13,
+  `ratings`:270, `comments`:22, `reports`:0, `historical_scores`:0,
+  `email_log`:0) before any deletion, per Ian's own explicit instruction
+  not to delete before understanding whether this could recur. Two real
+  snags hit and resolved along the way, both worth remembering for any
+  future manual Turso cleanup:
+  - A pasted multi-statement `DELETE` block came back as a SQL syntax
+    error mentioning tokens that appeared nowhere in the actual SQL given
+    - traced to Ian having copied an EARLIER draft that still had
+    `<ID1>, <ID2>, <ID3>` placeholder text in it (the literal `<`
+    character is what broke the parser), not the corrected version with
+    the real ID substituted in.
+  - Once corrected, a second attempt hit a genuine `FOREIGN KEY constraint
+    failed` error when the full 7-statement block was pasted and run as
+    one batch - but the read-only recheck immediately after showed EVERY
+    count still at its original value, meaning the whole batch had been
+    rolled back atomically by whichever single statement failed, not
+    partially applied. Resolved by having Ian run each of the 7 DELETEs
+    one at a time instead of as one pasted block - all 7 then succeeded
+    individually with no error at all, an inconsistency between batched
+    and single-statement execution that was never root-caused (no access
+    to Turso's own console internals to explain it) but is worth knowing
+    as a pattern: if a batched multi-statement delete errors on this
+    platform, don't assume partial application - verify actual state, and
+    fall back to one-at-a-time execution rather than debugging the batch
+    further.
+  - Final state confirmed with a real query, not inferred from the
+    deletes appearing to succeed: every dependent-table count at 0, and
+    `leaders` itself empty. Production is genuinely clean.
+- **Sandbox's own leftover left in place**, per Ian's explicit call - not
+  urgent, sandbox is allowed to be messy, and it's been sitting there
+  undetected since 2026-08-05 without causing any actual harm.
+
 ---
 
 ## 6. Known live bug to fix first
