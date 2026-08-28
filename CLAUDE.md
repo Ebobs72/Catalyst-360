@@ -3076,6 +3076,229 @@ explained BEFORE anything was deleted, not the reverse.
   urgent, sandbox is allowed to be messy, and it's been sitting there
   undetected since 2026-08-05 without causing any actual harm.
 
+### "Consent Not Recorded" Investigation — NOT A BUG, Two Separate Consent Columns Explained (2026-08-28)
+Flagged as a priority/compliance issue after Ian checked a real leader's
+row on the new production database post-self-assessment and found
+`leaders.consent_given = 0`, `consent_given_at = NULL` despite having
+genuinely ticked the consent checkbox and completed the self-assessment.
+Investigated end to end (code trace + a live production data check)
+before any fix was attempted, per Ian's own explicit instruction not to
+assume a cause. Conclusion: **the write is working correctly. The wrong
+table was checked.**
+
+- This codebase has TWO SEPARATE, INTENTIONALLY DIFFERENT consent
+  columns, and confusing them is an easy mistake to make when verifying
+  by hand:
+  - `raters.consent_given` / `consent_given_at` - the self-assessment
+    (and rater feedback) consent. Self-relationship submissions are
+    stored as `raters` rows (`relationship = 'Self'`), so THIS is where
+    self-assessment consent lands, written by `db.set_rater_consent()`
+    from `render_consent_gate()` in `feedback_form.py` - the SAME
+    function and code path handles both Self and non-Self raters,
+    just with different on-screen copy (see fix 1 below for the one
+    real gap in that copy split).
+  - `leaders.consent_given` / `consent_given_at` - a DIFFERENT consent,
+    asked on the leader's own portal visit (nominating raters, being
+    responsible for their data), written by a different function
+    (`db.set_leader_consent()`) from `render_leader_consent_gate()` in
+    `leader_portal.py`. Per this project's own two-stage programme
+    timeline (self-assessment before Module 1, the leader portal/rater
+    nomination after), a leader who has only done their self-assessment
+    has legitimately not been through this second, separate gate yet -
+    `leaders.consent_given = 0` in that state is CORRECT, not evidence
+    of a lost write.
+- Traced the full code path before checking any live data (per Ian's own
+  "don't assume" instruction): button click -> `db.set_rater_consent
+  (rater_info['id'])` -> a plain `UPDATE raters SET consent_given=1,
+  consent_given_at=CURRENT_TIMESTAMP WHERE id=?` with an explicit
+  `conn.commit()`, no try/except to swallow a failure silently. Checked
+  `rater_info['id']` traces cleanly to the rater's own primary key via
+  `get_rater_by_token()`'s join (no column collision with the joined
+  `leaders` table's own `id`). Checked for duplicate/shadowing
+  definitions of `set_rater_consent`/`set_leader_consent` - each defined
+  exactly once. Nothing in the code looked broken before ever touching
+  live data.
+- VERIFIED LIVE against the real production database (Ian ran the query,
+  no credentials shared into this session, same discipline as every
+  other database change in this project): the actual Self-relationship
+  rater row for the leader in question showed `consent_given: 1`,
+  `consent_given_at: "2026-08-28 12:51:53"`, roughly 17 minutes before
+  `completed_at` - a real, durable, provable timestamp exactly where the
+  design puts it. Confirms the write path is genuinely sound, not just
+  theoretically sound from reading the code.
+- No code change made here - there was nothing to fix. If this
+  confusion comes up again during manual verification (via Turso's
+  console or otherwise), check `raters.consent_given` for a self-
+  assessment or rater consent question, and `leaders.consent_given`
+  only for a question about the leader's own portal-level consent -
+  they are never the same value and were never meant to be.
+
+### Three Fixes from the Production Walkthrough — DONE 2026-08-28
+
+**Fix 1, rater-only "hard to trace back" language on the self-assessment.**
+The Overall Feedback keep/change comment guidance line was one shared
+string_key with the trace-back clause baked in, so a leader doing their
+own self-assessment read "...keeps your feedback harder to trace back to
+you" - nonsensical when there's no one to trace it back to and nothing
+being anonymised. `_render_comment_guidance` in `feedback_form.py` now
+takes `prompt` ('keep'/'change') and `keep_form` ('self'/'other') and
+resolves one of four distinct string_keys
+(`ui_comment_guidance_{prompt}_{keep_form}`), matching the pattern already
+used for the dimension-level comment prompt
+(`ui_comment_prompt_self`/`_rater`, 2026-08-21). Self drops the trace-back
+clause entirely rather than rewording it. Swept the whole file for other
+leftover instances via grep for "trace back" - the dimension-level prompt
+was already correctly split from the earlier pass; leader_portal.py's one
+other hit is unrelated anonymity-threshold copy, not personal comment
+attribution.
+
+**Fix 2, Self-Assessment report spacing between the dimension description
+and Q1.** Scoped to Self-Assessment only, per Ian's own direct
+instruction after watching the Full 360 sample render on his screen
+during a (subsequently abandoned) automated-verification attempt: "the
+spacing on that version of the report is already fine, this fix should
+only apply to the Self-Assessment report." `add_dimension_section` in
+`report_generator.py` now sets `space_after = Pt(16) if is_self_only else
+Pt(6)` on the description paragraph - Full 360's original Pt(6) untouched.
+Regenerated Ian's real Self-Assessment report and had him view it
+directly; confirmed "Much better."
+- WORD/APPLESCRIPT PDF AUTOMATION IS CURRENTLY BROKEN in this
+  environment's installed Word version (16.112) - both `docx2pdf` and
+  direct AppleScript `save`/`save as` calls fail with "doesn't understand
+  the message" errors, a regression from automation that reportedly
+  worked in earlier sessions. `sdef` (to inspect Word's real AppleScript
+  dictionary) also fails, needing a full Xcode install this machine
+  doesn't have. GUI/keystroke-level automation was tried once and
+  deliberately abandoned - there is no visual access to the desktop to
+  verify blind keystroke automation is doing what's intended, and that
+  risk wasn't worth taking. PRACTICAL CONSEQUENCE: page-break-impact
+  verification for report layout changes currently needs a human to
+  actually view the rendered Word/PDF output (as Ian did here) rather
+  than an automated PyMuPDF page-diff - PyMuPDF itself still works fine
+  for measurement, it's only the .docx -> PDF conversion step that's
+  broken.
+
+**Fix 3, page doesn't scroll to top on dimension advance in the paginated
+feedback form.** Added `_scroll_to_top_if_page_changed(page_idx)` in
+`feedback_form.py`, called once near the end of `render_feedback_form`
+(after the page-type dispatch block renders the new page's own content,
+not before - see the crash note below), tied to `st.session_state
+['_scrolled_to_page_idx']` so it only fires when `form_page_idx` has
+genuinely changed, never on a rerun caused by rating a question or typing
+a comment. Uses `st.iframe` (not `st.components.v1.html`, deprecated in
+this Streamlit version) since a bare `<script>` in `unsafe_allow_html`
+markdown never executes, and targets `[data-testid="stMain"]` (not
+`window`) since that's this app's real scrollable container.
+- THREE DISTINCT BUGS FOUND AND FIXED BEFORE THIS ACTUALLY WORKED, each
+  only found by testing live rather than trusting the code:
+  1. **A genuine, reproducible server crash** (no Python traceback
+     anywhere) when the scroll call was placed BEFORE the page-dispatch
+     block, specifically on the Overall Feedback -> Development
+     Priorities transition. Fixed by moving the call to fire AFTER the
+     new page's widgets have already been rendered into the script.
+  2. **`el.scrollTo({top:0, left:0, behavior:'instant'})` silently failed
+     to reach top specifically on transitions into or out of the Review
+     page** (by far the longest, most element-heavy page), while working
+     everywhere else. Root-caused live via `iframe.contentWindow.eval`:
+     a direct `el.scrollTop = 0` property assignment, invoked the same
+     way, measurably worked (before/after scrollTop read) where the
+     options-object `scrollTo()` call didn't. Switched every scroll call
+     in this function to the plain property assignment.
+  3. **The real cause of the Review-page failure, found only after fix 2
+     alone still didn't work live**: `st.iframe`'s HTML content was a
+     fixed literal string, identical on every call regardless of which
+     page changed to which. Streamlit's frontend appears to treat a
+     repeated `st.iframe` call with byte-identical content as the same
+     element across reruns and never reloads it, so the `<script>` only
+     ever executed on its first mount in a browser session - explaining
+     the exact symptom pattern (dimension-to-dimension and Overall
+     Feedback -> Priorities worked because each was effectively the
+     FIRST scroll iframe mounted in a given test run; Priorities -> Review
+     and Review -> Edit-jump-back failed because an iframe with that same
+     content had already mounted once before). Fixed by embedding
+     `page_idx` into the iframe's HTML as a comment, forcing genuinely
+     different content - and therefore a genuine reload and script
+     re-execution - on every real page change.
+- RETRIED BRIEFLY (three calls at 50/100/150ms), kept as a defensive
+  margin against a genuine render-timing race on a long page like Review,
+  even after finding the real cause above.
+- VERIFIED LIVE end to end after all three fixes, using real user-driven
+  scrolls (never JS-injected) followed by real clicks, then a passive
+  `scrollTop` read: Continue on a dimension page, Overall Feedback ->
+  Priorities, Priorities -> Review, Edit-jump-back-to-a-dimension-page,
+  and Review-after-edit (back to Review) all correctly reset to 0.
+  Selecting a rating and typing+blurring a comment box both correctly did
+  NOT reset scroll (confirmed the scroll position held at its genuine
+  user-set value through both). Re-verified the full sequence again at a
+  375x812 mobile viewport - same results, since the scroll logic itself
+  is plain JS with no viewport-dependent branching.
+- A FALSE ALARM WORTH DOCUMENTING FOR FUTURE SESSIONS: while testing at
+  mobile width, the browser tool's synthetic click repeatedly triggered a
+  native right-click-style context menu (Copy/Select All) instead of a
+  tap, which blocked the intended click and coincided with the dev
+  server becoming briefly unreachable - initially misdiagnosed as a real,
+  mobile-width-specific crash in the scroll fix. Ian caught this directly
+  ("this dialogue box showed up each time you were trying to click
+  continue") and clicked Continue himself, which worked immediately with
+  no crash - proving the app was fine throughout and the issue was purely
+  the mobile-emulated click/touch translation in the test tooling, not
+  application code. WORTH REMEMBERING: at a `resize_window` mobile preset
+  (which enables real touch-point/mouse-to-touch emulation), a
+  `computer{action:"left_click"}` can misfire as a long-press and open a
+  context menu - if a click seems to hang or a server seems to vanish
+  right after clicking at mobile width, check for a stray context menu
+  before concluding the app crashed.
+- Test rater `fixestestself2` (leader 1) and its ratings/comments/
+  email_log rows deleted after verification; leader 1's 13-rater baseline
+  confirmed unchanged.
+
+### Fourth Material Symbols Icon Gap: Streamlit's Built-In Alert Icon — FIXED 2026-08-28
+Spotted by Ian directly in a screenshot taken while testing Fix 3 above,
+not something either of us was looking for: stray "histor" text bleeding
+into the left edge of the Self-Assessment form's "Welcome back!" resume
+banner. He'd captured it but the screenshot got overwritten by a later
+one in the same testing session, so it had to be reproduced fresh rather
+than shown directly.
+
+- Reproduced live by creating a disposable test rater
+  (`reprotestself1`, id 157, deleted after) with a saved draft and
+  consent pre-set, landing straight on the form where the resume banner
+  renders. Inspected the actual DOM rather than guessing: `<span
+  data-testid="stAlertDynamicIcon">history</span>` - the literal Material
+  Symbols icon name ("history", the clock-arrow icon Streamlit shows by
+  default next to `st.info(...)`) rendering as visible text instead of
+  being mapped to its glyph.
+- SAME ROOT CAUSE AS THE THREE MATERIAL-SYMBOLS GAPS ALREADY DOCUMENTED
+  in "Genuine Bold Rollout..." above (Streamlit's `[data-testid=
+  "stIconMaterial"]` icon spans and leader_portal.py's own `_icon()`
+  helper), but a FOURTH, previously unfound instance: this specific icon
+  element - Streamlit's own automatic icon on `st.info`/`st.warning`/
+  `st.success`/`st.error`, not an explicit `icon=":material/name:"`
+  parameter this codebase passes anywhere - carries its own distinct
+  testid, `stAlertDynamicIcon`, which that earlier audit's grep-for-
+  `icon=` approach had no way to find, since there's no call site to grep
+  for. Both `feedback_form.py` and `leader_portal.py` use `st.info`/
+  `st.warning`/`st.success`/`st.error` extensively (the resume banner,
+  nomination warnings, CSV-import results, form-validation errors...), so
+  both files carried the same exposure.
+- Fixed by adding `[data-testid="stAlertDynamicIcon"]` to the existing
+  Material-Symbols-font exception rule in both files' Bentley-typeface
+  `<style>` blocks, alongside the pre-existing `[data-testid=
+  "stIconMaterial"]` exception - same mechanism, same reasoning, just a
+  fourth selector added to the same list.
+- VERIFIED LIVE on `feedback_form.py`: reloaded the same reproduction
+  case after the fix, confirmed via screenshot (a genuine clock icon
+  glyph, no stray text) AND via computed style
+  (`getComputedStyle(el).fontFamily` on the alert-icon span now reads
+  `"Material Symbols Rounded"`, not the inherited Bentley stack).
+  NOT independently re-verified on `leader_portal.py` with a live-rendered
+  alert (none of leader 1's current state happens to trigger one) - the
+  CSS rule is identical and keyed to a generic Streamlit-internal testid
+  with no per-file logic involved, so the feedback_form.py verification
+  stands for both; flagged here rather than silently assumed.
+- Test rater `reprotestself1` (id 157) and its rows deleted after
+  verification; leader 1's 13-rater baseline confirmed unchanged.
+
 ---
 
 ## 6. Known live bug to fix first
