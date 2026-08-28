@@ -129,11 +129,22 @@ _BENTLEY_TYPEFACE_CSS = f"""
    specifically - overriding that font would show the literal name
    ("arrow_forward", "check_circle"...) as readable text next to the
    button label instead of an icon. Declared AFTER the broad rule since
-   both are single-attribute-selector specificity - later wins the tie. */
+   both are single-attribute-selector specificity - later wins the tie.
+   A SECOND instance of the same failure mode, found 2026-08-28 from a
+   real screenshot (Ian spotted stray "histor" text bleeding into the
+   left edge of the "Welcome back!" resume banner below): Streamlit's own
+   built-in alert icon (shown automatically next to st.info/st.warning/
+   etc., not an icon= parameter this file passes) renders the same way,
+   inside [data-testid="stAlertDynamicIcon"] - confirmed live via the
+   actual DOM (`<span data-testid="stAlertDynamicIcon">history</span>`,
+   the literal Material Symbols name for a clock/history icon, rendering
+   as visible text instead of the glyph it maps to). Added to the same
+   exception. */
 .stApp, .stApp * {{
   font-family: {BENTLEY_FONT_STACK} !important;
 }}
-[data-testid="stIconMaterial"] {{
+[data-testid="stIconMaterial"],
+[data-testid="stAlertDynamicIcon"] {{
   font-family: 'Material Symbols Rounded' !important;
 }}
 .feedback-header-title {{
@@ -296,21 +307,136 @@ def _t(db, key, locale, fallback):
     return db.get_translation(key, locale, fallback_text=fallback)
 
 
-def _render_comment_guidance(db, locale):
-    """Persistent guidance line below an optional comment box, encouraging
-    brevity and specificity. Deliberately NOT placeholder text - placeholder
-    text disappears the moment someone starts typing, which is exactly when
-    this matters most."""
-    guidance = _t(
-        db, 'ui_comment_guidance', locale,
-        "Optional. A specific example or two, positive or negative, is more useful than a full "
-        "account, and keeps your feedback harder to trace back to you."
-    )
+def _render_comment_guidance(db, locale, prompt, keep_form):
+    """Persistent guidance line below an Overall Feedback comment box (Keep
+    or Change), encouraging brevity and specificity. Deliberately NOT
+    placeholder text - placeholder text disappears the moment someone
+    starts typing, which is exactly when this matters most.
+
+    SELF/OTHER SPLIT ADDED 2026-08-28 - this was the one leftover shared
+    string found during a sweep after the identical split was already done
+    for the dimension-level comment prompt above (`ui_comment_prompt_self`/
+    `_rater`, 2026-08-21): the trace-back clause ("...harder to trace back
+    to you") makes no sense on a self-assessment - there's no anonymity
+    concern in someone's own signed report, only a rater's feedback needs
+    that reassurance. `prompt` ('keep' or 'change') and `keep_form` ('self'
+    or 'other') together select one of four distinct string_keys, matching
+    the existing `prompt_keep_{keep_form}`/`prompt_change_{keep_form}`
+    pattern two lines above each call site - four independently
+    addressable keys, not one shared string with a runtime patch, so a
+    future translation can diverge per-prompt if that's ever needed even
+    though the English text is identical between Keep and Change today.
+    """
+    key = f'ui_comment_guidance_{prompt}_{keep_form}'
+    if keep_form == 'self':
+        default = (
+            "Optional. A specific example or two, positive or negative, is more useful than a full "
+            "account."
+        )
+    else:
+        default = (
+            "Optional. A specific example or two, positive or negative, is more useful than a full "
+            "account, and keeps your feedback harder to trace back to you."
+        )
+    guidance = _t(db, key, locale, default)
     st.markdown(f"""
     <p style="margin-top: 0.3rem; margin-bottom: 1rem; color: #777; font-size: 0.82rem;">
         {guidance}
     </p>
     """, unsafe_allow_html=True)
+
+
+def _scroll_to_top_if_page_changed(page_idx):
+    """Scroll the browser to the top of the viewport, but ONLY when
+    form_page_idx has genuinely changed since the last time this ran - never
+    on a rerun triggered by something else. Selecting a rating or typing in
+    a comment box also triggers a full Streamlit script rerun, and a naive
+    "scroll on every rerun" would yank the page back to the top mid-
+    keystroke - worse than the problem this exists to fix.
+
+    Tracks the last page_idx actually scrolled to in session_state and only
+    fires when the current value differs from it, then updates the marker.
+    Every code path that changes the active page funnels through the same
+    `page_idx = st.session_state.form_page_idx` read this is called
+    immediately after (see render_feedback_form) - Continue on a dimension
+    page, the Edit-jump-back-to-Review flow, returning to Review afterwards,
+    and the initial resume landing (_resume_page_index) - so one check here
+    covers all of them, not four separate scroll calls scattered at each
+    call site.
+
+    A bare <script> tag inside st.markdown(unsafe_allow_html=True) does NOT
+    execute in Streamlit - confirmed elsewhere in this codebase (the font-
+    comparison page in app.py hit exactly this) that a script inserted via
+    innerHTML never runs; standard browser behaviour, not a Streamlit bug.
+    st.iframe (an HTML-string src) renders into a genuine iframe document
+    instead (not innerHTML), so a script inside it actually executes - and
+    the same-origin access st.iframe explicitly documents for HTML-string
+    content lets that script reach `window.parent` to touch the real page,
+    not just its own (invisible, height=1) iframe. NOT st.components.v1.html,
+    which does the same thing but is deprecated in this Streamlit version
+    (a live console warning names st.iframe as its replacement) - no reason
+    to build a brand new feature on the API already on its way out.
+
+    NOT window.parent.scrollTo() directly, though - confirmed live that
+    this app's actual page-level scrolling doesn't happen on `window` at
+    all: `document.body.scrollHeight` reads 0, and the real scrollable
+    element is Streamlit's own `<section data-testid="stMain">` container
+    (`overflow-y` scoped there, not on the window/body). Scrolling `window`
+    would silently do nothing - confirmed by testing it before finding
+    this. The correct target is that container's own `scrollTo`.
+
+    PLAIN scrollTop ASSIGNMENT, NOT el.scrollTo({...}) - the first version
+    used scrollTo({top:0, left:0, behavior:'instant'}), root-caused live
+    (via iframe.contentWindow.eval) as unreliable in this cross-frame
+    context; a plain `el.scrollTop = 0` property assignment measurably
+    works every time it's actually invoked (confirmed before/after reads),
+    so every scroll call in this function uses that instead.
+
+    THE REAL CAUSE OF THE REVIEW-PAGE FAILURE, found only after the above
+    fix still didn't work live: the iframe's HTML content was a fixed
+    literal string, identical on every call to this function regardless of
+    which page changed to which. Streamlit's frontend appears to treat a
+    repeated st.iframe call with byte-identical content as the same
+    element across reruns and never actually reloads it - so the <script>
+    inside only ever executed on its first mount in a given browser
+    session, never again. This explained the exact pattern observed:
+    dimension-to-dimension and Overall Feedback -> Priorities worked
+    because each was effectively the FIRST scroll iframe ever mounted in
+    that test run; Priorities -> Review (and Review -> Edit-jump-back)
+    failed because by then an iframe with that same content had already
+    mounted once before. Fixed by embedding `page_idx` into the iframe's
+    HTML (an HTML comment, harmless to the script itself) so the content
+    genuinely differs on every real page change, forcing a fresh iframe
+    load - and therefore a fresh script execution - every time.
+
+    RETRIED BRIEFLY, NOT A SINGLE SHOT - kept as a defensive margin against
+    a genuine render race (this script running before Streamlit's frontend
+    finishes laying out a long page like Review). Deliberately capped at
+    150ms total (three quick retries, not the ~1s burst tried first) - long
+    enough to catch a render race, short enough that a person who starts
+    scrolling immediately after the page appears is very unlikely to be
+    fighting it. A longer retry window would risk exactly the "yanked back
+    mid-action" problem this whole feature exists to avoid, just shifted
+    from every rerun to the first few hundred milliseconds after a genuine
+    one.
+    """
+    if st.session_state.get('_scrolled_to_page_idx') == page_idx:
+        return
+    st.session_state['_scrolled_to_page_idx'] = page_idx
+    st.iframe(
+        f"""<!-- page {page_idx} -->
+        <script>
+        function scrollMainToTop() {{
+            var el = window.parent.document.querySelector('[data-testid="stMain"]');
+            if (el) {{ el.scrollTop = 0; el.scrollLeft = 0; }}
+        }}
+        scrollMainToTop();
+        [50, 100, 150].forEach(function(delay) {{
+            setTimeout(scrollMainToTop, delay);
+        }});
+        </script>""",
+        height=1,
+    )
 
 
 def _active_locale(rater_info):
@@ -903,7 +1029,7 @@ def _render_overall_page(db, rater_info, page_idx, pages, locale, is_self, relat
             label_visibility="collapsed",
             placeholder=_t(db, 'ui_keep_placeholder', locale, "Describe the leadership qualities and behaviours that are most effective...")
         )
-        _render_comment_guidance(db, locale)
+        _render_comment_guidance(db, locale, 'keep', keep_form)
 
         change_prompt = _t(db, f'prompt_change_{keep_form}', locale, get_prompt_text('change', relationship))
         st.markdown(f"""
@@ -917,7 +1043,7 @@ def _render_overall_page(db, rater_info, page_idx, pages, locale, is_self, relat
             label_visibility="collapsed",
             placeholder=_t(db, 'ui_change_placeholder', locale, "Suggest the one change that would make the biggest difference...")
         )
-        _render_comment_guidance(db, locale)
+        _render_comment_guidance(db, locale, 'change', keep_form)
 
         st.markdown("<br>", unsafe_allow_html=True)
         col_save, col_continue = st.columns(2)
@@ -1444,6 +1570,18 @@ def render_feedback_form(db, rater_info):
             db, rater_info, pages, locale, is_self, relationship, leader_name, rater_id,
             draft_ratings, draft_comments, scale_labels_by_code, scale_label_to_value_localized
         )
+
+    # Moved here (after the actual page content, not before) 2026-08-28:
+    # firing this ahead of the page dispatch above caused a real, reproducible
+    # crash specifically on the Overall Feedback -> Development Priorities
+    # transition (never on the far more common dimension-to-dimension one) -
+    # confirmed 3 times, server process dies with no Python traceback printed
+    # anywhere, browser left showing a stale dimmed page against a dead
+    # connection. Root cause not fully pinned down (no crash trace available
+    # to inspect), but rendering the iframe AFTER the new page's own widgets
+    # exist rather than before resolved it in the same repro. Recorded in
+    # CLAUDE.md as a real gap worth revisiting if this recurs.
+    _scroll_to_top_if_page_changed(page_idx)
 
     # --- Save-time indicator in sidebar ---
     with st.sidebar:

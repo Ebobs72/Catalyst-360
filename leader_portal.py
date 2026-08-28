@@ -1227,11 +1227,23 @@ PORTAL_CSS = f"""
    path). The exception rule below restores the icon font specifically;
    it's declared AFTER the broad rule and matches it on specificity
    (a single attribute selector, same tier as ".stApp *"), so later-wins
-   source order is what makes it take effect, not higher specificity. */
+   source order is what makes it take effect, not higher specificity.
+   A THIRD instance of the SAME failure mode, found 2026-08-28 via a real
+   screenshot (Ian spotted stray "histor" text bleeding into the "Welcome
+   back!" resume banner in feedback_form.py, reproduced and traced here
+   too since this file's st.info/st.warning/st.success/st.error calls hit
+   the identical code path): Streamlit's own built-in alert icon (the one
+   shown automatically next to st.info/st.warning/st.success/st.error, not
+   an icon= parameter this file passes explicitly) renders the same way,
+   inside [data-testid="stAlertDynamicIcon"] - a fourth Streamlit-internal
+   icon element type this file's own icon audit hadn't enumerated, since
+   it isn't created by an icon= call site to grep for. Added to the same
+   exception rule below. */
 .stApp, .stApp * {{
   font-family: {BENTLEY_FONT_STACK} !important;
 }}
 [data-testid="stIconMaterial"],
+[data-testid="stAlertDynamicIcon"],
 .cp-icon-glyph {{
   font-family: 'Material Symbols Rounded' !important;
 }}

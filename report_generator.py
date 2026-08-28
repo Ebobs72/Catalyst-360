@@ -1435,16 +1435,32 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
     if not is_first_dimension:
         heading.paragraph_format.page_break_before = True
 
-    # Dimension description. Tight space_after instead of the Normal default
-    # (10pt) plus a whole extra blank paragraph after it (~23pt combined) -
-    # one-time saving per dimension, small next to the per-item savings below
-    # but free, since nothing readable shrinks. line_spacing=1.0 overrides
-    # the document default (1.15 "auto"), shaving a proportional amount off
-    # every wrapped line rather than just the paragraph's before/after -
-    # matters most here since some dimension descriptions run to 3-4 lines.
+    # Dimension description. line_spacing=1.0 overrides the document default
+    # (1.15 "auto"), shaving a proportional amount off every wrapped line
+    # rather than just the paragraph's before/after - matters most here
+    # since some dimension descriptions run to 3-4 lines.
+    #
+    # space_after WIDENED 2026-08-28, SELF-ASSESSMENT ONLY (Ian's live
+    # catch: too little room between the description and Q1 in a
+    # generated Self-Assessment report) - was a flat Pt(6) for both
+    # report types, tightened down from the Normal default (10pt) plus a
+    # whole blank paragraph (~23pt combined) purely to save space.
+    # Deliberately NOT widened for Full 360: Ian opened a real generated
+    # Full 360 sample directly in Word while this was being investigated
+    # (a PDF-conversion pipeline attempted here for automated page-fit
+    # measurement turned out to be broken in this Word version - AppleScript
+    # "save as"/"save" on a document object now fails with "doesn't
+    # understand" errors it didn't in earlier sessions, abandoned rather
+    # than pursued further via blind GUI scripting with no way to see the
+    # screen and confirm it was doing the right thing) and confirmed by eye
+    # that its spacing is already fine as-is - Full 360 pages are also
+    # already tighter against the "5 items per page" constraint (see
+    # create_item_bar_chart's own height-tuning comments above), so there
+    # was real page-fit risk in widening it there for no actual benefit.
+    # Self-Assessment tables are shallower and have real room to absorb it.
     desc = doc.add_paragraph()
     desc.paragraph_format.space_before = Pt(0)
-    desc.paragraph_format.space_after = Pt(6)
+    desc.paragraph_format.space_after = Pt(16) if is_self_only else Pt(6)
     desc.paragraph_format.line_spacing = 1.0
     run = desc.add_run(DIMENSION_DESCRIPTIONS[dim_name])
     run.font.italic = True
