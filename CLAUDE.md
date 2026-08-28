@@ -2912,6 +2912,36 @@ thorough pass.
     a proper page-diff check if a real self-assessment report is ever
     seen to reflow unexpectedly.
 
+### Locale Picker Removed from Self-Assessment Only — DONE 2026-08-28
+Ian's instruction, prompted by a question raised while discussing an
+unrelated change: the picker was built for RATERS who might be less
+fluent in English than the leader nominating them, not for leaders
+themselves - every leader attending the programme has decent English.
+Raters still need it (translating rater comments for the Full 360 is a
+separate, larger conversation Ian still needs to have with Bentley, not
+resolved by this change) - this is scoped to Self only.
+
+- `render_feedback_form` in `feedback_form.py`: the locale-gate
+  condition now short-circuits on `is_self` (hoisted above the gate,
+  ahead of its previous computation point further down the function -
+  the later duplicate assignment was removed, not left as dead code).
+  A Self rater's `locale` column simply stays unset, which the i18n
+  scaffold already treats as the English fallback everywhere (`_t()`/
+  `get_translation()` short-circuit `None`/`'en'` to the hardcoded
+  English text) - no other change needed for this to be a no-op
+  functionally, just a removed screen. Skipping straight past the gate
+  means a Self rater now lands directly on the consent gate on their
+  first visit, same as always for a rater who already has a locale set.
+- VERIFIED LIVE with two fresh, never-before-seen test raters (not
+  inferred from reading the code alone): a new Self rater
+  (`localetestself1`) loaded straight into the consent gate with no
+  locale picker shown at all; a new Peers rater (`localetestrater1`)
+  created the same way still saw the full picker (English, Arabic,
+  German, French, Dutch, Vietnamese, Traditional Chinese) exactly as
+  before - confirming the change is genuinely scoped to Self and raters
+  are completely unaffected. Both test raters deleted after
+  verification; leader 1's 13-rater baseline confirmed unchanged.
+
 ---
 
 ## 6. Known live bug to fix first

@@ -1341,7 +1341,22 @@ def render_feedback_form(db, rater_info):
     # raters never see this again because get_rater_by_token() re-fetches
     # rater_info fresh on every page load, already carrying whatever they
     # chose last time.
-    if rater_info.get('locale') is None and st.session_state.get('rater_locale') is None:
+    #
+    # SKIPPED FOR SELF-ASSESSMENT, 2026-08-28 (Ian's instruction): the
+    # picker was built for RATERS who might not be as fluent in English as
+    # the leader nominating them, not for leaders themselves - every leader
+    # attending the programme has decent English. Removed here rather than
+    # from render_locale_picker/get_translation, since raters still need it
+    # (translating rater comments for the Full 360 is a separate, larger
+    # conversation Ian still needs to have with Bentley, not resolved by
+    # this change). A Self rater's locale simply stays unset, which the i18n
+    # scaffold already treats as the English fallback everywhere (_t()/
+    # get_translation() short-circuit None/'en' to the hardcoded English
+    # text) - no other change needed for this to be a no-op functionally,
+    # just a removed screen.
+    is_self = rater_info.get('relationship') == 'Self'
+    if (not is_self and rater_info.get('locale') is None
+            and st.session_state.get('rater_locale') is None):
         render_locale_picker(db, rater_info)
         return
 
@@ -1358,7 +1373,7 @@ def render_feedback_form(db, rater_info):
 
     leader_name = rater_info['leader_name']
     relationship = rater_info['relationship']
-    is_self = relationship == 'Self'
+    # is_self already computed above, ahead of the locale gate.
     rater_id = rater_info['id']
 
     st.session_state.db = db
