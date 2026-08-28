@@ -15,6 +15,7 @@ Run with: streamlit run app.py
 """
 
 import streamlit as st
+import os
 import sqlite3
 import hashlib
 import secrets
@@ -654,9 +655,34 @@ st.markdown("""
 # Initialize database
 db = Database()
 
-# Auto-load demo data on first run if database is empty
+# Demo data seeding - GATED BEHIND SEED_DEMO_DATA, 2026-08-28. Previously
+# fired automatically the instant `leaders` was empty, with no way to opt
+# out - genuinely useful for a fresh local dev environment or a one-off demo,
+# but a real landmine for any newly-provisioned database meant to hold real
+# leader data: the guard was "is this table empty", not "has this ever run
+# before" or "was this actually requested", so ANY empty-database moment -
+# including the very first request to a brand-new production service, before
+# a single real leader had been added - silently populated three fully-
+# scored fake leaders (Sarah Mitchell, James Thompson, Emma Richardson;
+# np.random.seed(42) makes this deterministic, not just occasional) and would
+# do so again on any FUTURE empty-database moment too, e.g. if every leader
+# were ever deleted during testing. Found and the resulting data removed
+# from the new production database the same day this was fixed - see
+# CLAUDE.md.
+# Fixed by requiring explicit opt-in (SEED_DEMO_DATA=true) rather than
+# removing the capability outright - it's still useful for a fresh dev
+# environment or a deliberate one-off demo, it just can no longer trigger
+# itself silently by virtue of a database being new. Same principle as any
+# other environment-gated behaviour in this app: preserve the option, remove
+# the silent default.
 def load_demo_data_if_empty():
-    """Load demo data if no leaders exist."""
+    """Load demo data if no leaders exist AND SEED_DEMO_DATA=true is set.
+
+    Never set this in a production environment's config - see the module
+    comment above for exactly what this seeds and why it's opt-in only.
+    """
+    if os.environ.get("SEED_DEMO_DATA", "").lower() != "true":
+        return
     leaders = db.get_all_leaders()
     if len(leaders) == 0:
         import numpy as np
