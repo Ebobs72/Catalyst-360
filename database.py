@@ -931,7 +931,10 @@ class Database:
         Returns:
             True if deleted, False if refused because the rater has already completed.
         """
-        row = self._fetchone("SELECT completed_at FROM raters WHERE id = ?", (rater_id,))
+        row = self._fetchone(
+            "SELECT completed_at, leader_id, name, email, relationship FROM raters WHERE id = ?",
+            (rater_id,),
+        )
         if row is None or row['completed_at'] is not None:
             return False
 
@@ -950,7 +953,43 @@ class Database:
 
         conn.commit()
         conn.close()
+
+        # FIXED 2026-08-29, real bug found live during a leader-portal
+        # walkthrough: this used to stop above, leaving `leaders.
+        # nomination_roster` (a separate, persisted JSON snapshot - see
+        # get_nomination_roster's own docstring for why it exists
+        # independently of the `raters` rows, to survive identity severing)
+        # completely untouched. The ring, admin totals, and progress bar all
+        # read live from `raters` and correctly updated the moment a rater
+        # was deleted; "People You've Nominated" reads the roster snapshot
+        # instead, so a deleted person kept showing there indefinitely -
+        # not a Streamlit cache, a genuinely separate copy of the data that
+        # nothing was keeping in sync. Removes the matching roster entry
+        # using the SAME matching rule already used by
+        # update_nomination_entry (by email where there is one, since email
+        # is the only link back to a `raters` row; by name+relationship
+        # otherwise), so this can't drift from how the rest of the roster
+        # code already reasons about identity.
+        self._remove_from_nomination_roster(
+            row['leader_id'], email=row['email'], name=row['name'],
+            relationship=row['relationship'],
+        )
         return True
+
+    def _remove_from_nomination_roster(self, leader_id, email, name, relationship):
+        """Remove a nominee from the leader's roster - the deletion-side
+        counterpart to add_to_nomination_roster, matching identity the same
+        way (by email where there is one, else by name+relationship)."""
+        roster = self.get_nomination_roster(leader_id)
+        if email:
+            new_roster = [e for e in roster if e.get('email') != email]
+        else:
+            new_roster = [
+                e for e in roster
+                if not (e.get('name') == name and e.get('relationship') == relationship)
+            ]
+        if len(new_roster) != len(roster):
+            self._save_nomination_roster(leader_id, new_roster)
 
     # ==========================================
     # TRANSLATIONS (i18n)

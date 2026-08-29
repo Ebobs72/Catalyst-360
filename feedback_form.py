@@ -577,12 +577,27 @@ def render_consent_gate(db, rater_info, locale):
                 ),
             ]
         else:
+            # BOSS/LINE MANAGER EXCEPTION ADDED 2026-08-29, found live during a
+            # leader-portal walkthrough: this bullet made a blanket claim that
+            # contradicted a real, already-built, deliberate exception -
+            # Boss/Line Manager feedback (scores AND comments) is always shown
+            # attributably, never blended, because that category has a max of
+            # 2 and structurally can never reach ANONYMITY_THRESHOLD the way
+            # Peers/DRs/Others can. The rater feedback FORM's own instructions
+            # (ui_instructions_other_4 below) already stated this correctly for
+            # comments ("unless you are the direct line manager") - this
+            # consent screen just hadn't caught up for scores. The SELF variant
+            # above was checked too and does NOT need the same fix: it makes no
+            # "shown combined with others" claim at all, since a self-assessment
+            # was never blended with anyone else's to begin with.
             bullets = [
                 _t(
                     db, 'ui_consent_rater_body_1', locale,
                     "Your individual scores are never shown to {leader_name} alone - they're only "
                     "ever shown combined with others in your category, once enough people have "
-                    "responded."
+                    "responded - unless you are their direct line manager, in which case your "
+                    "feedback is shown attributably rather than blended in, since that category "
+                    "can never reach the same threshold on its own."
                 ).format(leader_name=leader_name),
                 _t(
                     db, 'ui_consent_rater_body_2', locale,
@@ -808,9 +823,23 @@ def _render_header(db, locale, rater_info, is_self, leader_name, relationship, s
                "Rate how often you have observed each behaviour. If you have not had an opportunity to "
                "observe someone behaving in that way, please choose <strong>\"No opportunity to observe\"</strong> "
                "rather than guessing."),
+            # CORRECTED 2026-08-29, found live during a leader-portal walkthrough:
+            # "saves as you go" overclaimed - nothing saves from rating an item or
+            # typing a comment alone, since these widgets sit inside st.form and
+            # don't fire on_change (see this file's own comment near
+            # SCALE_OPTIONS). Confirmed live which of the two buttons actually
+            # persists a genuinely partial page: Save & Continue Later has no
+            # completeness check at all (unlike Continue, which blocks until every
+            # item on the page is rated) - clicking it after rating only 1 of 5
+            # items on a page saved exactly that 1 rating to draft_ratings, not a
+            # feature gap needing a fix, just copy that hadn't caught up to what
+            # the button already correctly does.
             _t(db, 'ui_instructions_other_6', locale,
-               "Each page saves as you go. You can close this window at any time "
-               "and return to this link to continue where you left off."),
+               "Nothing saves automatically as you type or select an answer. Click "
+               "<strong>Save & Continue Later</strong> at any point, even with a page only "
+               "partly finished, or complete a page and click Continue - either one saves "
+               "your answers so far. You can then close this window at any time and return "
+               "to this link to continue where you left off."),
         ]
         st.markdown(f"""
         <div style="background: white; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #E0E0E0; border-left: 4px solid #183319;">

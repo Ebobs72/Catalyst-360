@@ -679,6 +679,36 @@ MIN_RESPONSES_FOR_REPORT = 5
 # Self is exempt (always shown)
 ANONYMITY_THRESHOLD = 3
 
+# Nomination category requirements - the single source of truth for the
+# min/suggested/max numbers shown to a leader when nominating raters.
+# MOVED HERE from leader_portal.py 2026-08-29: the invitation email
+# (email_sender.py) had its own hardcoded copy of these numbers and had
+# drifted out of sync with the portal's own copy after a wording update -
+# a real bug found during a leader-portal walkthrough. Both leader_portal.py
+# (which builds the portal's own HTML-formatted CATEGORY_REQ_TEXT from this)
+# and email_sender.py (which builds its own plain-text guidance lines from
+# it) now import this same dict, so the underlying numbers - the part
+# actually likely to change - can't silently diverge between them again.
+# The exact wording template is still written once per caller (the portal
+# bolds the minimum number; the email doesn't), since the two contexts
+# render differently, but both are built from these same figures.
+#
+# 'suggested' is deliberately 0 for Others, not 5 - Others has no flat
+# target the way Peers/DRs do (see each caller's own guidance text).
+# 'ring_target' is a SEPARATE number the leader portal uses only for its
+# progress ring's geometry/label, so it can give a full ring at 5 (matching
+# the other three categories visually) without implying a flat "5" target
+# in the copy, which would misstate a category that often can't realistically
+# reach it - this doesn't touch the portal's chip logic, which reads
+# 'min_if_any' directly, never 'suggested' or 'ring_target'.
+RATER_REQUIREMENTS = {
+    'Boss': {'min': 1, 'max': 2, 'suggested': 1, 'required_nomination': True, 'show_minimum': True},
+    'Peers': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True, 'show_minimum': True},
+    'DRs': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True, 'show_minimum': True},
+    'Others': {'min': 0, 'max': 10, 'suggested': 0, 'required_nomination': False,
+               'show_minimum': False, 'min_if_any': ANONYMITY_THRESHOLD, 'ring_target': 5}
+}
+
 # ============================================
 # COMMENT SECTIONS
 # ============================================
