@@ -42,7 +42,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 from framework import (
-    ANONYMITY_THRESHOLD, RELATIONSHIP_TYPES,
+    ANONYMITY_THRESHOLD, RATER_REQUIREMENTS, RELATIONSHIP_TYPES,
     RELATIONSHIP_INPUT_HELP, normalise_relationship, get_logo_data_uri,
     get_bentley_font_face_css, BENTLEY_FONT_STACK,
     get_bentley_logotype_face_css
@@ -389,29 +389,18 @@ def _send_reminders_and_report(db, leader_info, incomplete_raters, base_url):
     return " ".join(parts) if parts else "Nobody to remind."
 
 
-# Rater requirements
-# 'Others' is optional, but ALL OR NOTHING above the anonymity threshold:
-# nominate none, or nominate at least ANONYMITY_THRESHOLD. One or two "Others" is
-# still worth avoiding: their responses don't get dropped (a thin Others group
-# folds into whichever of Peers/DRs is large enough — see database.py's
-# get_leader_feedback_data), but they lose their own voice in the report, showing
-# up as part of that group rather than as Others. `min_if_any` captures the
-# practical recommendation.
-RATER_REQUIREMENTS = {
-    'Boss': {'min': 1, 'max': 2, 'suggested': 1, 'required_nomination': True, 'show_minimum': True},
-    'Peers': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True, 'show_minimum': True},
-    'DRs': {'min': 3, 'max': 10, 'suggested': 5, 'required_nomination': True, 'show_minimum': True},
-    # 'suggested' is deliberately 0, not 5 - Others has no flat target the way
-    # Peers/DRs do (see CATEGORY_REQ_TEXT below). 'ring_target' is a SEPARATE
-    # number used only for the progress ring's geometry/label, so it can give
-    # a full ring at 5 (matching the other three categories visually) without
-    # implying a flat "5" target in the copy, which would misstate a category
-    # that often can't realistically reach it. Confirmed this doesn't touch
-    # the chip logic below, which reads 'min_if_any' directly, never 'suggested'
-    # or 'ring_target'.
-    'Others': {'min': 0, 'max': 10, 'suggested': 0, 'required_nomination': False,
-               'show_minimum': False, 'min_if_any': ANONYMITY_THRESHOLD, 'ring_target': 5}
-}
+# Rater requirements - MOVED to framework.py 2026-08-29 so email_sender.py's
+# invitation template can share the exact same numbers instead of carrying
+# its own hardcoded, driftable copy (see framework.py's own comment on
+# RATER_REQUIREMENTS for the full reasoning). Imported above alongside
+# ANONYMITY_THRESHOLD. 'Others' is optional, but ALL OR NOTHING above the
+# anonymity threshold: nominate none, or nominate at least
+# ANONYMITY_THRESHOLD. One or two "Others" is still worth avoiding: their
+# responses don't get dropped (a thin Others group folds into whichever of
+# Peers/DRs is large enough — see database.py's get_leader_feedback_data),
+# but they lose their own voice in the report, showing up as part of that
+# group rather than as Others. `min_if_any` captures the practical
+# recommendation.
 
 # Category caption/label pairs and requirement blurbs for the Overview ring
 # cards, matching the concept mockup's two-line card header (small caption,
@@ -595,7 +584,8 @@ BEGIN_HERE_WATCH_CARDS = [
         'items': [
             "You'll see whether someone's been <strong>invited</strong>. You will never see "
             "whether they've personally <strong>responded</strong>, that's deliberate, not a "
-            "missing feature. Response progress only ever shows as a total across each category.",
+            "missing feature. Response progress only ever shows as an overall total across "
+            "everyone invited, never broken down by category or by name.",
         ],
     },
     {
@@ -762,14 +752,50 @@ PORTAL_CSS = """
      cards measured 264/244/264/244px, not equal, despite this rule.
      Fixed by explicitly giving every wrapper level in that chain
      height:100% too, so the definite height on the real stretched column
-     actually propagates all the way down to .cp-card. */
-  div[data-testid="stElementContainer"]:has(.cp-card){height:100%;}
-  div[data-testid="stElementContainer"]:has(.cp-card) > div[data-testid="stMarkdown"]{height:100%;}
-  div[data-testid="stElementContainer"]:has(.cp-card) > div[data-testid="stMarkdown"] > div{height:100%;}
-  div[data-testid="stMarkdownContainer"]:has(.cp-card){height:100%;}
+     actually propagates all the way down to .cp-card.
+
+     SUPERSEDED 2026-08-29 - the whole height:100% chain above is REMOVED,
+     found live during a leader-portal walkthrough's "pill cramped against
+     the card's bottom edge" report. Root-caused via a full ancestor chain
+     measurement (getBoundingClientRect at every level, not assumed): on
+     Overview, each card's column contains a SECOND flex item below it -
+     the "Nominate" button (stLayoutWrapper, ~55px) - and stElementContainer
+     is a flex item (flex-basis:auto, flex-shrink:1 by default) inside that
+     column's own flex-column layout. Giving it height:100% sets its
+     flex-basis to the column's full height, but default shrink then
+     compresses it back down to (column height - button's own footprint)
+     to make room for that sibling - confirmed measured at 357px, 16px
+     short of the card's own true content height (min-height reservations
+     + padding + gaps = 371px scrollHeight), and overflow:hidden was
+     silently clipping that 16px, eating almost all of the intended bottom
+     padding and leaving the status chip only ~5px from the card's edge.
+     Trimming the card's own internal spacing (tried first, see the
+     padding/margin values above) didn't fix it: shrinking the card's own
+     natural content proportionally shrank what "the tallest natural
+     content in the row" resolves to as well, so the deficit persisted at
+     the same ~16px regardless of how much was trimmed - the two numbers
+     move together, chasing a fixed target that isn't actually independent.
+     THE ACTUAL FIX: the four categories' min-height floors (on the label,
+     h3, and description - added 2026-08-27, tuned to the worst-case text
+     length across all four categories at the narrowest multi-column
+     width) are now IDENTICAL regardless of category, which means the four
+     cards are ALREADY guaranteed equal natural height on their own,
+     without needing any explicit height-matching machinery at all -
+     confirmed live by setting height:auto on the whole chain and
+     re-measuring: all four cards still matched exactly (373px each), no
+     clipping (scrollHeight == clientHeight), and the chip-to-edge gap
+     returned to a comfortable 21px. Removing the chain fixes the real bug
+     as a side effect of removing a now-redundant mechanism, rather than
+     chasing the symptom with more spacing tweaks - the same "stop trying
+     to force it, remove the constraint" reasoning already used once before
+     in this exact card (see the ring-placement fix above). If a future
+     content change ever makes the four categories' text lengths genuinely
+     asymmetric again (not just differently-worded at the same reserved
+     floor), re-verify this holds - the floors are what guarantee equality
+     now, not an explicit height rule. */
   .cp-card{background:#FFFFFF;border:1px solid #DCD8C0;border-radius:12px;
     padding:20px 20px 16px;position:relative;overflow:hidden;
-    height:100%;display:flex;flex-direction:column;box-sizing:border-box;}
+    display:flex;flex-direction:column;box-sizing:border-box;}
   .cp-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
     background:var(--cp-accent,#183319);}
   /* "Nominate" link button under each card. REAL BUG FIXED, confirmed via
@@ -1281,6 +1307,58 @@ def _go_to_view(view):
     st.rerun()
 
 
+def _scroll_to_top_if_view_changed(view):
+    """Scroll the browser to the top of the viewport, but ONLY when the
+    portal's active view has genuinely changed since the last time this ran
+    - never on a rerun caused by something else on the same page (e.g. a
+    widget interaction within Overview/Nominate that doesn't go through
+    _go_to_view). ADDED 2026-08-29, extending the same fix already built for
+    the feedback form's dimension-page pagination (see
+    _scroll_to_top_if_page_changed in feedback_form.py) to this file - found
+    live during a leader-portal walkthrough that every navigation action
+    here (Begin Here -> Overview, into Guidelines, any topbar nav item)
+    left scroll position wherever it was on the previous page instead of
+    landing at the top of the new one.
+
+    Reuses the exact mechanism already proven correct in feedback_form.py,
+    including the two real bugs found getting it working there (see that
+    function's own docstring for the full story - not re-explained here):
+    - Uses `el.scrollTop = 0`, not `el.scrollTo({...})`, since the options-
+      object form was confirmed unreliable in this cross-frame context.
+    - Embeds `view` into the iframe's HTML content (as a comment) so the
+      content genuinely differs on every real navigation - Streamlit
+      otherwise treats a repeated st.iframe call with byte-identical
+      content as the same element and never reloads it, so the <script>
+      would only ever execute on its first mount in a browser session.
+    - Targets `[data-testid="stMain"]`, this app's real scrollable
+      container, not `window`.
+
+    Call this AFTER the new view's own content has rendered, not before -
+    the feedback-form version of this fix caused a genuine, reproducible
+    server crash when it fired ahead of the page's own dispatch block, on
+    a specific page-to-page transition. render_leader_portal's dispatch
+    already renders each view's content before this is called, so the same
+    ordering is preserved here.
+    """
+    if st.session_state.get('_scrolled_to_view') == view:
+        return
+    st.session_state['_scrolled_to_view'] = view
+    st.iframe(
+        f"""<!-- view {view} -->
+        <script>
+        function scrollMainToTop() {{
+            var el = window.parent.document.querySelector('[data-testid="stMain"]');
+            if (el) {{ el.scrollTop = 0; el.scrollLeft = 0; }}
+        }}
+        scrollMainToTop();
+        [50, 100, 150].forEach(function(delay) {{
+            setTimeout(scrollMainToTop, delay);
+        }});
+        </script>""",
+        height=1,
+    )
+
+
 def _render_portal_topbar(leader_info, active_view=None, show_nav=True):
     """
     Shared header for every portal screen (and, without nav, the consent
@@ -1506,6 +1584,12 @@ def render_leader_portal(db, leader_info):
         render_portal_overview(db, leader_info, self_rater, other_raters)
 
     st.markdown('</div>', unsafe_allow_html=True)
+
+    # Fires after the view's own content above, not before - see
+    # _scroll_to_top_if_view_changed's own docstring for why (the identical
+    # ordering mistake caused a real crash the first time this pattern was
+    # built, in feedback_form.py).
+    _scroll_to_top_if_view_changed(view)
 
 
 def render_portal_overview(db, leader_info, self_rater, other_raters):
@@ -2346,10 +2430,11 @@ def render_portal_guidelines():
     <div class="cp-note-card">
       <b>A note on anonymity</b>
       <p>Individual scores are never shown to you alone, only combined with others in the same
-      category once enough people have responded. This is exactly why the minimums above matter:
-      they're what keeps individual feedback protected. Comments are shown to you word-for-word,
-      though, so anything specific a rater writes may still be recognisable, even where their
-      scores aren't.</p>
+      category once enough people have responded - except your Line Manager, whose feedback is
+      always shown attributably, since that category can never reach the same threshold on its
+      own. This is exactly why the minimums above matter: they're what keeps individual feedback
+      protected. Comments are shown to you word-for-word, though, so anything specific a rater
+      writes may still be recognisable, even where their scores aren't.</p>
     </div>
     """)
 

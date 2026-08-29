@@ -16,7 +16,31 @@ from email.utils import formataddr
 from datetime import datetime, timedelta
 import streamlit as st
 
-from framework import get_logo_data_uri
+from framework import get_logo_data_uri, RATER_REQUIREMENTS
+
+# Nomination-guidance sentences for the invitation email's "Who should you
+# nominate?" box, built from the same RATER_REQUIREMENTS numbers the leader
+# portal itself uses (framework.py), not hardcoded separately - this is what
+# fixes the real drift bug found during a leader-portal walkthrough
+# (2026-08-29): the email still read the OLD "Minimum 3, suggest 5" /
+# "Optional... add at least 3" wording from before the portal's own category
+# copy was finalised to "Minimum 3, suggested 5, up to 10 if needed" (Peers/
+# DRs) and "Minimum 3, ideally 4 or 5 if you have them, up to 10 if needed"
+# (Others), and the two had silently disagreed ever since. Plain text, not
+# HTML-bolded like the portal's own CATEGORY_REQ_TEXT (leader_portal.py) -
+# the email's table already bolds the category NAME in its own column, so
+# bolding the number too would double up the emphasis - but the WORDING is
+# now identical, and the underlying NUMBERS can never drift again since both
+# callers read the one shared dict.
+NOMINATION_GUIDANCE_TEXT = {
+    'Boss': f"Minimum {RATER_REQUIREMENTS['Boss']['min']}, max {RATER_REQUIREMENTS['Boss']['max']} if matrix reporting",
+    'Peers': (f"Minimum {RATER_REQUIREMENTS['Peers']['min']}, suggested {RATER_REQUIREMENTS['Peers']['suggested']}, "
+              f"up to {RATER_REQUIREMENTS['Peers']['max']} if needed"),
+    'DRs': (f"Minimum {RATER_REQUIREMENTS['DRs']['min']}, suggested {RATER_REQUIREMENTS['DRs']['suggested']}, "
+            f"up to {RATER_REQUIREMENTS['DRs']['max']} if needed"),
+    'Others': (f"Minimum {RATER_REQUIREMENTS['Others']['min_if_any']}, ideally 4 or 5 if you have them, "
+               f"up to {RATER_REQUIREMENTS['Others']['max']} if needed"),
+}
 
 # Minimum time between reminder emails to the same rater
 REMINDER_THROTTLE_HOURS = 48
@@ -1127,22 +1151,33 @@ def _get_portal_invitation_html(leader_name, portal_url, db=None, locale=None):
                                 <p style="color: #183319; font-weight: 600; margin: 0 0 12px 0;">
                                     Who should you nominate?
                                 </p>
-                                <table style="width: 100%; color: #666; font-size: 14px; line-height: 1.8;">
+                                <!-- FIXED 2026-08-29: this used to hardcode its own wording, which had
+                                     drifted out of sync with the portal's own finalised category copy
+                                     (found live during a leader-portal walkthrough). Now built from
+                                     NOMINATION_GUIDANCE_TEXT, sourced from the same RATER_REQUIREMENTS
+                                     numbers the portal itself uses - see that dict's own comment.
+                                     LAYOUT: the label column is a fixed width with white-space:nowrap
+                                     so "Line Manager" and "Direct Reports" can never wrap onto a second
+                                     line the way they did before (the value column had no room left once
+                                     the label wrapped); vertical-align:top on both columns keeps a
+                                     wrapped value (Others' longer line) aligned cleanly with its label
+                                     instead of centering awkwardly against it. -->
+                                <table style="width: 100%; color: #666; font-size: 14px; line-height: 1.6; border-collapse: collapse;">
                                     <tr>
-                                        <td style="padding: 4px 0;"><strong>Line Manager:</strong></td>
-                                        <td style="padding: 4px 0;">1 required (max 2 if you have matrix reporting)</td>
+                                        <td style="padding: 4px 0; width: 110px; white-space: nowrap; vertical-align: top;"><strong>Line Manager:</strong></td>
+                                        <td style="padding: 4px 0 4px 12px; vertical-align: top;">{NOMINATION_GUIDANCE_TEXT['Boss']}</td>
                                     </tr>
                                     <tr>
-                                        <td style="padding: 4px 0;"><strong>Peers:</strong></td>
-                                        <td style="padding: 4px 0;">Minimum 3, suggest 5 (colleagues at same level)</td>
+                                        <td style="padding: 4px 0; width: 110px; white-space: nowrap; vertical-align: top;"><strong>Peers:</strong></td>
+                                        <td style="padding: 4px 0 4px 12px; vertical-align: top;">{NOMINATION_GUIDANCE_TEXT['Peers']}</td>
                                     </tr>
                                     <tr>
-                                        <td style="padding: 4px 0;"><strong>Direct Reports:</strong></td>
-                                        <td style="padding: 4px 0;">Minimum 3, suggest 5 (if applicable)</td>
+                                        <td style="padding: 4px 0; width: 110px; white-space: nowrap; vertical-align: top;"><strong>Direct Reports:</strong></td>
+                                        <td style="padding: 4px 0 4px 12px; vertical-align: top;">{NOMINATION_GUIDANCE_TEXT['DRs']}</td>
                                     </tr>
                                     <tr>
-                                        <td style="padding: 4px 0;"><strong>Others:</strong></td>
-                                        <td style="padding: 4px 0;">Optional (stakeholders, customers, etc.) — if you add any, add at least 3</td>
+                                        <td style="padding: 4px 0; width: 110px; white-space: nowrap; vertical-align: top;"><strong>Others:</strong></td>
+                                        <td style="padding: 4px 0 4px 12px; vertical-align: top;">{NOMINATION_GUIDANCE_TEXT['Others']}</td>
                                     </tr>
                                 </table>
                                 <p style="color: #888; font-size: 13px; margin: 12px 0 0 0; font-style: italic;">

@@ -1379,8 +1379,26 @@ def render_links_tab(db):
                 
                 with col5:
                     if st.button("", icon=":material/delete:", key=f"del_rater_{rater['id']}", help="Delete rater"):
-                        db.delete_rater(rater['id'])
-                        st.rerun()
+                        # FIXED 2026-08-29, a real, previously-flagged gap found
+                        # live during a leader-portal walkthrough: this used to
+                        # ignore delete_rater's return value entirely, so
+                        # clicking delete on a rater who had already completed
+                        # feedback (correctly refused at the DB level - see
+                        # delete_rater's own guard) silently did nothing, with
+                        # no error, no toast, and the row unchanged - reading
+                        # exactly like a successful click. Verified live: the
+                        # underlying ratings/comments were never at risk (the
+                        # guard already blocked the delete outright, confirmed
+                        # by checking the real rows survived), the missing
+                        # piece was purely telling the admin their click was
+                        # refused rather than leaving them to wonder.
+                        if db.delete_rater(rater['id']):
+                            st.rerun()
+                        else:
+                            st.toast(
+                                "Can't delete: this rater has already submitted feedback.",
+                                icon=":material/error:"
+                            )
                 
                 # Show link
                 st.code(link, language=None)

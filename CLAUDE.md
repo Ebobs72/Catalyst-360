@@ -3468,6 +3468,210 @@ they've reviewed it working on the sandbox.
 
 ---
 
+## 8a. Leader Portal Walkthrough: Full Findings — DONE 2026-08-29
+A genuine end-to-end test of the leader/rater journey (nominating, CSV
+import, deleting, reminders, completing feedback), organised by priority.
+All Code-owned items (A-F below) addressed; the four "not for Code" items
+(duplicate detection, time estimate wording, bookmark reminder, bounce-
+notification observation) were deliberately left as flagged decisions for
+Ian, not resolved unilaterally.
+
+**A1, invitation email nomination guidance out of sync with portal copy.**
+The email's "Who should you nominate?" box (`_get_portal_invitation_html`
+in `email_sender.py`) still read the OLD wording ("Minimum 3, suggest 5",
+"Optional... add at least 3") from before the portal's own category copy
+was finalised. Root cause: two independent hardcoded copies of the same
+numbers, one in `leader_portal.py`'s `RATER_REQUIREMENTS`/
+`CATEGORY_REQ_TEXT`, one in the email template - nothing kept them in
+sync. Fixed at the source: `RATER_REQUIREMENTS` MOVED from
+`leader_portal.py` to `framework.py` (alongside `ANONYMITY_THRESHOLD`,
+which it already depended on) so both files import the same numbers.
+`email_sender.py` gained `NOMINATION_GUIDANCE_TEXT`, built from those
+numbers with the identical wording template `leader_portal.py`'s
+`CATEGORY_REQ_TEXT` uses (plain text, not HTML-bolded like the portal's
+version - the email's table already bolds the category NAME in its own
+column). The email table also gets a genuine layout fix: the label column
+is now a fixed 110px with `white-space:nowrap` and both columns
+`vertical-align:top`, so "Line Manager" and "Direct Reports" can never
+wrap onto a second line the way they did before, and Others' longer line
+wraps cleanly without misaligning against its label. Verified by rendering
+the real HTML to a local file and screenshotting both a desktop width and
+a 375px mobile-email width (the email itself uses a fixed, non-responsive
+container width by design, unrelated to this fix - only the internal
+table's own wrapping was in scope).
+
+**A2, consent screen doesn't account for the Boss/Line Manager exception.**
+The rater consent gate's `ui_consent_rater_body_1` bullet
+(`render_consent_gate` in `feedback_form.py`) made a blanket claim
+("scores are only ever shown combined with others") that contradicted a
+real, already-built exception: Boss/Line Manager feedback (scores AND
+comments) is always shown attributably, never blended, because that
+category's max of 2 can never reach `ANONYMITY_THRESHOLD` on its own. The
+rater FORM's own instructions (`ui_instructions_other_4`) already stated
+this correctly for comments ("unless you are the direct line manager") -
+the consent screen just hadn't caught up for scores. Fixed by adding the
+same exception, matching wording/tone. The SELF consent variant was
+checked and confirmed NOT to need the same fix - it makes no "shown
+combined with others" claim at all, since a self-assessment was never
+blended with anyone else's. Swept for the same gap elsewhere and found
+one more: the Guidelines page's "A note on anonymity" card
+(`render_portal_guidelines` in `leader_portal.py`) made the identical
+unqualified claim to the LEADER - fixed the same way.
+
+**A3, "Response progress only ever shows as a total across each
+category" is inaccurate.** This line, in Begin Here's "What your rater
+list does and doesn't show" section (`leader_portal.py`), implied
+category-level granularity that doesn't exist - the actual behaviour is a
+single overall aggregate across all categories combined (e.g. "11
+invited... 64% response rate"), never broken down by category. Reworded
+to "Response progress only ever shows as an overall total across
+everyone invited, never broken down by category or by name." Swept for
+the same phrasing elsewhere - no other instances found (the other
+"per-category" hits in this file all correctly describe NOMINATION
+guidance, which genuinely is per-category, not response progress).
+
+**A4, "Each page saves as you go" doesn't hold if the page isn't fully
+completed.** Investigated the actual save mechanism before touching the
+copy, per the task's own instruction not to assume: the rating widgets
+sit inside `st.form` (which doesn't fire `on_change`), so nothing saves
+from selecting a rating or typing a comment alone - confirmed live,
+zero-DB-write, by rating one item and checking `raters.draft_ratings`
+directly. But Save & Continue Later turned out to have NO completeness
+check at all (`_render_dimension_page`'s `save_clicked` branch, unlike
+`continue_clicked`, which blocks until every item is rated) - confirmed
+live by rating only 1 of 5 items on a page, clicking Save & Continue
+Later, and finding `draft_ratings = {"1": "3"}` genuinely saved with the
+other four correctly absent. So this was NOT the feature gap the task
+worried it might be - Save & Continue Later already correctly allows
+leaving a page partially filled. The fix is purely the copy
+(`ui_instructions_other_6` in `feedback_form.py`), which now accurately
+states that nothing saves automatically and names which of the two
+buttons does what: "Nothing saves automatically as you type or select an
+answer. Click **Save & Continue Later** at any point, even with a page
+only partly finished, or complete a page and click Continue - either one
+saves your answers so far."
+
+**B, confirmed bug: deleted rater still appears in the nominated list.**
+Root-caused, not just patched: `leaders.nomination_roster` is a separate,
+persisted JSON snapshot of nominees (kept independent of `raters` rows
+specifically so it survives identity severing - see section 5's severing
+subsection) - and `delete_rater` in `database.py` never touched it, only
+the live `raters` row. Every OTHER surface (the category ring, admin
+totals, the progress bar) reads live from `raters` and correctly updated
+on delete; "People You've Nominated" reads the roster snapshot instead,
+so a deleted person kept showing there indefinitely. Not a Streamlit
+cache - a genuinely separate copy of the data nothing was keeping in
+sync. Fixed: `delete_rater` now also removes the matching roster entry
+(new `_remove_from_nomination_roster`, matching identity the same way
+`update_nomination_entry` already does - by email where there is one,
+else by name+relationship). VERIFIED LIVE end to end, twice (the first
+attempt was run against a server that hadn't picked up the fix yet - this
+project's dev server doesn't hot-reload, a lesson already documented
+elsewhere in this file, relearned here): added a real rater through the
+actual Nominate Raters form, confirmed it appeared in the list, deleted
+it through the actual admin dashboard's Links & Tracking delete button,
+and confirmed the list updated immediately - matching what the ring/
+admin totals/progress bar already correctly did.
+
+**C, deleting a rater who has already completed feedback.** Investigated
+before deciding on a fix, per the task's own instruction. The DB-level
+safeguard already exists and already works: `delete_rater` refuses
+outright when `completed_at IS NOT NULL` (a guard documented in this file
+since 2026-08-14). VERIFIED LIVE with a genuine completed-and-severed
+test rater (45 real ratings, 2 real comments): clicking the admin
+dashboard's delete button on it left the row, all 45 ratings, and both
+comments completely untouched. So there was no data-loss risk to fix -
+the actual gap (also already documented as a KNOWN GAP in this file) was
+purely that the admin dashboard's delete button ignored `delete_rater`'s
+return value, so a refused delete looked identical to a successful one:
+no error, no toast, the row just staying put with no explanation. Fixed
+in `admin_dashboard.py`: the button now checks the return value and shows
+`st.toast("Can't delete: this rater has already submitted feedback.")`
+when refused. VERIFIED LIVE: same test rater, same delete button, now
+shows the toast instead of silently doing nothing.
+
+**D, stale content on Overall Feedback → Development Priorities
+transition.** Investigated rather than dismissed as a one-off. This is
+the exact same transition that caused the real, reproducible crash fixed
+in the "Two follow-up fixes"/scroll-to-top work above (call-ordering
+issue, already fixed) - plausible that a milder "stale content" symptom
+was a lesser manifestation of the same timing sensitivity. Attempted live
+reproduction 5 times in a row (fresh page loads, genuine clicks, no
+JS-injected shortcuts) on the current, already-fixed code - did not
+reproduce once. NOT confirmed as fully resolved with certainty (a rare,
+one-off intermittent issue can't be proven absent from 5 attempts alone),
+but no evidence found that it persists on the current code either. Worth
+a note if it recurs: capture a screenshot immediately if seen live again,
+since the one report so far had none to compare against.
+
+**E, extend the scroll-to-top fix to Leader Portal navigation.** The
+feedback form's dimension-page scroll-to-top (see the "Three Fixes" entry
+above) only covered that form - every navigation action in the leader
+portal itself (Begin Here → Overview, into Guidelines, any topbar nav
+item) left scroll position wherever it was on the previous page. Fixed
+with a direct port of the same mechanism: `_scroll_to_top_if_view_changed
+(view)` in `leader_portal.py`, keyed on `view` instead of `page_idx`,
+reusing every lesson already learned building the original (plain
+`el.scrollTop = 0`, not `scrollTo()`; embed `view` into the iframe's HTML
+so Streamlit can't treat repeated calls as the same unchanged element;
+fire AFTER the view's content renders, not before). Since `_go_to_view`
+is the single choke point ALL portal navigation already goes through
+(topbar nav, category-card "Nominate" links, Begin Here's own CTA), one
+call site in `render_leader_portal`'s dispatch covers every case. VERIFIED
+LIVE: genuine scroll-down-then-click on Overview→Nominate, Nominate→
+Guidelines, Guidelines→Help, and Begin Here's own "Go to Overview" CTA -
+all four correctly reset `stMain`'s scrollTop to 0, confirmed via
+`getBoundingClientRect`/`scrollTop` reads, not just visual screenshots.
+
+**F, category card pills still cramped against the bottom edge.**
+Re-checked properly this time, with real measurements, not another quick
+single-width tweak - this exact spot had already been patched multiple
+times before and kept resurfacing. Root-caused precisely via a full
+ancestor-chain measurement (`getBoundingClientRect` at every level):
+Overview's cards share their column with a "Nominate" button below them,
+and the existing `height:100%` cascade (four CSS rules, added 2026-08-27
+to force equal card heights) resolves the card's flex-basis against the
+column's full height, but default `flex-shrink` then compresses it back
+down to make room for that button sibling - measured 357px against the
+card's own true content need of 371px (the min-height reservations +
+padding + gaps), with the 14-16px shortfall silently eaten by
+`overflow:hidden`, consuming almost all the intended bottom padding.
+Trimming the card's own internal spacing (tried first) didn't fix it:
+shrinking the card's natural content proportionally shrank what the
+matched height resolved to as well, since the two are entangled - the
+deficit persisted at the same ~16px regardless of how much was trimmed.
+THE ACTUAL FIX: the four categories' min-height floors (tuned 2026-08-27
+to the worst-case text length across all four, at the narrowest
+multi-column width) are now IDENTICAL regardless of category, which
+means the cards are ALREADY guaranteed equal natural height without any
+explicit height-matching machinery - confirmed live by temporarily
+setting the whole chain to `height:auto` and re-measuring: still equal
+(373px each), no clipping, comfortable 21px gap. The entire four-rule
+`height:100%` cascade plus `.cp-card`'s own `height:100%` were REMOVED
+(matching the same "stop forcing it, remove the constraint" reasoning
+already used once before in this exact card, for the ring-placement fix).
+VERIFIED LIVE across a full width sweep (360/430/600/645/690/768/902/
+1400px) on BOTH Overview (has the button) and Nominate Raters (read-only,
+no button) - zero clipping and a comfortable 17-19px gap at every width
+tested. ONE HONEST RESIDUAL FINDING, not silently hidden: at 645-690px
+specifically, one card (whichever category's actual wrapped text happens
+to exceed even the generously-tuned floor at that exact width) renders
+~14px taller than its three siblings - the min-height floors guarantee a
+MINIMUM, not a maximum, so a card whose real content occasionally exceeds
+even that floor will legitimately be taller. Confirmed this does NOT
+affect pill position (the `footTop` of all four cards stays byte-
+identical at every width, including 645-690px) or spacing (17-19px
+throughout) - only the card's own border sits slightly higher for the
+shorter siblings. A real, minor trade-off against the alternative (force
+exact pixel-equal card height, at the cost of reintroducing the clipping
+bug this task exists to fix) - not chased further within this task's
+scope, since the actual reported bug (the cramped pill) is fixed
+everywhere tested.
+
+Test data used across this task (rater ids up to 164, various tokens)
+all created fresh and deleted after verification; leader 1's 13-rater /
+12-entry-roster baseline confirmed unchanged throughout.
+
 ## 9. Working style the human prefers
 
 - Name trade-offs explicitly BEFORE building; propose a better way if you see one.
