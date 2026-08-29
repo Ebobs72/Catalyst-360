@@ -420,7 +420,7 @@ CATEGORY_REQ_TEXT = {
     # sets more honest expectations. The cap (10) is genuinely the same
     # number as Peers/DRs though, confirmed identical and confirmed safe
     # to state - see the nomination-cap diagnostic in the history above.
-    'Others': (f"Minimum {RATER_REQUIREMENTS['Others']['min_if_any']}, ideally 4 or 5 if you have them, "
+    'Others': (f"Minimum <b>{RATER_REQUIREMENTS['Others']['min_if_any']}</b>, ideally 4 or 5 if you have them, "
                f"up to {RATER_REQUIREMENTS['Others']['max']} if needed"),
 }
 CATEGORY_ACCENT = {'Boss': '#183319', 'Peers': '#183319', 'DRs': '#6b7a63', 'Others': '#DCD8C0'}
@@ -1923,6 +1923,41 @@ def _do_send_pending_invitations(db, leader_info, pending, base_url):
         st.session_state['cp_invite_result'] = ("success", f"Sent {sent} invitation{'s' if sent != 1 else ''}.")
 
 
+def _normalise_name(name):
+    """Case-insensitive, trimmed comparison key for duplicate-name matching -
+    the one definition both the manual add form and the CSV importer use
+    below, so the two can't quietly drift on what counts as "the same
+    name"."""
+    return (name or '').strip().lower()
+
+
+def _find_duplicate_name(raters, name):
+    """Return the first rater dict in `raters` whose name matches `name`
+    (case-insensitive, trimmed), across ANY category.
+
+    ORIGINALLY same-category only (a Peer and a Direct Report sharing a
+    name was treated as more likely two real people than a duplicate).
+    REVERSED 2026-08-29, Ian's own call after seeing the feature live: a
+    name reused under a DIFFERENT category might mean someone changed
+    their mind about which group a nominee belongs in, or picked the wrong
+    one the first time - worth a nudge too, not silently ignored. The
+    caller (render_portal_nominate's submit handler, and
+    _parse_rater_csv below) is responsible for comparing the match's own
+    `relationship` against the new entry's to choose same-category vs
+    cross-category wording - this function just finds the match.
+
+    Severed raters (name/email nulled on completion) never match, since
+    their normalised name is always the empty string.
+    """
+    target = _normalise_name(name)
+    if not target:
+        return None
+    for r in raters:
+        if _normalise_name(r.get('name')) == target:
+            return r
+    return None
+
+
 def render_portal_nominate(db, leader_info, existing_raters):
     """Nominate Raters screen: add form + CSV import (functionally unchanged
     from before this redesign), then the nominated list and send-invitations
@@ -1939,6 +1974,14 @@ def render_portal_nominate(db, leader_info, existing_raters):
     matching what the app has always allowed.
     """
     leader_id = leader_info['id']
+    # The duplicate-name check (both here and inside CSV import) matches
+    # against the ROSTER, not `existing_raters` - found live while testing:
+    # every rater who has already responded is severed (name/email nulled),
+    # so `existing_raters` alone goes blind to exactly the people most
+    # likely to be "final" nominees. The roster survives severing by design
+    # (see get_nomination_roster's own docstring) and is the same source
+    # "People You've Nominated" already reads from for the identical reason.
+    nomination_roster = db.get_nomination_roster(leader_id)
     base_url = st.session_state.get('portal_base_url', get_app_base_url())
 
     _md("""
@@ -1970,17 +2013,31 @@ def render_portal_nominate(db, leader_info, existing_raters):
 
     st.markdown('<div class="cp-section-label">Add a rater</div>', unsafe_allow_html=True)
 
+    # Clears the add-rater form's own widgets on the run AFTER a genuine add
+    # completes (either directly below, or via "Add anyway" further down) -
+    # has to happen HERE, before those widgets are instantiated, since
+    # Streamlit refuses to set a widget's session_state value once that
+    # widget has already been created in the same run. clear_on_submit is
+    # deliberately NOT used on the form any more (added 2026-08-29 for the
+    # duplicate-name warning below): it would also clear the fields on a
+    # duplicate-triggered submit, and Cancel needs those fields to still
+    # show exactly what was typed, so a leader fixing a typo (e.g. the
+    # email) doesn't have to retype the rest from scratch.
+    if st.session_state.pop('_clear_add_rater_form', False):
+        for key in ('add_rater_name', 'add_rater_email', 'add_rater_relationship'):
+            st.session_state.pop(key, None)
+
     with st.container(key="cp_add_card"):
-        with st.form("add_rater_form", clear_on_submit=True):
+        with st.form("add_rater_form", clear_on_submit=False):
             col1, col2, col3, col4 = st.columns([1.3, 1.3, 1, 0.7])
             with col1:
-                rater_name = st.text_input("Full name", placeholder="e.g. Priya Anand")
+                rater_name = st.text_input("Full name", key="add_rater_name", placeholder="e.g. Priya Anand")
             with col2:
-                rater_email = st.text_input("Email address", placeholder="e.g. priya.anand@bentley...")
+                rater_email = st.text_input("Email address", key="add_rater_email", placeholder="e.g. priya.anand@bentley...")
             with col3:
                 relationship = st.selectbox(
                     "Relationship", options=['Boss', 'Peers', 'DRs', 'Others'],
-                    index=None, placeholder="Choose category...",
+                    index=None, placeholder="Choose category...", key="add_rater_relationship",
                     format_func=lambda x: {
                         'Boss': 'Boss (Line Manager)', 'Peers': 'Peer',
                         'DRs': 'Direct Report', 'Others': 'Other'
@@ -2003,10 +2060,73 @@ def render_portal_nominate(db, leader_info, existing_raters):
                 elif not relationship:
                     st.error("Please select a relationship")
                 else:
-                    db.add_rater(leader_id, relationship, rater_name, rater_email)
-                    db.add_to_nomination_roster(leader_id, rater_name, rater_email, relationship)
-                    st.success(f"Added {rater_name}. Check the details below, then send their invitation when you're ready.")
-                    st.rerun()
+                    duplicate = _find_duplicate_name(nomination_roster, rater_name)
+                    if duplicate:
+                        # PAUSE, DON'T BLOCK: hold the add for one explicit
+                        # confirmation rather than refusing it outright - two
+                        # genuinely different people can share a name, and a
+                        # leader who's sure it's fine shouldn't be prevented
+                        # from proceeding. Checks across ALL categories now
+                        # (Ian's own reversal, 2026-08-29, of the original
+                        # same-category-only design) - see
+                        # _find_duplicate_name's own docstring for why.
+                        st.session_state['pending_duplicate_add'] = {
+                            'name': rater_name, 'email': rater_email, 'relationship': relationship,
+                            'existing_relationship': duplicate.get('relationship'),
+                        }
+                    else:
+                        db.add_rater(leader_id, relationship, rater_name, rater_email)
+                        db.add_to_nomination_roster(leader_id, rater_name, rater_email, relationship)
+                        st.session_state.pop('pending_duplicate_add', None)
+                        st.session_state['_clear_add_rater_form'] = True
+                        st.success(f"Added {rater_name}. Check the details below, then send their invitation when you're ready.")
+                        st.rerun()
+
+        pending = st.session_state.get('pending_duplicate_add')
+        if pending:
+            # Same-category and cross-category collisions get different
+            # copy (added 2026-08-29 alongside the cross-category check
+            # itself): a same-category repeat is most likely a genuine
+            # accidental re-add, but a cross-category match more often
+            # means the leader changed their mind about which group a
+            # nominee belongs in, or picked the wrong one first time - so
+            # it points at the Edit flow on the existing entry instead of
+            # assuming a new person is intended.
+            existing_label = RELATIONSHIP_TYPES.get(
+                pending['existing_relationship'], pending['existing_relationship']
+            )
+            same_category = pending['existing_relationship'] == pending['relationship']
+            if same_category:
+                warning_text = (
+                    f"There's already a {existing_label} called {pending['name']} on your "
+                    f"list. Add this one anyway?"
+                )
+            else:
+                warning_text = (
+                    f"There's already a {existing_label} called {pending['name']} on your "
+                    f"list, under a different category. If this is the same person but you "
+                    f"need to change their category, you can edit them in People You've "
+                    f"Nominated below instead of adding a new entry. Add this one anyway?"
+                )
+            with st.container(key="cp_duplicate_warning"):
+                st.warning(warning_text)
+                wcol1, wcol2 = st.columns(2)
+                with wcol1:
+                    if st.button("Add anyway", key="confirm_duplicate_add", type="primary", use_container_width=True):
+                        db.add_rater(leader_id, pending['relationship'], pending['name'], pending['email'])
+                        db.add_to_nomination_roster(leader_id, pending['name'], pending['email'], pending['relationship'])
+                        st.session_state.pop('pending_duplicate_add', None)
+                        st.session_state['_clear_add_rater_form'] = True
+                        st.success(f"Added {pending['name']}. Check the details below, then send their invitation when you're ready.")
+                        st.rerun()
+                with wcol2:
+                    # Deliberately does NOT clear add_rater_name/email/
+                    # relationship - the whole point of Cancel is that someone
+                    # can fix a typo (e.g. the email) without retyping
+                    # everything from scratch.
+                    if st.button("Cancel", key="cancel_duplicate_add", use_container_width=True):
+                        st.session_state.pop('pending_duplicate_add', None)
+                        st.rerun()
 
         show_csv = st.session_state.get('cp_show_csv', False)
         with st.container(key="cp_ghost_csv_toggle"):
@@ -2016,7 +2136,7 @@ def render_portal_nominate(db, leader_info, existing_raters):
                 st.rerun()
 
         if show_csv:
-            _render_csv_import(db, leader_id, existing_raters)
+            _render_csv_import(db, leader_id, existing_raters, nomination_roster)
 
     st.markdown('<div class="cp-section-label">People you\'ve nominated</div>', unsafe_allow_html=True)
     _render_nominated_list_new(db, leader_info, base_url)
@@ -2088,7 +2208,7 @@ def _render_nomination_warnings(rater_counts):
             )
 
 
-def _render_csv_import(db, leader_id, existing_raters):
+def _render_csv_import(db, leader_id, existing_raters, nomination_roster):
     template_df = pd.DataFrame({
         'name': ['Jane Smith', 'Tom Brown', 'Sarah Jones', 'Raj Patel'],
         'email': ['jane@company.com', 'tom@company.com', 'sarah@company.com', 'raj@company.com'],
@@ -2103,7 +2223,7 @@ def _render_csv_import(db, leader_id, existing_raters):
     if uploaded_file:
         try:
             import_df = pd.read_csv(uploaded_file)
-            rows, problems = _parse_rater_csv(import_df, existing_raters)
+            rows, problems, warnings = _parse_rater_csv(import_df, existing_raters, nomination_roster)
             for problem in problems:
                 st.error(problem)
             if rows:
@@ -2114,6 +2234,12 @@ def _render_csv_import(db, leader_id, existing_raters):
                 ])
                 st.success(f"Ready to import {len(rows)} {'person' if len(rows) == 1 else 'people'}")
                 st.dataframe(preview, use_container_width=True, hide_index=True)
+                # Non-blocking: these are duplicate-name-within-category
+                # nudges (see _parse_rater_csv's own docstring), never a
+                # reason to withhold the import - Import All below stays
+                # fully enabled regardless of how many of these show.
+                for warning in warnings:
+                    st.warning(warning)
                 with st.container(key="cp_primary_import_csv"):
                     if st.button("Import All", use_container_width=True, key="cp_import_csv_btn"):
                         for r in rows:
@@ -2257,17 +2383,40 @@ def _render_nominated_list_new(db, leader_info, base_url):
                 st.rerun()
 
 
-def _parse_rater_csv(import_df, existing_raters):
+def _parse_rater_csv(import_df, existing_raters, nomination_roster):
     """
     Turn an uploaded CSV into rows ready to import, plus human-readable problems.
 
-    Returns (rows, problems). `rows` are dicts of name/email/relationship with the
-    relationship already normalised to its internal code. `problems` are messages
-    naming the offending spreadsheet row, so the leader can go and fix that line
-    rather than being told the whole file is wrong.
+    Returns (rows, problems, warnings). `rows` are dicts of name/email/relationship
+    with the relationship already normalised to its internal code. `problems` are
+    messages naming the offending spreadsheet row, so the leader can go and fix
+    that line rather than being told the whole file is wrong.
 
     Nothing is imported if there are problems: a partial import of a nominee list
     is worse than none, because the leader cannot easily tell what landed.
+
+    `warnings` (added 2026-08-29) are the non-blocking duplicate-name nudges
+    - unlike `problems`, these never suppress the import. Checked against
+    BOTH the existing list and other rows already seen in this same CSV
+    (`seen_by_name` is seeded from `nomination_roster`, NOT `existing_raters`
+    - a rater who has already responded is severed, name nulled, so
+    `existing_raters` alone goes blind to exactly the people most likely to
+    be a genuine duplicate target; the roster survives severing by design -
+    then grows as rows are processed, mirroring the existing `seen_emails`
+    pattern below), so two rows in one upload that collide with each other
+    are caught too, not just a row colliding with someone already on the
+    list. Whichever row of a collision is processed SECOND gets the warning
+    - the same convention `seen_emails` already uses for its own (blocking)
+    duplicate check.
+
+    Checks ACROSS ALL CATEGORIES, not just the same one (Ian's own reversal,
+    2026-08-29, of the original same-category-only design - see
+    _find_duplicate_name's own docstring for why). `seen_by_name` maps each
+    normalised name to the SET of categories already seen for it, so a row
+    can be told apart as a same-category repeat (gets the "second entry"
+    wording) versus a cross-category reuse (gets wording pointing at the
+    Edit flow instead, since that more often means a leader meant to correct
+    someone's category, not add a new person).
     """
     required = ['name', 'email', 'relationship']
     missing_cols = [c for c in required if c not in import_df.columns]
@@ -2276,14 +2425,20 @@ def _parse_rater_csv(import_df, existing_raters):
             f"Your CSV is missing the {', '.join(missing_cols)} "
             f"column{'s' if len(missing_cols) > 1 else ''}. "
             f"It needs: name, email, relationship."
-        ]
+        ], []
 
     rows = []
     problems = []
+    warnings = []
     seen_emails = {
         (r.get('email') or '').strip().lower()
         for r in existing_raters if r.get('email')
     }
+    seen_by_name = {}
+    for r in nomination_roster:
+        nm = _normalise_name(r.get('name'))
+        if nm:
+            seen_by_name.setdefault(nm, set()).add(r['relationship'])
     counts = {rel: 0 for rel in RATER_REQUIREMENTS}
     for r in existing_raters:
         if r['relationship'] in counts:
@@ -2337,13 +2492,33 @@ def _parse_rater_csv(import_df, existing_raters):
             )
             continue
 
+        name_norm = _normalise_name(name)
+        prior_categories = seen_by_name.get(name_norm, set())
+        if relationship in prior_categories:
+            label = RELATIONSHIP_TYPES.get(relationship, relationship)
+            warnings.append(
+                f"Row {position} ({name}): there's already a {label} called "
+                f"{name} on your list. This will add a second entry."
+            )
+        elif prior_categories:
+            existing_rel = next(iter(prior_categories))
+            existing_label = RELATIONSHIP_TYPES.get(existing_rel, existing_rel)
+            warnings.append(
+                f"Row {position} ({name}): there's already a {existing_label} "
+                f"called {name} on your list, under a different category. If "
+                f"this is the same person, correct their category from People "
+                f"You've Nominated after importing, rather than importing a "
+                f"new entry."
+            )
+        seen_by_name.setdefault(name_norm, set()).add(relationship)
+
         rows.append({'name': name, 'email': email, 'relationship': relationship})
 
     if problems:
         # Do not import a partial list
-        return [], problems
+        return [], problems, []
 
-    return rows, problems
+    return rows, problems, warnings
 
 
 def _validate_nomination_change(current_rel, new_rel, new_email, counts):
