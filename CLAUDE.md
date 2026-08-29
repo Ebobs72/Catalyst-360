@@ -3672,6 +3672,145 @@ Test data used across this task (rater ids up to 164, various tokens)
 all created fresh and deleted after verification; leader 1's 13-rater /
 12-entry-roster baseline confirmed unchanged throughout.
 
+### Category card pills: "Minimum 3" on Others card not bold — FIXED 2026-08-29
+Ian spotted this directly: the Others category card's minimum number
+wasn't bold, unlike Line Manager/Peers/Direct Reports. Confirmed in
+`CATEGORY_REQ_TEXT` (leader_portal.py) - Boss/Peers/DRs all wrap their
+minimum in `<b>...</b>`, Others' entry was the one left plain when the
+"Final Category Guidance Copy" pass (2026-08-27) rewrote its wording.
+Checked `GUIDELINE_CATEGORIES`'s parallel `badge` text too - that one
+never bolds any category's number, so it's already internally consistent
+and didn't need touching. Fixed, verified live on both Overview and
+Nominate Raters.
+
+### Duplicate Rater Name Warning — BUILT 2026-08-29
+Approved design (soft, non-blocking nudge; exact name match, case-
+insensitive and trimmed, within the same category only; checked against
+both the existing list and, for CSV, other rows in the same batch).
+
+**A real correctness issue found before any live testing could even
+start**: every one of leader 1's existing raters was already severed
+(name/email nulled after responding), so a duplicate check sourced from
+`existing_raters` (the live `raters` table) would have been blind to
+exactly the people most likely to be a genuine duplicate target - the
+severed name normalises to `''`, which never matches a real typed name.
+Fixed by sourcing the name-check from `leaders.nomination_roster`
+instead (fetched once in `render_portal_nominate` as `nomination_roster`,
+threaded down into `_render_csv_import`/`_parse_rater_csv`) - the same
+roster "People You've Nominated" already reads from for the identical
+reason (survives severing by design). `existing_raters` is still used
+for its original purposes (category counts/caps); only the NAME check
+moved.
+
+- `_normalise_name(name)` (case-insensitive, trimmed) and
+  `_find_duplicate_name(raters, name, relationship)` in `leader_portal.py`
+  are the single shared definition of "same name" both the manual form
+  and the CSV importer use, so the two can't drift on what counts as a
+  match. Deliberately never checks across categories - see that
+  function's own docstring.
+- **Manual "Add a Rater" form**: `clear_on_submit` changed from `True` to
+  `False`, and the three widgets given explicit keys
+  (`add_rater_name`/`add_rater_email`/`add_rater_relationship`), so a
+  duplicate-triggered submit can hold the typed values in place rather
+  than Streamlit auto-clearing them. On a genuine collision, the add is
+  NOT committed - the typed values go into
+  `st.session_state['pending_duplicate_add']` instead, and a warning
+  ("There's already a {category} called {name} on your list. Add this
+  one anyway?") renders with Add anyway / Cancel. Add anyway commits
+  exactly as an unblocked add would; Cancel just clears the pending flag,
+  deliberately leaving the form's own fields untouched so a typo (e.g.
+  the email) can be fixed without retyping the rest. A genuine add
+  (either path) sets `_clear_add_rater_form`, checked at the TOP of the
+  function on the next run (before the widgets are recreated) to reset
+  their session_state - has to happen there, since Streamlit refuses to
+  set a widget's value after it's already been instantiated in the same
+  run.
+- **CSV import**: `_parse_rater_csv` now returns `(rows, problems,
+  warnings)`, not `(rows, problems)` - `warnings` are the non-blocking
+  duplicate-name nudges, built the same way `seen_emails` already builds
+  its (blocking) email-duplicate set: seeded from the roster, then grown
+  as each row is processed, so a row colliding with an EARLIER row in the
+  same upload is caught too, not just a row colliding with someone
+  already on the list. Rendered in `_render_csv_import` right after the
+  preview table, before Import All - which stays fully enabled
+  regardless of how many warnings show, since these are informational,
+  never a reason to withhold the import (unlike `problems`, which still
+  blocks the whole import as before).
+- VERIFIED LIVE end to end through the real Streamlit rerun cycle (DB
+  state checked before/after every step, not just visual screenshots -
+  one early screenshot round genuinely was stale/mid-transition and
+  would have been misread as a failure without the DB check):
+  - Manual form: submitting "Jon Newman" as Peer (an existing Peer)
+    correctly held the add and showed the warning; clicking Add anyway
+    committed a real second "Jon Newman"/Peers row and cleared the form
+    (confirmed via `raters` table and the page's own live DOM state, not
+    the screenshot, which lagged behind both).
+  - Manual form: submitting "Simon Moreton-Thickett" as Peer (an
+    existing Peer) showed the warning; clicking Cancel left the name/
+    email/relationship fields exactly as typed (confirmed via each
+    input's actual `.value`) and added nothing to the database.
+  - Manual form: the same "Simon Moreton-Thickett" resubmitted as Direct
+    Report (a different category, no existing DR with that name) showed
+    NO warning and committed immediately - confirmed live.
+  - CSV import: a 5-row file (3x "Priya Anand"/Peer, "Jon Newman"/Peer,
+    "Raj Patel"/Direct Report) uploaded via a synthetic
+    `DataTransfer`-based file input (no OS file picker available to this
+    tooling) produced exactly three warnings - the 2nd and 3rd Priya
+    Anand rows (colliding with the 1st, within the same batch) and the
+    Jon Newman row (colliding with the existing roster) - with the FIRST
+    Priya row and Raj Patel correctly unflagged. Import All stayed
+    enabled throughout (confirmed via the button's own `.disabled`
+    property, not appearance) and, on click, all 5 rows landed in
+    `raters` with the correct names/emails/categories, including every
+    flagged duplicate.
+- A ROOT CAUSE FOUND MID-TEST, not a bug in the feature itself: the very
+  first manual-form test appeared to silently skip the warning entirely
+  and add the duplicate straight through - traced to the dev server
+  still running the code from BEFORE the roster-sourcing fix above (this
+  project's dev server doesn't hot-reload on save, a lesson already
+  documented elsewhere in this file and relearned here). Restarting the
+  server and rerunning the identical test produced the correct warning.
+- Test raters and roster entries created for this verification (Jon
+  Newman #2, Simon Moreton-Thickett as DR, the Priya Anand x3/Raj Patel
+  CSV batch) all deleted after; leader 1's 13-rater / 12-entry-roster
+  baseline confirmed unchanged.
+
+### Duplicate Rater Name Warning: cross-category reversal — DONE 2026-08-29
+Same day as the build above, Ian reversed the original same-category-only
+decision after seeing the feature live: a name reused under a DIFFERENT
+category might mean a leader changed their mind about which group a
+nominee belongs in, or picked the wrong one first time - worth a nudge
+too, not silently ignored.
+
+- `_find_duplicate_name(raters, name)` dropped its `relationship`
+  parameter and now searches across ALL categories; the caller compares
+  the match's own category against the new entry's to pick same-category
+  vs cross-category wording.
+- Manual form: same-category wording unchanged ("...Add this one
+  anyway?"). Cross-category wording additionally points at the fix Ian
+  asked for: "...on your list, under a different category. If this is
+  the same person but you need to change their category, you can edit
+  them in People You've Nominated below instead of adding a new entry.
+  Add this one anyway?" Both variants keep the identical Add anyway /
+  Cancel mechanism already built - only the message text branches.
+- CSV import: `_parse_rater_csv`'s `seen_names` (a flat set of
+  `(relationship, name)` tuples) became `seen_by_name` (a dict mapping
+  each normalised name to the SET of categories already seen for it), so
+  a row can be told apart as a same-category repeat versus a
+  cross-category reuse. The cross-category CSV wording points at fixing
+  it via People You've Nominated AFTER import (there's no per-row inline
+  edit in a batch import), not before.
+- VERIFIED: the manual form live (added "Jane Smith" - an existing Direct
+  Report - as Peer; the cross-category warning rendered with the exact
+  wording above, no DB write happened while it was showing, and Cancel
+  correctly dismissed it with still nothing written) and the CSV path via
+  a direct call to the real `_parse_rater_csv` (not a reimplementation)
+  with a same-category repeat, a cross-category reuse, and a clean row
+  all in one file - each got exactly the wording its own case should.
+- No test data left behind: the manual-form spot-check ended on Cancel,
+  so nothing needed cleaning up; leader 1's 13-rater baseline reconfirmed
+  unchanged.
+
 ## 9. Working style the human prefers
 
 - Name trade-offs explicitly BEFORE building; propose a better way if you see one.
