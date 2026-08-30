@@ -599,6 +599,17 @@ BEGIN_HERE_WATCH_CARDS = [
             "when it's available again.",
         ],
     },
+    {
+        # Added 2026-08-30, Ian's own instruction: nominating raters and
+        # watching responses come in genuinely happens over days or weeks,
+        # so this portal is worth being able to find again easily.
+        'title': 'Worth bookmarking this page',
+        'items': [
+            "You'll likely be back here more than once as responses come in. Bookmark your "
+            "portal page, or keep your invitation email handy, so you can find your way "
+            "straight back whenever you need to.",
+        ],
+    },
 ]
 
 # ==========================================================================
@@ -2586,6 +2597,16 @@ def render_portal_guidelines():
       <h1>360 Feedback Guidelines</h1>
       <p>The quality of your feedback depends on choosing raters who can give you meaningful,
       honest insight into your leadership. Here's guidance on each category.</p>
+    </div>
+    """)
+
+    # Added 2026-08-30, Ian's own instruction: nominating raters and
+    # watching responses come in happens over days or weeks, not one
+    # sitting, so this is worth being able to find again easily.
+    _md("""
+    <div class="cp-sub-note">
+      You'll likely visit this portal more than once as your raters respond. Bookmark it, or
+      keep your invitation email handy, so you can find your way straight back.
     </div>
     """)
 

@@ -779,6 +779,24 @@ def _render_header(db, locale, rater_info, is_self, leader_name, relationship, s
             "demonstrate it in your current role, please choose <strong>\"No opportunity to demonstrate\"</strong> "
             "rather than guessing."
         )
+        # Added 2026-08-30, Ian's own instruction. Self never had this
+        # explanation at all before now - the "other" branch's own version
+        # (ui_instructions_other_6) already covered it, this brings Self up
+        # to the same standard rather than leaving it a gap. Deliberately
+        # says "use Save & Continue Later", not "your answers save as you
+        # go" - nothing here auto-saves (see that button's own docstring),
+        # and overclaiming that would repeat a mistake already corrected
+        # once in this file.
+        instructions_self_3 = _t(
+            db, 'ui_instructions_self_3', locale,
+            "Nothing saves automatically as you type or select an answer. Click "
+            "<strong>Save & Continue Later</strong> at any point, even with a page only "
+            "partly finished, or complete a page and click Continue - either one saves "
+            "your answers so far. You can then close this window at any time and return "
+            "to this link to continue where you left off. If you're completing this over "
+            "more than one sitting, it's worth bookmarking this page, or keeping your "
+            "invitation email handy, so you can find your way straight back."
+        )
         st.markdown(f"""
         <div style="background: white; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #E0E0E0; border-left: 4px solid #183319;">
             <p style="margin: 0; color: #333; line-height: 1.6;">
@@ -786,6 +804,9 @@ def _render_header(db, locale, rater_info, is_self, leader_name, relationship, s
             </p>
             <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
                 {instructions_self_2}
+            </p>
+            <p style="margin: 1rem 0 0 0; color: #333; line-height: 1.6;">
+                {instructions_self_3}
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -839,7 +860,9 @@ def _render_header(db, locale, rater_info, is_self, leader_name, relationship, s
                "<strong>Save & Continue Later</strong> at any point, even with a page only "
                "partly finished, or complete a page and click Continue - either one saves "
                "your answers so far. You can then close this window at any time and return "
-               "to this link to continue where you left off."),
+               "to this link to continue where you left off. If you're completing this over "
+               "more than one sitting, it's worth bookmarking this page, or keeping your "
+               "invitation email handy, so you can find your way straight back."),
         ]
         st.markdown(f"""
         <div style="background: white; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #E0E0E0; border-left: 4px solid #183319;">
