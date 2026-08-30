@@ -3935,8 +3935,8 @@ mechanism this session traced precisely before proposing any fix.
   the row untouched, unaffected by the rendering rewrite. Test leader and
   all 6 raters (plus their ratings/comments/email_log rows) deleted after
   verification.
-- NOT committed/pushed yet - awaiting Ian's explicit instruction, per
-  standing practice.
+- Committed and pushed to both `production` (`1fa14fb`) and `sandbox`
+  (`cc9572a`) 2026-08-30, alongside the rater-correction feature below.
 
 ### Admin Dashboard: Rater Email/Relationship Correction — BUILT 2026-08-30
 Ian's own observation, prompted by the elimination-leak fix above: the
@@ -4042,6 +4042,77 @@ needed to consider: it must not reopen the elimination leak just fixed.
     row untouched.
 - Test leader and its 4 raters (plus ratings/comments/email_log rows)
   deleted after verification.
+- Committed and pushed to both `production` (`1fa14fb`) and `sandbox`
+  (`cc9572a`) 2026-08-30, alongside the elimination-leak fix above.
+
+### Bookmark Reminder and Realistic Time Estimate — DONE 2026-08-30
+Two small, related copy fixes across every place someone is invited to
+complete something, requested together: nothing told a rater or leader
+they could bookmark their way back if they needed more than one sitting,
+and the time estimate everywhere ("approximately 15-20 minutes") had
+drifted well short of how long the 45-item paired instrument with two
+open prompts actually takes in practice.
+
+**Time estimate.** Every occurrence of "approximately 15-20 minutes" was
+a search away - only two, both in `email_sender.py` (the rater invitation
+and the rater reminder email; `feedback_form.py` and `leader_portal.py`
+had no time estimate at all). Both now read "It should take around 30
+minutes to complete, depending on how much detail you add in your
+comments." - Ian's own wording, kept close to verbatim.
+
+**Bookmark reminder.** Added in six places, wordsmithed per location
+rather than one string pasted everywhere, since the audience and the
+thing being bookmarked genuinely differ:
+- `_get_rater_invitation_html` (email_sender.py) - new
+  `email_bookmark_note`, shared for Self and everyone else since nothing
+  in it is relationship-specific. Deliberately says "click Save &
+  Continue Later", not "your progress saves automatically" - nothing in
+  this survey auto-saves (see `ui_instructions_other_6`'s own docstring),
+  and restating that overclaim here would undo the correction already
+  made once to the in-app copy.
+- `_get_reminder_html` (email_sender.py) - a shorter `email_reminder_
+  bookmark_note`, not the same text reused. Someone getting a reminder
+  has likely already started, so this leads with "haven't finished yet"
+  rather than re-explaining the whole save mechanism from scratch.
+- `_get_portal_invitation_html` (email_sender.py) - new `email_leader_
+  bookmark_note`, framed around the leader's own repeat visits (add
+  raters, check progress, send reminders) rather than "multiple
+  sessions", since nominating raters isn't a single form to finish, it's
+  an ongoing task across a cohort's life.
+- `render_portal_guidelines` (leader_portal.py) - a new `cp-sub-note`
+  styled box directly under the page intro, above the category cards.
+  Reused the existing light beige tip style rather than inventing a new
+  visual idiom for a single line.
+- `render_portal_begin_here` (leader_portal.py) - a new watch-card
+  appended to `BEGIN_HERE_WATCH_CARDS` ("Worth bookmarking this page"),
+  after the existing five - not urgent troubleshooting info like its
+  neighbours, so it goes last rather than competing for the "two most
+  likely practical questions" priority slot at the top.
+- `feedback_form.py`'s own survey instructions - the "other" (rater)
+  variant already explained resuming (`ui_instructions_other_6`, added
+  during an earlier walkthrough fix); extended with the same bookmark
+  sentence. Self had NO equivalent explanation of the save mechanism at
+  all until now - a real, pre-existing gap, not something this task
+  introduced - closed with a new `ui_instructions_self_3`, identical in
+  substance to the rater version since nothing about resuming a
+  self-assessment is relationship-specific.
+- Genuinely considered and left out: the admin dashboard. Nothing there
+  is a multi-session task for the person completing it (an admin adding
+  raters isn't the one who has to come back and finish a survey), so a
+  bookmark reminder there would be solving a problem that doesn't exist
+  on that screen.
+
+VERIFIED LIVE: all three emails regenerated via their real functions
+(not reimplementations) to a local HTML file and screenshotted in the
+browser - correct wording, correct placement, no layout regression.
+Guidelines and Begin Here checked live in the running app (leader 1's
+portal). The feedback-form instructions checked against both variants -
+a real pending Peer rater (existing) and a fresh throwaway Self rater
+(`Copy Test Self`, created for this check since leader 1's own Self was
+already completed and severed, deleted immediately after) - confirming
+the new self-assessment paragraph renders correctly and the rater
+paragraph's pre-existing bold/green styling isn't disturbed by the
+appended sentence.
 - NOT committed/pushed yet - awaiting Ian's explicit instruction, per
   standing practice.
 

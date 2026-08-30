@@ -311,8 +311,23 @@ def _get_rater_invitation_html(rater_name, leader_name, relationship, assessment
 
     body_note = _translated(
         db, locale, 'email_rater_invitation_body_note',
-        "Your feedback is valuable and will be treated confidentially. The assessment takes "
-        "approximately 15-20 minutes to complete."
+        "Your feedback is valuable and will be treated confidentially. It should take around "
+        "30 minutes to complete, depending on how much detail you add in your comments."
+    )
+
+    # Added 2026-08-30, Ian's own instruction: nothing here saves as you
+    # type (see ui_instructions_other_6 in feedback_form.py for the
+    # accurate mechanism - Save & Continue Later is the only thing that
+    # persists a page), so this deliberately says "use Save & Continue
+    # Later", not "your progress saves automatically" - the same overclaim
+    # already corrected once in the in-app copy must not be reintroduced
+    # here. Identical for Self and everyone else - nothing in it is
+    # relationship-specific.
+    bookmark_note = _translated(
+        db, locale, 'email_bookmark_note',
+        "You don't have to finish it all in one sitting. If you're completing this over more "
+        "than one session, click <strong>Save & Continue Later</strong> on any page, then keep "
+        "this email handy, or bookmark the page, so you can find your way straight back."
     )
 
     # Advance notice only - the actual consent capture (a ticked checkbox,
@@ -389,6 +404,10 @@ def _get_rater_invitation_html(rater_name, leader_name, relationship, assessment
                                 {body_note}
                             </p>
 
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                                {bookmark_note}
+                            </p>
+
                             <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 0 0 30px 0;">
                                 {data_protection_note}
                             </p>
@@ -454,8 +473,17 @@ def _get_reminder_html(rater_name, leader_name, relationship, assessment_url, db
     reminder_header = _translated(db, locale, 'email_reminder_header', "FRIENDLY REMINDER")
     body_note = _translated(
         db, locale, 'email_rater_reminder_body_note',
-        "Your input is important and helps support leadership development. The assessment takes "
-        "approximately 15-20 minutes."
+        "Your input is important and helps support leadership development. It should take "
+        "around 30 minutes to complete, depending on how much detail you add in your comments."
+    )
+    # Shorter than the invitation email's own version (email_bookmark_note) -
+    # someone getting a reminder has likely already started, so this leads
+    # with "haven't finished" rather than re-explaining the whole mechanism.
+    bookmark_note = _translated(
+        db, locale, 'email_reminder_bookmark_note',
+        "If you haven't finished yet, you don't need to do it in one sitting. Use "
+        "<strong>Save & Continue Later</strong> on any page and this same link will take you "
+        "straight back to where you left off."
     )
     cta_text = _translated(db, locale, 'email_rater_reminder_cta', "Complete Now")
     link_note = _translated(
@@ -505,8 +533,12 @@ def _get_reminder_html(rater_name, leader_name, relationship, assessment_url, db
                                 {intro}
                             </p>
 
-                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 30px 0;">
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
                                 {body_note}
+                            </p>
+
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 0 0 30px 0;">
+                                {bookmark_note}
                             </p>
 
                             <!-- CTA Button -->
@@ -1079,6 +1111,14 @@ def _get_portal_invitation_html(leader_name, portal_url, db=None, locale=None):
         "invitations yourself from your portal — where you can also track progress and send "
         "reminders."
     )
+    # Added 2026-08-30, Ian's own instruction: nominating raters and
+    # watching responses come in genuinely happens over days or weeks, not
+    # in one sitting, so this email is worth being able to find again.
+    bookmark_note = _translated(
+        db, locale, 'email_leader_bookmark_note',
+        "Keep this email handy, or bookmark your portal page once you're in. You'll likely "
+        "want to come back more than once, to add raters, check progress, or send reminders."
+    )
 
     logo_html = _email_logo_html()
     return f"""
@@ -1188,7 +1228,11 @@ def _get_portal_invitation_html(leader_name, portal_url, db=None, locale=None):
                             <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 20px 0;">
                                 {raters_flow_note}
                             </p>
-                            
+
+                            <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 20px 0;">
+                                {bookmark_note}
+                            </p>
+
                             <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 30px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
                                 If the button doesn't work, copy and paste this link into your browser:<br>
                                 <a href="{portal_url}" style="color: #183319; word-break: break-all;">{portal_url}</a>
