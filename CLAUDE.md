@@ -3811,6 +3811,240 @@ too, not silently ignored.
   so nothing needed cleaning up; leader 1's 13-rater baseline reconfirmed
   unchanged.
 
+### Admin Dashboard: Rater List Leaked Identity by Elimination — FIXED 2026-08-30
+Ian's own investigation, prompted while reviewing the duplicate-name work
+above: does the Admin Dashboard's Links & Tracking view retain severed
+raters' names? Confirmed it does not for the rater-facing side (severing
+is unaffected), but the ADMIN side genuinely leaked identity, via a
+mechanism this session traced precisely before proposing any fix.
+
+- **The leak, confirmed against the actual code**:
+  `render_links_tab`'s per-rater row used
+  `display_name = rater.get('name') or f"{category} {i}"` - a real name
+  for anyone not yet completed (severing hasn't nulled it yet), a generic
+  positional label for anyone who has, tagged "Pending"/"Complete"
+  respectively. Within one category, this means the non-completers are
+  named and the completers are anonymous BUT COUNTABLE - so with 5 Peers
+  and 4 responses, the 1 named "Pending" row identifies by elimination
+  who the other 4 anonymous "Complete" rows must be, since Ian already
+  knows all 5 names from having reviewed or nominated them himself. The
+  risk sharpens as fewer remain outstanding - at 1 of 5 there is no
+  ambiguity left at all. Confirmed separately that report-generation-time
+  folding (Tier 1/2 in `get_leader_feedback_data`) never touches
+  `raters.relationship`, so a lone folded "Others" respondent still shows
+  standalone here as an unambiguous single "Complete" row - the worst
+  case, since this screen gave a group of one zero protection even though
+  the report itself never shows it unfolded.
+- **Ian's first instinct (anonymise names once any completion occurs in a
+  category) was explicitly rejected before being built**, because it
+  would have broken a genuine, common operational need: Ian regularly
+  has to find and act on a SPECIFIC named individual on a leader's rater
+  list, most often because the leader has asked for that person to be
+  removed for a reason they can't action themselves. Names disappearing
+  the moment responses start coming in would remove exactly that ability
+  at the point in a cohort's life it's most likely to be needed. The
+  actual leak needs BOTH a real name AND an individual completion status
+  on the same row at once - removing either stops it, and removing names
+  specifically was the one Ian actually needed kept.
+- **The fix, per Ian's own final spec**: real names stay visible on every
+  row, permanently, no exceptions - unchanged from before. Individual
+  per-row "Pending"/"Complete" status is removed entirely, replaced by a
+  single category-level aggregate line ("4 of 5 responded"), never tied
+  to an individual row. This removes the elimination mechanism itself -
+  there is no longer a per-row signal to eliminate against - while
+  leaving every real name fully intact everywhere, which is what Ian's
+  actual workflow depends on.
+- **A real problem with recovering the name at all**: severing nulls
+  `raters.name`/`email` on submission, which is exactly why the old code
+  fell back to a generic label for completers in the first place - so
+  simply "always show the name" wasn't available without a genuine schema
+  change. `leaders.nomination_roster` (the leader-facing list that
+  survives severing) couldn't be reused here: it has no stable join key
+  back to a specific `raters` row once email is also nulled, and matching
+  by name+relationship risked misattributing rows in an edge case. Fixed
+  with a new admin-only shadow-column pair, `raters.admin_name`/
+  `admin_email` (`_safe_add_column`, same pattern as `consent_given`),
+  populated identically to `name`/`email` at creation (`add_rater`) and
+  kept in sync on legitimate corrections (`update_rater`), but
+  DELIBERATELY never touched by `sever_rater_identity` - confirmed by
+  leaving its actual UPDATE statements completely unchanged, still only
+  nulling `name`/`email`, still overwriting `email_log.to_email` to
+  `'[severed]'`. A one-time backfill
+  (`UPDATE raters SET admin_name = name WHERE admin_name IS NULL AND name
+  IS NOT NULL`, mirrored for email) covers every row that hadn't yet been
+  severed at the time this shipped. Rows already severed BEFORE this fix
+  are genuinely unrecoverable - shown as "Name not recorded (submitted
+  before this update)" rather than guessed at, an honest disclosed gap,
+  not a silent one.
+- **Two further leaks of the same category found and closed in the same
+  pass, neither explicitly named in Ian's spec but caught by the
+  project's standing "sweep for the same gap" practice**:
+  - The Links & Tracking CSV export had its own `Status` column
+    ("Complete"/"Pending") sitting beside `name`/`email` - removed
+    entirely, and the name/email columns switched to `admin_name`/
+    `admin_email` so the export doesn't regress to the old severed-blank
+    behaviour either.
+  - The "+Add email" button and the invitation/reminder buttons'
+    visibility were BOTH previously correlated with completion status
+    indirectly - the live `email` field goes blank on severing, so
+    "+Add email" appearing was itself a completion tell, and the
+    invitation/reminder buttons were hidden outright for completed
+    raters, which is a status signal by omission. Fixed by driving both
+    off `admin_email`/`has_email` (unaffected by severing) instead of the
+    live `email` field, and by moving the completion check from button
+    VISIBILITY into the button's CLICK HANDLER - a completed rater's row
+    looks identical to any other, but clicking Send now shows a graceful
+    toast ("Already completed - nothing to send.") instead of silently
+    doing nothing or never rendering the control in the first place.
+  - `get_email_log_for_leader`'s query (`r.name as rater_name`) was a
+    THIRD instance, found during this same pass - switched to
+    `r.admin_name`. ONE RESIDUAL GAP, DELIBERATELY NOT FIXED, FLAGGED IN
+    CODE: that same modal's `to_email` column still shows the literal
+    `'[severed]'` string for a completed rater's historical log rows,
+    which is itself a completion tell. Closing this fully needs a new
+    admin-only, never-severed column on `email_log` itself - judged
+    beyond the scope of this pass and flagged rather than silently left.
+- **Deletion safety was deliberately NOT duplicated here.** Ian's spec
+  explicitly separates this: the completed-rater deletion guard is
+  walkthrough item C (already built - `delete_rater` refuses when
+  `completed_at IS NOT NULL`, admin UI shows a toast on refusal rather
+  than silently doing nothing). Removing the status badge does not
+  reopen that risk, since deletion safety was never based on Ian noticing
+  the badge - it's enforced at the point of deletion itself, independent
+  of what the row displays.
+- **VERIFIED LIVE against a purpose-built test leader** ("Elimination
+  Test Leader", matching Ian's own example numbers exactly - 5 Peers, 4
+  completed (Alice/Bob/Carol/Dave) + 1 pending (Eve), plus 1 completed
+  lone Others (Frank)) - existing leader 1 couldn't be used for this
+  specific check, since every one of its raters was already either
+  severed or created via a legacy path with no name captured at all.
+  Confirmed directly in the database that the 4 completed Peers plus
+  Frank had `name = NULL` (correctly severed) while `admin_name` held
+  the correct real name, and Eve (pending) still had both columns intact
+  with `completed_at IS NULL`. Screenshotted the live Links & Tracking
+  view: "**Peers** (5)" with "4 of 5 responded" directly beneath it, then
+  all 5 rows (Alice, Bob, Carol, Dave, Eve) with real names, real emails,
+  and delete buttons - completely uniform, zero visual distinction of any
+  kind between the 4 completed and the 1 pending row. Scrolled to
+  "**Others** (1)" / "1 of 1 responded" and confirmed Frank Other's row
+  identically uniform - real name shown, nothing on the row revealing he
+  is the one who responded. Both of Ian's own explicit must-verify-live
+  scenarios (4-of-5, no longer eliminable; 1-of-1 thin category, not
+  distinguishable) confirmed satisfied. Separately re-confirmed
+  `delete_rater(174)` (a completed Peer) still returns `False` and leaves
+  the row untouched, unaffected by the rendering rewrite. Test leader and
+  all 6 raters (plus their ratings/comments/email_log rows) deleted after
+  verification.
+- NOT committed/pushed yet - awaiting Ian's explicit instruction, per
+  standing practice.
+
+### Admin Dashboard: Rater Email/Relationship Correction — BUILT 2026-08-30
+Ian's own observation, prompted by the elimination-leak fix above: the
+Leader Portal already lets a leader correct a nominee's email and
+relationship (typos, wrong category), but the Admin Dashboard never got
+the equivalent feature. Built as a close parallel to
+`leader_portal.py`'s own mechanism (`_validate_nomination_change`/
+`_apply_nomination_correction`), with one constraint neither of those
+needed to consider: it must not reopen the elimination leak just fixed.
+
+- **The constraint that shaped the whole design**: an Edit control whose
+  visible behaviour (enabled/disabled, shown/hidden, a different result
+  message) differed by completion status would recreate the exact same
+  class of leak fixed hours earlier, just through a new route - "can this
+  admin tell which raters are pending vs completed by whether Edit
+  behaves differently" is now a standing check for anything added to this
+  screen, not just the specific badge that was removed. So the Edit
+  button and the edit form it opens render IDENTICALLY on every row,
+  completed or not - same fields, same layout, same "Rater details
+  updated." message either way. The actual protections (below) are
+  enforced silently inside the save logic, never through a visible
+  difference in the form itself.
+- `_validate_rater_correction`/`_apply_rater_correction` in
+  `admin_dashboard.py` are parallel functions, not shared imports from
+  leader_portal.py (avoids a leader_portal <-> admin_dashboard import
+  cycle) - kept deliberately in step with the same rules:
+  - Email format validated (must contain '@' if provided, blank allowed).
+  - A relationship change is blocked with a full-width `st.error(...)`
+    if the target category is already at `RATER_REQUIREMENTS[...]['max']`
+    (e.g. Line Manager's cap of 2) - identical rule to the leader
+    portal's own cap enforcement.
+  - For a rater who has NOT yet completed: `db.update_rater(...)` updates
+    `email`/`relationship` normally (mirrors into `admin_name`/
+    `admin_email` automatically, per that function's existing behaviour),
+    and a changed email triggers a fresh invitation send if email is
+    configured - matching leader_portal's own "only re-invite when the
+    address actually changed" reasoning.
+  - For a rater who HAS completed: `raters.email` stays NULL (writing an
+    address back would re-identify a severed response) and
+    `raters.relationship` never changes (their answers belong to the
+    category they were invited under - see `update_rater`'s own
+    docstring). Only `admin_email`, the permanent admin-only record,
+    gets corrected. This happens silently - no error, no different
+    message - so attempting a blocked relationship change on a completed
+    rater looks, from the UI, exactly like a successful save.
+  - `leaders.nomination_roster` is updated UNCONDITIONALLY in both
+    cases, matching leader_portal's own behaviour exactly - and for the
+    same underlying reason, not just consistency for its own sake: if
+    the roster only updated when the live row could still be changed,
+    the leader could infer completion status from whether their own
+    view of the roster changed after an admin correction. A safe no-op
+    if the rater was never on the roster to begin with (e.g. added via
+    this dashboard's single-add or Quick Add forms, which don't
+    currently write to the roster - a separate, pre-existing gap, not
+    introduced by this feature).
+  - Self is excluded from the relationship dropdown (fixed label
+    instead) - there's only ever one Self per leader, so reassigning it
+    is meaningless. This is keyed off relationship, not completion, so
+    it doesn't reintroduce any leak: every Self row, completed or not,
+    gets the identical fixed-label treatment.
+- **A real layout bug found live before this could be called done**: the
+  Save/Cancel button column was too narrow (1.3 of ~7.9 relative units,
+  split into two), and the validation error was rendered INSIDE that same
+  narrow column - both wrapped one character per line at the project's
+  own standard 902px test width, confirmed via screenshot while testing
+  the Line-Manager-at-max case. Fixed by widening the button column
+  (1.3 -> 2.4) and, more importantly, moving the error/success handling
+  entirely OUTSIDE the column layout - `st.error(...)` now renders
+  full-width below the row regardless of how narrow the button columns
+  are, rather than being trapped inside whichever column the triggering
+  button happened to sit in.
+- **VERIFIED LIVE** against a purpose-built test leader ("Edit Test
+  Leader": 2 Line Managers at the real max of 2, one pending Peer "Pat
+  Peer", one completed/severed Peer "Pete Peer", both added via
+  `add_rater` + `add_to_nomination_roster` so both admin_name/admin_email
+  and the roster were populated realistically):
+  - Confirmed the Edit form for the pending and the completed rater
+    render pixel-identical (same fields, same layout) - no visual tell.
+  - Attempted moving the pending Peer into Line Manager (already at max
+    2): blocked with "Already at the maximum of 2 for Line Manager. Move
+    or remove one first.", rendered full-width and legible, nothing
+    written.
+  - Corrected the pending Peer's email for real: `raters.email` and
+    `admin_email` both updated to the new address, relationship
+    unchanged, and the roster entry updated to match - confirmed via
+    direct DB query, not just the UI.
+  - Attempted correcting the COMPLETED Peer's email AND moving them to
+    Others: `admin_email` updated to the new address, `raters.email`
+    stayed NULL, `raters.relationship` stayed 'Peers' (the attempted
+    move was silently dropped) - confirmed via direct DB query. The
+    roster entry, per the unconditional-update design above, DID show
+    'Others' - a deliberate, documented divergence between the roster's
+    cosmetic display and the real scored category, identical to what
+    already happens today via the leader portal's own edit path for a
+    completed rater, not a new inconsistency introduced here.
+  - Confirmed Cancel discards typed changes with no write - typed a
+    throwaway email, clicked Cancel, confirmed via direct DB query that
+    neither `email` nor `admin_email` changed.
+  - Re-confirmed the completed-rater delete guard (built in the earlier
+    elimination-leak fix) still works correctly under the new five-column
+    layout - clicking delete on the completed Peer still shows "Can't
+    delete: this rater has already submitted feedback." and leaves the
+    row untouched.
+- Test leader and its 4 raters (plus ratings/comments/email_log rows)
+  deleted after verification.
+- NOT committed/pushed yet - awaiting Ian's explicit instruction, per
+  standing practice.
+
 ## 9. Working style the human prefers
 
 - Name trade-offs explicitly BEFORE building; propose a better way if you see one.

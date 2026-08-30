@@ -10,7 +10,7 @@ from datetime import datetime
 from framework import (
     RELATIONSHIP_TYPES, GROUP_DISPLAY, MIN_RESPONSES_FOR_REPORT,
     RELATIONSHIP_INPUT_HELP, normalise_relationship, normalise_cohort_text,
-    DIMENSIONS, get_logo_data_uri
+    DIMENSIONS, get_logo_data_uri, RATER_REQUIREMENTS
 )
 
 # Try to import email functionality
@@ -1031,6 +1031,89 @@ def _generate_test_feedback():
     return ratings, comments
 
 
+def _validate_rater_correction(current_rel, new_rel, new_email, counts):
+    """
+    Validate an admin-side correction to a rater's email/relationship.
+
+    Mirrors leader_portal.py's _validate_nomination_change exactly (same
+    rules, same reasoning) - kept as a separate function rather than a
+    shared import to avoid a leader_portal <-> admin_dashboard import
+    cycle. If these rules ever change, keep both in step deliberately.
+    """
+    if new_email and '@' not in new_email:
+        return "Please enter a valid email address, or leave it blank."
+
+    if new_rel != current_rel:
+        limit = RATER_REQUIREMENTS.get(new_rel, {}).get('max')
+        if limit is not None and counts.get(new_rel, 0) >= limit:
+            label = RELATIONSHIP_TYPES.get(new_rel, new_rel)
+            return (
+                f"Already at the maximum of {limit} for {label}. "
+                f"Move or remove one first."
+            )
+    return None
+
+
+def _apply_rater_correction(db, leader_info, base_url, rater, new_email, new_relationship):
+    """
+    Correct a rater's email and/or relationship from the admin dashboard.
+
+    Deliberately renders and behaves IDENTICALLY whether or not this rater has
+    already completed feedback - see the "NO PER-ROW COMPLETION STATUS"
+    comment above render_links_tab's rater loop. Adding an edit control whose
+    visible behaviour differed by completion status would reopen exactly the
+    elimination leak that comment describes fixing, just through a new route.
+    The completion check happens here, silently, mirroring leader_portal.py's
+    _apply_nomination_correction:
+
+    - A completed rater's `raters.email` stays NULL (severed) - writing an
+      address back onto it would re-identify an anonymous response. Only
+      `admin_email`, the permanent admin-only record, gets corrected, since
+      that column was never part of the anonymity mechanism.
+    - A completed rater's `raters.relationship` never changes - severing
+      does not touch it (it's needed for grouping/scoring), but their
+      answers were given in the context of the category they were invited
+      under, and recategorising them afterwards would misrepresent their
+      input (see update_rater's own docstring).
+
+    Neither restriction produces a different message or a different-looking
+    form, so nothing here can be used to infer completion status.
+
+    The leader's own "People You've Nominated" list (leaders.nomination_roster)
+    is kept in step too, unconditionally, matching leader_portal's own
+    behaviour - it's a cosmetic, leader-facing record, not the scored data,
+    so correcting it doesn't carry the same relationship-lock restriction.
+    This is a safe no-op if the rater was never on the roster to begin with
+    (e.g. added via this dashboard's single-add or Quick Add forms, which
+    don't currently write to the roster - a separate, pre-existing gap, not
+    introduced by this fix).
+    """
+    old_email = rater.get('admin_email') or ''
+    if old_email:
+        db.update_nomination_entry(
+            leader_info['id'], old_email,
+            new_email=new_email or None, new_relationship=new_relationship
+        )
+
+    if rater.get('completed'):
+        if new_email:
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE raters SET admin_email = ? WHERE id = ?", (new_email, rater['id']))
+            conn.commit()
+            conn.close()
+        return
+
+    db.update_rater(rater['id'], email=new_email or None, relationship=new_relationship)
+
+    # Only re-invite when the address actually changed - a relationship tweak
+    # alone doesn't alter the invitation copy, so re-sending would just be noise.
+    if EMAIL_AVAILABLE and is_email_configured() and new_email and new_email != (rater.get('email') or ''):
+        updated = db.get_rater(rater['id'])
+        if updated:
+            send_rater_invitation(updated, leader_info['name'], base_url, db)
+
+
 def render_links_tab(db):
     """Render the links generation and tracking tab."""
     
@@ -1142,7 +1225,12 @@ def render_links_tab(db):
         if rel not in raters_by_group:
             raters_by_group[rel] = []
         raters_by_group[rel].append(rater)
-    
+
+    # Current per-category counts, used to enforce RATER_REQUIREMENTS['max']
+    # when an edit moves someone into a different category (see
+    # _validate_rater_correction).
+    counts_by_rel = {rel: len(raters_by_group.get(rel, [])) for rel in RATER_REQUIREMENTS}
+
     if not raters:
         st.info("No raters added yet for this leader. Use the forms above or bulk import below.")
     else:
@@ -1298,85 +1386,180 @@ def render_links_tab(db):
             st.markdown("---")
 
         # Display raters table
+        #
+        # NO PER-ROW COMPLETION STATUS ANYWHERE ON THIS SCREEN - fixed
+        # 2026-08-30, a real elimination leak found by Ian: a completed
+        # rater's real name is correctly nulled by severing, but this
+        # screen used to show a real name ONLY for non-completers, tagged
+        # "Pending", right next to generic "Peers 2/3/4" rows tagged
+        # "Complete" - so anyone who already knew all the nominees' names
+        # (which Ian, as the person who nominated or reviewed them,
+        # always does) could work out exactly who was in the completed
+        # set by elimination. At the extreme (1 of N responded), there's
+        # no ambiguity left at all - a full identification, using exactly
+        # the side-channel severing exists to prevent.
+        #
+        # The fix requires BOTH: real names showing on EVERY row,
+        # permanently (Ian's own explicit, standing requirement - he needs
+        # to find and act on a specific named person at any point in a
+        # cohort's life, most often because a leader has asked for someone
+        # to be removed), AND no per-row completion signal of any kind, not
+        # just the visible badge. Names now come from admin_name (see
+        # database.py's add_rater/update_rater/sever_rater_identity - a
+        # parallel, admin-only copy of name/email that severing never
+        # touches), and completion shows ONLY as a category-level aggregate
+        # ("N of M responded") below, never tied to an individual row.
+        #
+        # TWO OTHER SIGNALS also had to be closed, not just the visible
+        # badge, or the same elimination would still work through a
+        # different route:
+        # - The email cell used to show "+Add email" whenever `email` was
+        #   empty - which is ALWAYS true for a completed rater (severing
+        #   nulls it), so its mere presence/absence was itself a status
+        #   tell. Now driven by admin_email instead, which doesn't correlate
+        #   with completion.
+        # - The invitation/reminder buttons used to be hidden entirely for
+        #   completed raters - so a row with no buttons at all was
+        #   immediately readable as "done". They now always render
+        #   (whenever an email is on file at all) and simply refuse
+        #   gracefully with a toast if clicked on a completed rater,
+        #   matching the same "don't silently no-op, but don't gate
+        #   visibility on the thing we're protecting" reasoning already
+        #   applied to the delete button's own completed-rater guard below.
         for rel in ['Self', 'Boss', 'Peers', 'DRs', 'Others']:
             if rel not in raters_by_group:
                 continue
-            
-            st.markdown(f"**{GROUP_DISPLAY.get(rel, rel)}** ({len(raters_by_group[rel])})")
-            
-            for i, rater in enumerate(raters_by_group[rel], 1):
+
+            group_raters = raters_by_group[rel]
+            completed_count = sum(1 for r in group_raters if r['completed'])
+            st.markdown(f"**{GROUP_DISPLAY.get(rel, rel)}** ({len(group_raters)})")
+            st.caption(f"{completed_count} of {len(group_raters)} responded")
+
+            for rater in group_raters:
                 link = f"{base_url}?t={rater['token']}"
-                
-                # Determine status
-                if rater['completed']:
-                    status_icon = ":material/check_circle:"
-                    status_text = "Complete"
-                else:
-                    status_icon = ":material/schedule:"
-                    status_text = "Pending"
-                
-                # Get last email info
-                has_email = bool(rater.get('email'))
-                
-                # Layout: Name | Email | Status | Actions
-                col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 2, 0.5])
-                
+
+                # admin_name/admin_email are the admin-only copy that
+                # survives severing (see database.py). A row can only lack
+                # one if it was severed BEFORE this fix shipped - genuinely,
+                # irreversibly unrecoverable, not a bug - shown plainly
+                # rather than guessed at.
+                admin_name = rater.get('admin_name')
+                admin_email = rater.get('admin_email')
+                has_email = bool(admin_email)
+                editing_key = f'edit_rater_{rater["id"]}'
+
+                if st.session_state.get(editing_key):
+                    # Edit mode. Renders IDENTICALLY regardless of completion
+                    # status (same fields, same enabled state) - the
+                    # relationship-lock and severed-email protections are
+                    # enforced silently inside _apply_rater_correction, never
+                    # by varying what this form shows or how it responds, so
+                    # opening this can't itself be used to infer completion
+                    # (see that function's own docstring for the full
+                    # reasoning). Self is the one exception, and it's keyed
+                    # off relationship, not completion - there is only ever
+                    # one Self per leader, so a relationship dropdown for it
+                    # would be meaningless, and showing a fixed label instead
+                    # doesn't reveal anything since every Self row is treated
+                    # the same way regardless of whether it's completed.
+                    ecol1, ecol2, ecol3, ecol4 = st.columns([1.8, 2.3, 1.7, 2.4])
+                    with ecol1:
+                        st.write(admin_name or "Name not recorded (submitted before this update)")
+                    with ecol2:
+                        new_email = st.text_input(
+                            "Email", value=admin_email or "",
+                            key=f"edit_email_input_{rater['id']}",
+                            label_visibility="collapsed",
+                            placeholder="Email address"
+                        )
+                    with ecol3:
+                        if rel == 'Self':
+                            st.caption("Self")
+                            new_rel = rel
+                        else:
+                            rel_options = ['Boss', 'Peers', 'DRs', 'Others']
+                            new_rel = st.selectbox(
+                                "Relationship", options=rel_options,
+                                index=rel_options.index(rel) if rel in rel_options else 0,
+                                format_func=lambda x: RELATIONSHIP_TYPES.get(x, x),
+                                key=f"edit_rel_input_{rater['id']}",
+                                label_visibility="collapsed"
+                            )
+                    with ecol4:
+                        save_col, cancel_col = st.columns(2)
+                        with save_col:
+                            save_clicked = st.button("Save", key=f"save_rater_{rater['id']}", use_container_width=True)
+                        with cancel_col:
+                            cancel_clicked = st.button("Cancel", key=f"cancel_rater_{rater['id']}", use_container_width=True)
+
+                    # Feedback renders full-width, below the row rather than
+                    # inside one of the narrow button columns above - a
+                    # validation error squeezed into a half-a-button-width
+                    # column wraps one character per line, found live while
+                    # testing the Boss-at-max case.
+                    if save_clicked:
+                        error = _validate_rater_correction(rel, new_rel, new_email, counts_by_rel)
+                        if error:
+                            st.error(error)
+                        else:
+                            _apply_rater_correction(db, selected_leader, base_url, rater, new_email or None, new_rel)
+                            st.session_state[editing_key] = False
+                            st.toast("Rater details updated.")
+                            st.rerun()
+                    if cancel_clicked:
+                        st.session_state[editing_key] = False
+                        st.rerun()
+
+                    st.code(link, language=None)
+                    continue
+
+                # Layout: Name | Email | Edit | Actions | Delete
+                col1, col2, col3, col4, col5 = st.columns([2.1, 2.1, 0.5, 1.8, 0.5])
+
                 with col1:
-                    display_name = rater.get('name') or f"{GROUP_DISPLAY.get(rel, rel)} {i}"
-                    st.write(f"{status_icon} {display_name}")
-                
+                    st.write(admin_name or "Name not recorded (submitted before this update)")
+
                 with col2:
                     if has_email:
-                        st.caption(f":material/mail: {rater['email']}")
+                        st.caption(f":material/mail: {admin_email}")
                     else:
-                        # Allow adding email
-                        if st.session_state.get(f'edit_email_{rater["id"]}'):
-                            new_email = st.text_input(
-                                "Email", 
-                                key=f"email_input_{rater['id']}", 
-                                label_visibility="collapsed",
-                                placeholder="Enter email"
-                            )
-                            if st.button("Save", key=f"save_email_{rater['id']}"):
-                                if new_email:
-                                    db.update_rater(rater['id'], email=new_email)
-                                    st.session_state[f'edit_email_{rater["id"]}'] = False
-                                    st.rerun()
-                        else:
-                            if st.button("+ Add email", key=f"add_email_{rater['id']}", 
-                                        type="secondary", use_container_width=True):
-                                st.session_state[f'edit_email_{rater["id"]}'] = True
-                                st.rerun()
-                
+                        st.caption("No email address")
+
                 with col3:
-                    if rater['completed']:
-                        st.markdown(f"<span style='color: green;'>Complete</span>", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"<span style='color: orange;'>Pending</span>", unsafe_allow_html=True)
-                
+                    if st.button("", icon=":material/edit:", key=f"edit_rater_btn_{rater['id']}",
+                                help="Correct this person's email or relationship"):
+                        st.session_state[editing_key] = True
+                        st.rerun()
+
                 with col4:
-                    if email_configured and has_email and not rater['completed']:
+                    if email_configured and has_email:
                         btn_col1, btn_col2 = st.columns(2)
                         with btn_col1:
                             if st.button("", icon=":material/send:", key=f"send_inv_{rater['id']}", help="Send invitation"):
-                                success, msg = send_rater_invitation(rater, selected_leader['name'], base_url, db)
-                                if success:
-                                    st.toast(f"Sent to {rater['email']}", icon=":material/check_circle:")
+                                if rater['completed']:
+                                    st.toast("Already completed - nothing to send.", icon=":material/info:")
                                 else:
-                                    st.toast(f"Failed: {msg}", icon=":material/error:")
+                                    success, msg = send_rater_invitation(rater, selected_leader['name'], base_url, db)
+                                    if success:
+                                        st.toast(f"Sent to {admin_email}", icon=":material/check_circle:")
+                                    else:
+                                        st.toast(f"Failed: {msg}", icon=":material/error:")
                         with btn_col2:
                             if st.button("", icon=":material/notifications:", key=f"send_rem_{rater['id']}", help="Send reminder"):
-                                success, msg = send_rater_reminder(rater, selected_leader['name'], base_url, db)
-                                if success:
-                                    st.toast(f"Reminder sent", icon=":material/check_circle:")
-                                elif msg == "Reminded recently":
-                                    # Not a failure - the 48h throttle working as
-                                    # designed. An error toast here would read as
-                                    # a delivery problem that isn't real.
-                                    st.toast(f"Already reminded within the last 48h", icon=":material/schedule:")
+                                if rater['completed']:
+                                    st.toast("Already completed - nothing to send.", icon=":material/info:")
                                 else:
-                                    st.toast(f"Failed: {msg}", icon=":material/error:")
-                
+                                    success, msg = send_rater_reminder(rater, selected_leader['name'], base_url, db)
+                                    if success:
+                                        st.toast(f"Reminder sent", icon=":material/check_circle:")
+                                    elif msg == "Reminded recently":
+                                        # Not a failure - the 48h throttle working as
+                                        # designed. An error toast here would read as
+                                        # a delivery problem that isn't real.
+                                        st.toast(f"Already reminded within the last 48h", icon=":material/schedule:")
+                                    else:
+                                        st.toast(f"Failed: {msg}", icon=":material/error:")
+
                 with col5:
                     if st.button("", icon=":material/delete:", key=f"del_rater_{rater['id']}", help="Delete rater"):
                         # FIXED 2026-08-29, a real, previously-flagged gap found
@@ -1415,16 +1598,20 @@ def render_links_tab(db):
         st.caption("Download all raters with their links for mail merge or records")
         
         if raters:
-            # Build export data
+            # Build export data. Uses admin_name/admin_email (survives
+            # severing) and deliberately carries NO per-row Status column -
+            # the exact same elimination leak fixed on-screen above (a real
+            # name next to an individual completion tag) would apply
+            # equally to an exported spreadsheet, so it's fixed here too,
+            # not just in the live view.
             link_data = []
             for rel in ['Self', 'Boss', 'Peers', 'DRs', 'Others']:
                 if rel in raters_by_group:
-                    for i, rater in enumerate(raters_by_group[rel], 1):
+                    for rater in raters_by_group[rel]:
                         link_data.append({
-                            'Name': rater.get('name') or '',
-                            'Email': rater.get('email') or '',
+                            'Name': rater.get('admin_name') or '',
+                            'Email': rater.get('admin_email') or '',
                             'Relationship': rel,
-                            'Status': 'Complete' if rater['completed'] else 'Pending',
                             'Link': f"{base_url}?t={rater['token']}"
                         })
             

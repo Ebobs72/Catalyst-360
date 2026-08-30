@@ -325,6 +325,52 @@ class Database:
         self._safe_add_column("raters", "consent_given", "INTEGER DEFAULT 0")
         self._safe_add_column("raters", "consent_given_at", "TIMESTAMP")
 
+        # ADMIN-ONLY IDENTITY, DELIBERATELY UN-SEVERED - added 2026-08-29 to fix
+        # a real leak found in the admin dashboard's Links & Tracking view: it
+        # used to fall back to `raters.name`/`email` for display, which
+        # sever_rater_identity nulls on completion (correctly - that's the
+        # whole point of severing). But showing a real name ONLY for
+        # non-completers, next to an individual "Pending"/"Complete" badge,
+        # let an admin work out who's in the completed set by elimination -
+        # exactly the kind of side-channel severing exists to prevent. Ian's
+        # own explicit requirement (2026-08-29): admin needs real names on
+        # every row, permanently, to find and act on a specific person at any
+        # point in a cohort's life - but the per-row status badge that made
+        # that dangerous has to go, replaced with a category-level aggregate
+        # (see admin_dashboard.py's render_links_tab).
+        #
+        # `admin_name`/`admin_email` are a parallel, admin-only copy: set
+        # identically to `name`/`email` at creation (add_rater) and kept in
+        # step with any legitimate correction (update_rater), but NEVER
+        # touched by sever_rater_identity - that function nulls `name`/
+        # `email` only, exactly as before this change. The anonymity-critical
+        # guarantee (a submitted response can never be resolved back to a
+        # person through the rater's own record, the report, or anything a
+        # leader can see) is completely unaffected: these columns are read
+        # ONLY by the admin dashboard, never by report generation, the
+        # leader portal, or the feedback form itself.
+        self._safe_add_column("raters", "admin_name", "TEXT")
+        self._safe_add_column("raters", "admin_email", "TEXT")
+        # One-time backfill for rows that existed before these columns did.
+        # Idempotent (WHERE admin_name IS NULL means it only ever touches a
+        # row once) so it's safe to run on every startup. Rows already
+        # severed BEFORE this fix shipped have no name/email left anywhere to
+        # backfill FROM - that identity was already, genuinely, irreversibly
+        # gone the moment severing ran, before this admin-only copy existed
+        # to catch it. Those specific historical rows stay NULL here and the
+        # admin dashboard shows them plainly as unrecoverable, rather than
+        # guessing.
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE raters SET admin_name = name WHERE admin_name IS NULL AND name IS NOT NULL"
+        )
+        cursor.execute(
+            "UPDATE raters SET admin_email = email WHERE admin_email IS NULL AND email IS NOT NULL"
+        )
+        conn.commit()
+        conn.close()
+
     # ==========================================
     # LEADER MANAGEMENT
     # ==========================================
@@ -679,21 +725,27 @@ class Database:
         return secrets.token_urlsafe(6)
     
     def add_rater(self, leader_id, relationship, name=None, email=None):
-        """Add a rater for a leader and generate their unique link."""
+        """Add a rater for a leader and generate their unique link.
+
+        Populates admin_name/admin_email identically to name/email at
+        creation - the admin-only copy that sever_rater_identity never
+        touches (see that function's own docstring, and the migration
+        comment above where these columns are added).
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
         token = self.generate_token()
-        
+
         cursor.execute("""
-            INSERT INTO raters (leader_id, name, email, relationship, token)
-            VALUES (?, ?, ?, ?, ?)
-        """, (leader_id, name, email, relationship, token))
-        
+            INSERT INTO raters (leader_id, name, email, relationship, token, admin_name, admin_email)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (leader_id, name, email, relationship, token, name, email))
+
         rater_id = cursor.lastrowid
         conn.commit()
         conn.close()
-        
+
         return rater_id, token
     
     def get_rater_by_token(self, token):
@@ -751,20 +803,34 @@ class Database:
         enforces this by only ever resolving the rater through
         get_unsevered_rater_by_email, which finds nothing once they have
         submitted.
+
+        A `name` or `email` update ALSO mirrors into `admin_name`/
+        `admin_email` (added 2026-08-29 - see add_rater's own docstring),
+        transparently, so a legitimate correction (e.g. a leader fixing a
+        typo before the rater responds) doesn't leave the admin-only copy
+        stale. This never runs against an already-completed rater in
+        practice, since every caller of this function for name/email
+        resolves the rater through get_unsevered_rater_by_email first,
+        which already excludes anyone who has submitted.
         """
         conn = self.get_connection()
         cursor = conn.cursor()
 
         valid_fields = ['name', 'email', 'relationship']
         updates = {k: v for k, v in kwargs.items() if k in valid_fields}
-        
+
+        if 'name' in updates:
+            updates['admin_name'] = updates['name']
+        if 'email' in updates:
+            updates['admin_email'] = updates['email']
+
         if updates:
             set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
             values = tuple(list(updates.values()) + [rater_id])
-            
+
             cursor.execute(f"UPDATE raters SET {set_clause} WHERE id = ?", values)
             conn.commit()
-        
+
         conn.close()
     
     def update_rater_reminder_sent(self, rater_id):
@@ -854,6 +920,14 @@ class Database:
 
         The leader's own record of who they nominated is unaffected, because it
         lives on `leaders.nomination_roster` rather than on this row.
+
+        DELIBERATELY DOES NOT TOUCH admin_name/admin_email (added 2026-08-29)
+        - that admin-only copy is a separate, parallel record specifically
+        exempted from this operation (see add_rater's docstring for the full
+        reasoning). This function's own guarantee - a submitted response can
+        never be resolved back to a person through this row, the report, or
+        anything a leader can see - is completely unaffected either way,
+        since admin_name/admin_email are read ONLY by the admin dashboard.
 
         IRREVERSIBLE BY DESIGN. Called from submit_feedback after the completion
         commit. Never call it on a rater who has not submitted.
@@ -1180,11 +1254,23 @@ class Database:
         conn.close()
     
     def get_email_log_for_leader(self, leader_id, limit=50):
-        """Get email log entries for a leader's raters."""
+        """Get email log entries for a leader's raters.
+
+        `rater_name` comes from admin_name, not the (severed-on-completion)
+        name column - same reasoning as the admin dashboard's rater list
+        (see add_rater's docstring). NOTE, found but deliberately not
+        fixed here: `to_email` itself still shows the literal '[severed]'
+        placeholder for a completed rater's historical rows (written by
+        sever_rater_identity, unchanged), which is its own completion tell
+        alongside a real address for anyone not yet completed. Closing that
+        fully would need email_log to carry its own admin-only, un-severed
+        copy of the address - a real, analogous extension of this same
+        fix, but a new schema change beyond what this pass covers.
+        """
         return self._fetchall("""
-            SELECT 
+            SELECT
                 el.*,
-                r.name as rater_name,
+                r.admin_name as rater_name,
                 r.relationship
             FROM email_log el
             LEFT JOIN raters r ON el.rater_id = r.id
