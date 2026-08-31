@@ -4113,8 +4113,39 @@ already completed and severed, deleted immediately after) - confirming
 the new self-assessment paragraph renders correctly and the rater
 paragraph's pre-existing bold/green styling isn't disturbed by the
 appended sentence.
-- NOT committed/pushed yet - awaiting Ian's explicit instruction, per
-  standing practice.
+- Committed and pushed to both `production` (`809f583`) and `sandbox`
+  (`1b5df9f`) 2026-08-30.
+
+### Temporary Font Comparison Route Removed — DONE 2026-08-31
+The `?fonttest=1` scaffolding (`app.py`) had served its purpose - Ian
+picked genuine Expanded Bold, already rolled out everywhere bold is
+used (see "Genuine Bold Rollout..." above) - so it came out entirely,
+not just unlinked: the `'fonttest'` branch in `get_route()`, the whole
+`render_font_comparison()` function, and the `elif route == 'fonttest'`
+dispatch in `main()`.
+
+- Checked for knock-on dead code rather than just deleting the three
+  named pieces: `textwrap`, `pathlib.Path`, and `get_bentley_font_face_css`
+  (alongside `font_face_css`, imported from `framework.py`) had no other
+  call site anywhere in `app.py` - that comparison page was their only
+  user - so all three imports came out too, genuinely unused rather than
+  speculative cleanup. `get_logo_data_uri` stayed, since
+  `render_landing_page` still calls it directly. Confirmed
+  `get_bentley_font_face_css`/`font_face_css` themselves are untouched in
+  `framework.py` and still genuinely used by `leader_portal.py` and
+  `feedback_form.py` for the real production typeface CSS - this only
+  removed `app.py`'s own now-dead import of them.
+- VERIFIED LIVE against every acceptance check: `?fonttest=1` now falls
+  straight through to the normal landing page (screenshotted, no
+  comparison content, no error); grepped the whole codebase for
+  `fonttest`/`render_font_comparison` and found zero remaining
+  references anywhere; Overview, Nominate Raters, Guidelines, and the
+  admin dashboard all re-checked live afterward and render exactly as
+  before, Bentley typeface still applied throughout (confirming the
+  import removal didn't touch the real typeface pipeline, which lives
+  in `leader_portal.py`/`feedback_form.py`, not `app.py`).
+- Cleanup only, no functional change to anything a real user could
+  reach - the route was never linked from any navigation in the app.
 
 ## 9. Working style the human prefers
 
