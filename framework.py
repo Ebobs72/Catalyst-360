@@ -679,6 +679,18 @@ MIN_RESPONSES_FOR_REPORT = 5
 # Self is exempt (always shown)
 ANONYMITY_THRESHOLD = 3
 
+# Self-Assessment cohort averages (see database.py's
+# get_cohort_self_assessment_average): a minimum cohort size, below which
+# the cohort average is withheld entirely rather than shown from too small
+# a sample. This is a DEFENSIVE FLOOR, not something expected to bite at
+# the programme's real target cohort size (18-20) - it exists for
+# robustness against smaller cohorts in the future. Distinct from
+# ANONYMITY_THRESHOLD: this isn't an anonymity protection (self-assessment
+# scores aren't subject to that threshold at all - see the feature's own
+# rationale in CLAUDE.md), it's purely a "don't average four people and
+# call it a cohort" statistical-reliability floor.
+COHORT_AVERAGE_MIN_SIZE = 8
+
 # Nomination category requirements - the single source of truth for the
 # min/suggested/max numbers shown to a leader when nominating raters.
 # MOVED HERE from leader_portal.py 2026-08-29: the invitation email
