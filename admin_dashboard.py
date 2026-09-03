@@ -1792,15 +1792,24 @@ def render_reports_tab(db):
                     with st.spinner(f"Generating {report_type} for {leader['name']}..."):
                         try:
                             from report_generator import generate_report
-                            
+
                             data, comments = db.get_leader_feedback_data(leader['id'])
+                            # Self-Assessment only - see get_cohort_self_assessment_average's
+                            # own docstring for why this is deliberately not fetched for
+                            # Full 360. Only queried when actually needed, not on every
+                            # generation regardless of report_type.
+                            cohort_averages = (
+                                db.get_cohort_self_assessment_average(leader['id'])
+                                if report_type == 'Self-Assessment' else None
+                            )
                             output_path, theme_warning = generate_report(
                                 leader['name'],
                                 report_type,
                                 data,
                                 comments,
                                 leader.get('dealership'),
-                                leader.get('cohort')
+                                leader.get('cohort'),
+                                cohort_averages=cohort_averages
                             )
                             db.log_report(leader['id'], report_type, output_path, leader.get('assessment_year'))
 
@@ -1837,15 +1846,17 @@ def render_reports_tab(db):
                     with st.spinner(f"Generating Self-Assessment for {leader['name']}..."):
                         try:
                             from report_generator import generate_report
-                            
+
                             data, comments = db.get_leader_feedback_data(leader['id'])
+                            cohort_averages = db.get_cohort_self_assessment_average(leader['id'])
                             output_path, _ = generate_report(
                                 leader['name'],
                                 'Self-Assessment',
                                 data,
                                 comments,
                                 leader.get('dealership'),
-                                leader.get('cohort')
+                                leader.get('cohort'),
+                                cohort_averages=cohort_averages
                             )
                             db.log_report(leader['id'], 'Self-Assessment', output_path, leader.get('assessment_year'))
 

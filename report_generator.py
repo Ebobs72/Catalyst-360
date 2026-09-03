@@ -590,8 +590,17 @@ def categorize_papu_nanu(data):
 # CHARTS
 # ============================================
 
-def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
-    """Create radar chart for dimension overview - professional style."""
+def create_radar_chart(dimensions, self_scores, combined_scores, output_path,
+                        combined_label='All Raters'):
+    """Create radar chart for dimension overview - professional style.
+
+    combined_label defaults to 'All Raters' so the Full 360 call site
+    (add_executive_summary) is completely unaffected - it never passes this
+    kwarg. The Self-Assessment cohort-average radar (generate_report) passes
+    combined_label='Cohort Average' when calling this with cohort averages
+    in place of combined_scores - same line/fill construction, different
+    label, per that feature's own spec.
+    """
     labels = list(dimensions.keys())
     num_vars = len(labels)
     
@@ -650,7 +659,7 @@ def create_radar_chart(dimensions, self_scores, combined_scores, output_path):
     if combined_scores and any(combined_scores.get(dim) for dim in labels):
         combined_values = [combined_scores.get(dim, 0) or 0 for dim in labels]
         combined_values += combined_values[:1]
-        ax.plot(angles, combined_values, 'o-', linewidth=3, label='All Raters',
+        ax.plot(angles, combined_values, 'o-', linewidth=3, label=combined_label,
                 color=COLOURS['heritage_white_deep'], markersize=10)
         ax.fill(angles, combined_values, alpha=0.25, color=COLOURS['heritage_white'])
     
@@ -1186,6 +1195,47 @@ def add_scoring_scale_note(doc, no_opportunity_label):
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
 
+def add_cohort_average_note(doc, available):
+    """Framing copy for the Self-Assessment cohort average, placed once
+    before "Your Self-Assessment Overview" (the number's first appearance),
+    matching add_scoring_scale_note's own "explain once near the top,
+    don't repeat near every chart" pattern - this is a linear document read
+    once per coaching conversation, not a navigable app.
+
+    This copy is NOT optional per the feature's own spec: shown without it,
+    a cohort average reads as a leaderboard - who's rated better or worse -
+    which directly contradicts the self-referential design the rest of this
+    report is built around. Two variants:
+
+    available=True: the actual framing statement, close to the human's own
+    wording, placed wherever a real cohort average is about to appear.
+
+    available=False: the gating outcome must still be visible, not a silent
+    missing column - a blank with no explanation reads as broken, not as
+    "not applicable yet". Deliberately reason-agnostic (doesn't distinguish
+    "cohort not yet complete" from "cohort too small" from "no cohort set at
+    all") - the specific reason isn't the leader's concern, and naming a
+    cohort's size or completion count here would edge toward the kind of
+    disclosure this project is otherwise careful to avoid elsewhere.
+    """
+    note = doc.add_paragraph()
+    if available:
+        text = (
+            "The cohort average shown alongside your own score reflects how others in your "
+            "programme rated themselves on each dimension. It's context for understanding your "
+            "own self-perception, not a ranking or comparison of who's performing better."
+        )
+    else:
+        text = (
+            "A cohort comparison isn't shown for this report. It appears only once everyone in "
+            "your programme has completed their self-assessment."
+        )
+    run = note.add_run(text)
+    run.font.size = Pt(9)
+    run.font.italic = True
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+
 def add_executive_summary(doc, data):
     """Add executive summary with dimension table and radar chart."""
     add_section_heading(doc, "Executive Summary", font_size=16)
@@ -1417,8 +1467,14 @@ def add_papu_nanu_section(doc, data):
     # No explicit page break — next section uses page_break_before
 
 
-def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_first_dimension=False):
-    """Add a dimension section with items displayed side-by-side with bar charts."""
+def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_first_dimension=False,
+                           cohort_averages=None):
+    """Add a dimension section with items displayed side-by-side with bar charts.
+
+    cohort_averages (Self-Assessment only - see generate_report and
+    database.py's get_cohort_self_assessment_average) is a dict of
+    {dimension_name: average} or None. The Full 360 call site never passes
+    this, so that branch is completely unaffected."""
     heading = add_section_heading(doc, dim_name, font_size=13, level=2)
     # Word's Heading 2 style carries its own 10pt space_before, which is
     # redundant here since this heading always starts at the very top of a
@@ -1465,6 +1521,40 @@ def add_dimension_section(doc, dim_name, data, comments, is_self_only=False, is_
     run = desc.add_run(DIMENSION_DESCRIPTIONS[dim_name])
     run.font.italic = True
     run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    # Cohort-average comparison line - Self-Assessment only, and only when
+    # a cohort average is actually available for THIS dimension (the whole
+    # dict can be present while one specific dimension is still missing, in
+    # the unlikely case every other leader marked every item in it "no
+    # opportunity" - see get_cohort_self_assessment_average). The framing
+    # copy that makes this readable as context rather than a ranking
+    # (add_cohort_average_note) is placed once, earlier in the report, not
+    # repeated here - same "explain once near the top" pattern as the
+    # scoring-scale note.
+    #
+    # When shown, this line absorbs the "room before Q1" spacing the
+    # description paragraph above would otherwise carry alone (see that
+    # paragraph's own space_after comment) - tightened here so the total
+    # gap before Q1 doesn't double up now that a second paragraph sits
+    # between the description and the first item.
+    cohort_avg = (cohort_averages or {}).get(dim_name) if is_self_only else None
+    if cohort_avg is not None:
+        desc.paragraph_format.space_after = Pt(6)
+        own_score = data['by_dimension'].get(dim_name, {}).get('Self')
+        compare = doc.add_paragraph()
+        compare.paragraph_format.space_before = Pt(0)
+        compare.paragraph_format.space_after = Pt(16)
+        compare.paragraph_format.line_spacing = 1.0
+        own_run = compare.add_run(
+            f"Your score: {own_score:.1f}" if own_score is not None else "Your score: -"
+        )
+        own_run.bold = True
+        own_run.font.size = Pt(10)
+        own_run.font.color.rgb = RGBColor(0x18, 0x33, 0x19)
+        compare.add_run("     ").font.size = Pt(10)
+        cohort_run = compare.add_run(f"Cohort average: {cohort_avg:.1f}")
+        cohort_run.font.size = Pt(10)
+        cohort_run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
     start, end = DIMENSIONS[dim_name]
     
@@ -2178,10 +2268,11 @@ def add_next_steps(doc):
 # MAIN GENERATION
 # ============================================
 
-def generate_report(leader_name, report_type, data, comments, dealership=None, cohort=None):
+def generate_report(leader_name, report_type, data, comments, dealership=None, cohort=None,
+                     cohort_averages=None):
     """
     Main entry point for report generation.
-    
+
     Args:
         leader_name: Name of the leader
         report_type: 'Self-Assessment', 'Full 360', or 'Progress Report'
@@ -2189,7 +2280,14 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         comments: Comments dictionary
         dealership: Optional dealership name
         cohort: Optional cohort name
-    
+        cohort_averages: Optional dict of {dimension_name: average}, from
+            database.py's get_cohort_self_assessment_average. SELF-ASSESSMENT
+            ONLY - see that function's own docstring for the full rationale
+            (why Full 360 deliberately doesn't get this feature). None (the
+            gated-off state, or simply not passed) renders the "not
+            available yet" framing instead of a comparison. Full 360 and
+            Progress Report never read this argument at all.
+
     Returns:
         (output_path, theme_warning) — theme_warning is None unless the Key
         Themes section (Full 360 only) was skipped due to a genuine failure.
@@ -2226,25 +2324,34 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         # Overview — dimension table + radar on one page
         heading = add_section_heading(doc, "Your Self-Assessment Overview", font_size=16)
         heading.paragraph_format.page_break_before = True
-        
-        table = doc.add_table(rows=1, cols=2)
+
+        # Cohort average availability decided ONCE here, then threaded through
+        # every place it appears below (table, radar, each dimension section) -
+        # a single source of truth so the table can't show a column the radar
+        # doesn't, or vice versa.
+        cohort_available = bool(cohort_averages)
+        add_cohort_average_note(doc, cohort_available)
+
+        table = doc.add_table(rows=1, cols=3 if cohort_available else 2)
         table.style = 'Table Grid'
         table.autofit = False
-        
-        widths = content_columns(4.5, 1.5)
-        
+
+        widths = content_columns(3.4, 1.4, 1.4) if cohort_available else content_columns(4.5, 1.5)
+
         hdr = table.rows[0].cells
         hdr[0].text = "Dimension"
         hdr[1].text = "Your Score"
+        if cohort_available:
+            hdr[2].text = "Cohort Average"
         for i, cell in enumerate(hdr):
             cell.width = widths[i]
             set_cell_shading(cell, '183319')
             cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
             cell.paragraphs[0].runs[0].bold = True
             cell.paragraphs[0].runs[0].font.size = Pt(10)
-        if len(hdr) > 1:
-            hdr[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+        for cell in hdr[1:]:
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
         for dim_name in DIMENSIONS.keys():
             row = table.add_row().cells
             for i, cell in enumerate(row):
@@ -2253,7 +2360,11 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
             self_score = data['by_dimension'].get(dim_name, {}).get('Self')
             row[1].text = f"{self_score:.1f}" if self_score else "-"
             row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+            if cohort_available:
+                cohort_score = cohort_averages.get(dim_name)
+                row[2].text = f"{cohort_score:.1f}" if cohort_score is not None else "-"
+                row[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
         # Keep table with radar. This page carries only the heading and a ten-row
         # table, so a full-width radar (about 5in tall) still fits beneath it.
         for row in table.rows:
@@ -2266,14 +2377,18 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
 
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             self_scores = {dim: data['by_dimension'].get(dim, {}).get('Self') for dim in DIMENSIONS}
-            create_radar_chart(DIMENSIONS, self_scores, None, tmp.name)
+            create_radar_chart(
+                DIMENSIONS, self_scores,
+                cohort_averages if cohort_available else None,
+                tmp.name, combined_label='Cohort Average'
+            )
 
             para = doc.add_paragraph()
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = para.add_run()
             run.add_picture(tmp.name, width=Inches(CONTENT_WIDTH_IN))
             os.unlink(tmp.name)
-        
+
         # Detailed sections — with parent heading that flows into first dimension
         detail_heading = add_section_heading(doc, "Detailed Self-Assessment by Dimension", font_size=18)
         detail_heading.paragraph_format.page_break_before = True
@@ -2281,7 +2396,8 @@ def generate_report(leader_name, report_type, data, comments, dealership=None, c
         
         for i, dim_name in enumerate(DIMENSIONS.keys()):
             add_dimension_section(doc, dim_name, data, comments, is_self_only=True,
-                                  is_first_dimension=(i == 0))
+                                  is_first_dimension=(i == 0),
+                                  cohort_averages=cohort_averages if cohort_available else None)
 
         # Self-identified development priorities
         add_development_priorities(

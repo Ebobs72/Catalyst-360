@@ -1667,7 +1667,108 @@ class Database:
                 comments['by_section'][section].append(comment)
         
         return data, comments
-    
+
+    def get_cohort_self_assessment_average(self, leader_id):
+        """
+        Per-dimension cohort self-assessment average for every OTHER active
+        leader in this leader's cohort, or None if either gating condition
+        fails to hold. SELF-ASSESSMENT ONLY - deliberately not built for
+        Full 360 (see CLAUDE.md for the full rationale: a Full 360 score is
+        already an aggregate of a different set of specific raters per
+        leader, comparing cohort averages of averages compounds noise about
+        who a leader's raters happened to be, not signal about the leader;
+        it also risks back-calculating other leaders' results in a mid-size
+        cohort, an anonymity concern self-assessment doesn't carry, since
+        self-assessment isn't subject to ANONYMITY_THRESHOLD at all; and the
+        programme is built around self-referential development, not
+        leader-vs-leader comparison).
+
+        TWO GATING CONDITIONS, both checked explicitly against the database
+        on every call, never assumed to hold:
+        1. The whole cohort's self-assessments must be complete - every
+           ACTIVE leader currently in this cohort (this leader included)
+           has a completed Self rater row. A single leader who hasn't
+           started, or who has no Self rater row at all, blocks the whole
+           cohort's averages, not just their own.
+        2. The cohort must clear COHORT_AVERAGE_MIN_SIZE (framework.py) -
+           a defensive floor, not expected to bite at the programme's real
+           target cohort size (18-20).
+
+        Averages each OTHER leader's OWN per-dimension self-assessment score
+        (their personal mean across that dimension's items, the same number
+        their own report would show), then averages those per-leader
+        numbers across the cohort - not a pooled average of every individual
+        item rating, which would let a leader with more "no opportunity"
+        answers quietly carry less weight than everyone else's single vote.
+        Deliberately EXCLUDES the leader's own score from the average they
+        see, per the feature's own spec: including it would partially
+        compare someone against themselves and dilute the contrast this
+        exists to provide.
+        """
+        from framework import DIMENSIONS, COHORT_AVERAGE_MIN_SIZE
+
+        leader = self.get_leader(leader_id)
+        cohort = leader.get('cohort') if leader else None
+        if not cohort:
+            return None
+
+        total_row = self._fetchone("""
+            SELECT COUNT(*) as total
+            FROM leaders
+            WHERE status = 'active' AND cohort = ?
+        """, (cohort,))
+        total = (total_row or {}).get('total') or 0
+
+        if total < COHORT_AVERAGE_MIN_SIZE:
+            return None
+
+        completed_row = self._fetchone("""
+            SELECT COUNT(DISTINCT l.id) as completed
+            FROM leaders l
+            JOIN raters r ON r.leader_id = l.id
+                AND r.relationship = 'Self' AND r.completed_at IS NOT NULL
+            WHERE l.status = 'active' AND l.cohort = ?
+        """, (cohort,))
+        completed = (completed_row or {}).get('completed') or 0
+
+        if completed != total:
+            return None
+
+        rows = self._fetchall("""
+            SELECT l.id as leader_id, rt.item_number, rt.score, rt.no_opportunity
+            FROM leaders l
+            JOIN raters r ON r.leader_id = l.id
+                AND r.relationship = 'Self' AND r.completed_at IS NOT NULL
+            JOIN ratings rt ON rt.rater_id = r.id
+            WHERE l.status = 'active' AND l.cohort = ? AND l.id != ?
+        """, (cohort, leader_id))
+
+        # Per-leader, per-item scores - excludes "no opportunity" answers,
+        # matching get_leader_feedback_data's own exclusion (a no-opportunity
+        # response is never counted as a low score, or any score at all).
+        per_leader_items = {}
+        for row in rows:
+            if row['no_opportunity'] or row['score'] is None:
+                continue
+            per_leader_items.setdefault(row['leader_id'], {})[row['item_number']] = row['score']
+
+        # Per-leader, per-dimension average (each leader's own mean across
+        # that dimension's items) - mirrors get_leader_feedback_data's own
+        # by_dimension calculation exactly, one other leader at a time.
+        dim_leader_scores = {dim: [] for dim in DIMENSIONS}
+        for items in per_leader_items.values():
+            for dim_name, (start, end) in DIMENSIONS.items():
+                scores = [items[n] for n in range(start, end + 1) if n in items]
+                if scores:
+                    dim_leader_scores[dim_name].append(sum(scores) / len(scores))
+
+        averages = {}
+        for dim_name, scores in dim_leader_scores.items():
+            if scores:
+                averages[dim_name] = round(sum(scores) / len(scores), 2)
+
+        return averages
+
     def log_report(self, leader_id, report_type, file_path, assessment_year=None):
         """Record that a report was generated - the reports table existed in
         the schema from the start but nothing ever inserted into it, so every

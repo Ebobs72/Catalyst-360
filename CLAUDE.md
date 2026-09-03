@@ -4147,6 +4147,145 @@ dispatch in `main()`.
 - Cleanup only, no functional change to anything a real user could
   reach - the route was never linked from any navigation in the app.
 
+### Cohort Averages — Self-Assessment Reports Only — BUILT 2026-08-31
+Per-dimension cohort average shown alongside a leader's own self-assessment
+score: a table column, a third radar line, and a per-dimension comparison
+in the Detailed Self-Assessment section. SELF-ASSESSMENT ONLY, deliberately
+- Full 360 report generation is untouched and this must not be extended
+there without a separate, deliberate decision. Three reasons, from the
+human's own brief, not just "it's harder": (1) a Full 360 score is already
+an aggregate of a different set of specific raters per leader, so a cohort
+average of averages compounds noise about who a leader's raters happened
+to be, not signal about the leader; (2) in a mid-size cohort, a cohort-
+level Full 360 average combined with a leader's own known score risks
+back-calculating other leaders' results, an anonymity concern self-
+assessment doesn't carry since it isn't subject to ANONYMITY_THRESHOLD at
+all; (3) the programme is built around self-referential development, not
+leader-vs-leader comparison - a Full 360 cohort figure invites "am I rated
+better or worse than my peers," a different and less useful question than
+what this instrument is designed to answer.
+
+- **`COHORT_AVERAGE_MIN_SIZE = 8`** (framework.py, alongside
+  `ANONYMITY_THRESHOLD`) - a defensive floor, not expected to bite at the
+  programme's real target cohort size (18-20). Distinct in kind from
+  `ANONYMITY_THRESHOLD`: this isn't an anonymity protection, it's a
+  statistical-reliability floor against averaging too few people and
+  calling it a cohort.
+- **`db.get_cohort_self_assessment_average(leader_id)`** (database.py) is
+  the single source of truth, returning a `{dimension: average}` dict or
+  `None`. TWO GATING CONDITIONS, both checked explicitly against the
+  database on every call, never assumed to hold:
+  1. The whole cohort's self-assessments must be complete - every ACTIVE
+     leader currently in the cohort (the report's own subject included)
+     has a completed Self rater row. One leader who hasn't started blocks
+     the whole cohort's averages, not just their own. This already aligns
+     with existing release timing (reports aren't handed out until end of
+     Module 1 regardless), so it isn't a new constraint in practice, but
+     it's enforced in code now rather than assumed to coincidentally hold.
+  2. The cohort must clear `COHORT_AVERAGE_MIN_SIZE`.
+  - Calculation deliberately EXCLUDES the requesting leader's own score
+    (comparing someone against themselves would dilute the contrast this
+    exists to provide), and averages each OTHER leader's OWN per-dimension
+    self-assessment score (their personal mean across that dimension's
+    five items, the same number their own report would show) rather than
+    re-pooling every individual item rating across the cohort - the
+    latter would let a leader with more "no opportunity" answers quietly
+    carry less weight than everyone else's single vote in the average.
+- **Wiring, Self-Assessment only, two call sites in `admin_dashboard.py`**
+  (the dropdown-driven single-leader tab and the dedicated Self-Assessment-
+  only tab): `db.get_cohort_self_assessment_average(leader_id)` is called
+  ONLY when `report_type == 'Self-Assessment'`, not on every generation
+  regardless of type, and passed into `generate_report(...,
+  cohort_averages=...)` - a new, purely additive keyword argument. The
+  batch "Generate All Full 360 Reports" loop is untouched, never even
+  imports the new method.
+- **`report_generator.py` changes, all additive**:
+  - `create_radar_chart` gained `combined_label='All Raters'` - the Full
+    360 call site (`add_executive_summary`) never passes this kwarg, so
+    its own radar is byte-for-byte unaffected. The Self-Assessment radar
+    call in `generate_report` passes `combined_label='Cohort Average'`
+    along with the cohort-average dict in place of `combined_scores` -
+    same line/fill construction as the existing "All Raters" line (same
+    `heritage_white`/`heritage_white_deep` colours), different label.
+  - New `add_cohort_average_note(doc, available)` - the required framing
+    copy, styled to match `add_scoring_scale_note`'s own convention (9pt
+    italic grey, explained ONCE before the number's first appearance in
+    "Your Self-Assessment Overview", not repeated near every chart - this
+    is a linear document read once per coaching conversation, not a
+    navigable app). NOT OPTIONAL per the feature's own spec: without it, a
+    cohort average reads as a leaderboard, which contradicts the self-
+    referential design the whole report is built around. Two variants -
+    the real framing statement when available, and a gated-off message
+    ("A cohort comparison isn't shown for this report...") when not,
+    deliberately reason-agnostic (doesn't distinguish incomplete cohort
+    vs too-small cohort vs no cohort at all - the specific reason isn't
+    the leader's concern, and naming a cohort's size or completion count
+    here would edge toward the kind of disclosure this project is
+    otherwise careful to avoid elsewhere).
+  - "Your Self-Assessment Overview" table: 2 columns (unchanged) when no
+    cohort average is available, 3 (`Dimension` / `Your Score` / `Cohort
+    Average`) when it is - decided once via `cohort_available = bool(
+    cohort_averages)`, threaded through the table, the radar, and every
+    dimension section, so none of them can independently drift out of
+    sync with each other.
+  - `add_dimension_section` gained `cohort_averages=None` (the Full 360
+    call site never passes it, so `is_self_only=False` gates the new code
+    off regardless): a "Your score: X.X    Cohort average: Y.Y" line right
+    after the dimension description, shown only when a value exists for
+    THAT specific dimension (the dict can be present while one dimension
+    is still missing, in the unlikely case every other leader marked
+    every item in it "no opportunity"). Absorbs the "room before Q1"
+    spacing the description paragraph would otherwise carry alone (see
+    that paragraph's own space_after comment, from the 2026-08-28 spacing
+    fix) - tightened there and moved onto this new line, so the total gap
+    before Q1 doesn't double up now that a second paragraph sits between
+    the description and the first item.
+- **VERIFIED with a real constructed test, both correctness and every
+  acceptance check**, per the task's own explicit requirement not to
+  trust the code in isolation:
+  - Built an 8-leader cohort (exactly `COHORT_AVERAGE_MIN_SIZE`, the
+    boundary case) with one "Subject Leader" and 7 "others", each other
+    leader given a distinct, deterministic per-dimension score pattern
+    (`1 + ((leader_index + dimension_index) % 4)`) and the subject given
+    a constant, extreme 5 on every item specifically to prove it's
+    excluded from the average. Computed the expected cohort average
+    independently (not via the same code path) and asserted an exact
+    match against `get_cohort_self_assessment_average`'s real output -
+    matched on every one of the 9 dimensions.
+  - Gate 1: reset one "other" leader's self-assessment to incomplete via
+    `reset_rater_response` - confirmed the function returns `None` for
+    the whole cohort, not a partial average excluding just that leader.
+  - Gate 2: built a separate 5-leader cohort (below the floor, all
+    complete) - confirmed `None`.
+  - Generated TWO real `.docx` reports for the same subject leader via
+    the real `generate_report` function (not a reimplementation) - one
+    with `cohort_averages` populated, one with `None` - and inspected
+    both with `python-docx`: the "available" report showed the correct
+    framing paragraph, a 3-column table with the right numbers, and a
+    "Your score: 5.0    Cohort average: X.X" line under every one of the
+    9 dimensions; the gated report showed the "not shown for this
+    report" framing, a 2-column table, and zero cohort-average text
+    anywhere. Extracted the embedded radar chart PNG directly from the
+    generated `.docx` (via its zip structure) and visually confirmed a
+    correctly labelled "Cohort Average" legend and a distinct inner line
+    at the right per-dimension values, matching the table exactly.
+  - Repeated the "with cohort averages" generation through the REAL admin
+    dashboard UI (not just direct function calls) - clicked the actual
+    Generate button for "Subject Leader" on the Reports tab, confirmed
+    "Report generated!", downloaded it, and confirmed the resulting file
+    carried the identical correct content, proving the two
+    `admin_dashboard.py` call sites are wired correctly, not just the
+    underlying functions in isolation.
+  - Generated a real Full 360 report (leader 1, real existing data) and
+    confirmed zero cohort-average text appears anywhere in it - the
+    feature's own explicit "Full 360 untouched" requirement, checked
+    live rather than inferred from not having edited that code path.
+  - All 13 test leaders (plus their raters/ratings/comments/email_log
+    rows) and every generated test `.docx` deleted after verification;
+    leader 1's 13-rater baseline confirmed unchanged.
+- NOT committed/pushed yet - awaiting Ian's explicit instruction, per
+  standing practice.
+
 ## 9. Working style the human prefers
 
 - Name trade-offs explicitly BEFORE building; propose a better way if you see one.
