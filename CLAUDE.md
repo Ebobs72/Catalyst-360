@@ -4283,8 +4283,132 @@ what this instrument is designed to answer.
   - All 13 test leaders (plus their raters/ratings/comments/email_log
     rows) and every generated test `.docx` deleted after verification;
     leader 1's 13-rater baseline confirmed unchanged.
+- Committed and pushed to both `production` (`1292f75`) and `sandbox`
+  (`6e43dfd`) 2026-09-03.
+
+### Admin Dashboard Cohort Averages — BUILT 2026-09-03
+Extends the Self-Assessment cohort-average feature above with a whole-
+cohort summary view in the admin dashboard: aggregate, dimension-level
+self-assessment averages for one cohort at a time, on the Overview tab's
+filtered single-cohort page. Aggregate-only, deliberately never a per-
+leader breakdown - that already exists via each leader's own generated
+report; this view answers a different question ("where is this cohort
+collectively strong or weak"), not "how does leader X compare to leader
+Y", which this project has been careful never to build (see the report-
+side feature's own rationale above for why leader-vs-leader comparison
+is out of scope for this instrument).
+
+- **`database.py` refactored, not duplicated**, per the task's own
+  explicit instruction not to let the two features diverge: the report-
+  side `get_cohort_self_assessment_average(leader_id)`'s entire
+  calculation moved into a new private `_cohort_dimension_averages(cohort,
+  exclude_leader_id=None)`, which both public methods now call - the
+  report-side one passing the requesting leader to exclude, the new
+  `get_cohort_dimension_averages(cohort)` passing nothing (a whole-cohort
+  read has no single leader to exclude). Same two gates (whole-cohort
+  completeness, `COHORT_AVERAGE_MIN_SIZE`), same per-leader-then-average
+  calculation, in exactly one place - the two features cannot show
+  different numbers for the same cohort because there is only one
+  calculation to disagree with itself.
+- **`admin_dashboard.py`**: a new "Cohort Self-Assessment Averages"
+  section on `render_overview_tab`'s filtered single-cohort view (reached
+  via "View" on a cohort card), placed after the existing Leaders/Total
+  Raters/Response Rate/Ready-for-Report stats and before the per-leader
+  "Leader Status" list - keeps it clearly scoped to one cohort at a time,
+  and clearly separate from the pre-existing per-leader section
+  immediately below it. A plain `Dimension | Cohort Average` table when
+  available; an explicit `st.info` ("Cohort averages aren't available
+  yet...") when gated off, never a blank or partial table.
+- **VERIFIED LIVE with a real regression + correctness test**, not just
+  code review of the refactor: rebuilt the same deterministic-scores test
+  pattern as the report-side feature's own verification (8 leaders, each
+  given a distinct per-dimension score via `1 + ((leader_index +
+  dimension_index) % 4)`), and asserted THREE things against independently
+  computed expectations: (1) `get_cohort_dimension_averages` (whole
+  cohort, all 8) matches an average computed by hand outside the code
+  under test; (2) `get_cohort_self_assessment_average` (excludes one
+  leader) STILL matches its own pre-refactor expected values exactly - a
+  genuine regression check on the report-side feature already shipped,
+  not assumed safe because the refactor "looked" equivalent; (3) the two
+  results are genuinely different numbers for the same cohort, proving
+  the exclusion parameter actually does something rather than the two
+  functions accidentally converging.
+  - Gate 1 (incomplete cohort): reset one leader's self-assessment,
+    confirmed BOTH functions return `None` for that cohort.
+  - Gate 2 (below floor): a separate 4-leader cohort, all complete,
+    confirmed `None`.
+  - Reproduced both the working and gated states live in the actual admin
+    UI (not just direct function calls): an 8-leader complete cohort
+    showed the real "Cohort Self-Assessment Averages" table with the
+    correct 2.5 average on every one of the 9 dimensions (matching the
+    constructed data's known uniform average), screenshotted; a 4-leader
+    complete-but-below-floor cohort showed the "Cohort averages aren't
+    available yet..." message instead, screenshotted - confirming the
+    withheld state renders correctly, not silently, when gated.
+  - Confirmed aggregate-only, no per-leader breakdown: the new table
+    lists dimensions only: the pre-existing "Leader Status" section
+    immediately below it, which does show per-leader detail, is
+    untouched and visually distinct, not merged with the new table.
+  - All 12 test leaders (plus raters/ratings/comments/email_log) deleted
+    after verification; leader 1's 13-rater baseline confirmed unchanged.
 - NOT committed/pushed yet - awaiting Ian's explicit instruction, per
   standing practice.
+
+### Flagged for later: measuring self-assessment movement over time
+Idea, not built, deliberately deferred: re-running the self-assessment
+later in the programme (e.g. at the end) to measure movement against the
+original. Genuinely useful in principle - the same instrument, same
+person, two points in time - but explicitly NOT started now, for one
+reason: this feature's entire value depends on retaining someone's
+original self-assessment data for long enough to compare against later,
+which means it directly depends on the data retention period, still an
+open decision (`ui_consent_retention` on the consent screens currently
+says "We're still finalising our data retention timeline with Bentley" -
+see section 5's consent-copy work). Building "measure movement" ahead of
+that decision means building on a foundation retention could pull out
+from under it the moment it's actually settled - not a new problem, the
+same tension already flagged between `historical_scores` existing at all
+and any short retention period actually being chosen.
+
+**Checked now, cheaply, per the human's own instruction not to assume
+`historical_scores` is further along than it actually is** (this project
+already found one table - `reports` - that sat completely unused for
+months before anyone noticed, so this was worth ruling out rather than
+assumed): `historical_scores` is GENUINELY DORMANT. Confirmed by grep
+across the entire codebase (`historical_scores`, `save_historical_data`,
+`get_historical_data`) - the only matches are the table's own `CREATE
+TABLE` and the two accessor methods' own definitions in `database.py`.
+NEITHER `save_historical_data` NOR `get_historical_data` has a single
+call site anywhere else in the codebase - no UI calls either, no
+scheduled job, nothing. The local dev database's own `historical_scores`
+table has zero rows, consistent with there being no code path that could
+ever have written one, in any environment: `save_historical_data` isn't
+reachable from anywhere, so this conclusion doesn't depend on which
+database happens to be inspected. This table and its two functions are
+exactly the same category of dormant scaffolding the `reports` table
+was before it got wired up (see that fix earlier in this file) - schema
+and helper functions that exist, but were never connected to a real
+feature.
+
+**When retention is actually resolved, pick this up deliberately, not
+assumed complete because the table already exists:**
+- `historical_scores` schema and its two accessor methods are a
+  reasonable starting point, but genuinely untested and unconnected -
+  treat them as a sketch, not a working foundation.
+- The real work is: (1) an admin action to snapshot a leader's CURRENT
+  self-assessment data into `historical_scores` at a deliberate point
+  (most likely when a fresh self-assessment round begins, so the
+  ORIGINAL data is preserved before being overwritten - `ratings`/
+  `comments` have no history of their own, only the current values), (2)
+  a UI to actually initiate a second self-assessment round for someone
+  who already has one on record (doesn't exist today - the current flow
+  assumes exactly one Self rater per leader ever), (3) a report section
+  or view that reads two snapshots and shows the delta, and (4) deciding
+  what "movement" means for the priorities/keep-change qualitative
+  fields, not just the numeric dimension scores.
+- None of this should be started before the retention question is
+  settled - the point of this note is to make that dependency explicit
+  and visible to whoever picks this up next, not to pre-empt it.
 
 ## 9. Working style the human prefers
 

@@ -1668,47 +1668,36 @@ class Database:
         
         return data, comments
 
-    def get_cohort_self_assessment_average(self, leader_id):
+    def _cohort_dimension_averages(self, cohort, exclude_leader_id=None):
         """
-        Per-dimension cohort self-assessment average for every OTHER active
-        leader in this leader's cohort, or None if either gating condition
-        fails to hold. SELF-ASSESSMENT ONLY - deliberately not built for
-        Full 360 (see CLAUDE.md for the full rationale: a Full 360 score is
-        already an aggregate of a different set of specific raters per
-        leader, comparing cohort averages of averages compounds noise about
-        who a leader's raters happened to be, not signal about the leader;
-        it also risks back-calculating other leaders' results in a mid-size
-        cohort, an anonymity concern self-assessment doesn't carry, since
-        self-assessment isn't subject to ANONYMITY_THRESHOLD at all; and the
-        programme is built around self-referential development, not
-        leader-vs-leader comparison).
+        Shared calculation behind BOTH get_cohort_self_assessment_average
+        (the Self-Assessment report's per-leader comparison, which excludes
+        the requesting leader) and get_cohort_dimension_averages (the admin
+        dashboard's whole-cohort summary, which excludes no one). Kept as
+        ONE implementation deliberately - the two features must never
+        diverge or duplicate this logic (per that feature's own spec).
 
-        TWO GATING CONDITIONS, both checked explicitly against the database
-        on every call, never assumed to hold:
+        Returns a {dimension: average} dict, or None if either gating
+        condition fails to hold. Neither is assumed to hold; both are
+        checked against the database on every call:
         1. The whole cohort's self-assessments must be complete - every
-           ACTIVE leader currently in this cohort (this leader included)
-           has a completed Self rater row. A single leader who hasn't
-           started, or who has no Self rater row at all, blocks the whole
-           cohort's averages, not just their own.
-        2. The cohort must clear COHORT_AVERAGE_MIN_SIZE (framework.py) -
-           a defensive floor, not expected to bite at the programme's real
+           ACTIVE leader in this cohort has a completed Self rater row. One
+           leader who hasn't started, or has no Self rater row at all,
+           blocks the whole cohort's average, not just their own.
+        2. The cohort must clear COHORT_AVERAGE_MIN_SIZE (framework.py) - a
+           defensive floor, not expected to bite at the programme's real
            target cohort size (18-20).
 
-        Averages each OTHER leader's OWN per-dimension self-assessment score
-        (their personal mean across that dimension's items, the same number
-        their own report would show), then averages those per-leader
-        numbers across the cohort - not a pooled average of every individual
-        item rating, which would let a leader with more "no opportunity"
-        answers quietly carry less weight than everyone else's single vote.
-        Deliberately EXCLUDES the leader's own score from the average they
-        see, per the feature's own spec: including it would partially
-        compare someone against themselves and dilute the contrast this
-        exists to provide.
+        Averages each contributing leader's OWN per-dimension self-
+        assessment score (their personal mean across that dimension's
+        items, the same number their own report would show), then averages
+        those per-leader numbers across the cohort - not a pooled average
+        of every individual item rating, which would let a leader with more
+        "no opportunity" answers quietly carry less weight than everyone
+        else's single vote.
         """
         from framework import DIMENSIONS, COHORT_AVERAGE_MIN_SIZE
 
-        leader = self.get_leader(leader_id)
-        cohort = leader.get('cohort') if leader else None
         if not cohort:
             return None
 
@@ -1734,14 +1723,19 @@ class Database:
         if completed != total:
             return None
 
-        rows = self._fetchall("""
+        query = """
             SELECT l.id as leader_id, rt.item_number, rt.score, rt.no_opportunity
             FROM leaders l
             JOIN raters r ON r.leader_id = l.id
                 AND r.relationship = 'Self' AND r.completed_at IS NOT NULL
             JOIN ratings rt ON rt.rater_id = r.id
-            WHERE l.status = 'active' AND l.cohort = ? AND l.id != ?
-        """, (cohort, leader_id))
+            WHERE l.status = 'active' AND l.cohort = ?
+        """
+        params = [cohort]
+        if exclude_leader_id is not None:
+            query += " AND l.id != ?"
+            params.append(exclude_leader_id)
+        rows = self._fetchall(query, tuple(params))
 
         # Per-leader, per-item scores - excludes "no opportunity" answers,
         # matching get_leader_feedback_data's own exclusion (a no-opportunity
@@ -1754,7 +1748,7 @@ class Database:
 
         # Per-leader, per-dimension average (each leader's own mean across
         # that dimension's items) - mirrors get_leader_feedback_data's own
-        # by_dimension calculation exactly, one other leader at a time.
+        # by_dimension calculation exactly, one contributing leader at a time.
         dim_leader_scores = {dim: [] for dim in DIMENSIONS}
         for items in per_leader_items.values():
             for dim_name, (start, end) in DIMENSIONS.items():
@@ -1768,6 +1762,48 @@ class Database:
                 averages[dim_name] = round(sum(scores) / len(scores), 2)
 
         return averages
+
+    def get_cohort_self_assessment_average(self, leader_id):
+        """
+        Per-dimension cohort self-assessment average for every OTHER active
+        leader in this leader's cohort, or None if either gating condition
+        fails to hold (see _cohort_dimension_averages for the full gating
+        and calculation rationale). SELF-ASSESSMENT ONLY - deliberately not
+        built for Full 360 (see CLAUDE.md for the full rationale: a Full
+        360 score is already an aggregate of a different set of specific
+        raters per leader, comparing cohort averages of averages compounds
+        noise about who a leader's raters happened to be, not signal about
+        the leader; it also risks back-calculating other leaders' results
+        in a mid-size cohort, an anonymity concern self-assessment doesn't
+        carry, since self-assessment isn't subject to ANONYMITY_THRESHOLD
+        at all; and the programme is built around self-referential
+        development, not leader-vs-leader comparison).
+
+        Deliberately EXCLUDES the leader's own score from the average they
+        see, per the feature's own spec: including it would partially
+        compare someone against themselves and dilute the contrast this
+        exists to provide.
+        """
+        leader = self.get_leader(leader_id)
+        cohort = leader.get('cohort') if leader else None
+        return self._cohort_dimension_averages(cohort, exclude_leader_id=leader_id)
+
+    def get_cohort_dimension_averages(self, cohort):
+        """
+        Whole-cohort per-dimension self-assessment averages, for the admin
+        dashboard's cohort summary view (Overview tab, filtered to one
+        cohort) - aggregate-only, "where is this cohort collectively
+        strong or weak", never a per-leader breakdown (per-leader detail
+        already exists via each leader's own generated report).
+
+        Same two gates and the same calculation as
+        get_cohort_self_assessment_average - shares
+        _cohort_dimension_averages with it so the two can never diverge or
+        duplicate the underlying logic - just without excluding any one
+        leader, since there's no single "requesting leader" for a
+        whole-cohort read.
+        """
+        return self._cohort_dimension_averages(cohort)
 
     def log_report(self, leader_id, report_type, file_path, assessment_year=None):
         """Record that a report was generated - the reports table existed in

@@ -470,7 +470,43 @@ def render_overview_tab(db):
             st.metric("Response Rate", f"{completion_rate}%")
         with col4:
             st.metric("Ready for Report", ready_for_report)
-        
+
+        # Cohort-wide self-assessment averages - aggregate, dimension-level
+        # only, deliberately never a per-leader breakdown (per-leader detail
+        # already exists via each leader's own generated report; this is
+        # specifically a quick "where is this cohort collectively strong or
+        # weak" read). Self-Assessment only, same rationale as the report-
+        # side feature - see get_cohort_dimension_averages's own docstring.
+        # Shares its calculation and both gates (whole-cohort completeness,
+        # COHORT_AVERAGE_MIN_SIZE) with that feature via
+        # _cohort_dimension_averages, so the two can never show different
+        # numbers for the same cohort.
+        st.markdown("---")
+        st.subheader("Cohort Self-Assessment Averages")
+
+        cohort_dim_averages = db.get_cohort_dimension_averages(cohort_filter)
+        if cohort_dim_averages:
+            st.caption(
+                "Aggregate averages across every completed self-assessment in this "
+                "cohort, by dimension - not a per-leader breakdown. For an individual "
+                "leader's own detail, generate their report from the Reports tab."
+            )
+            avg_df = pd.DataFrame([
+                {
+                    'Dimension': dim_name,
+                    'Cohort Average': f"{cohort_dim_averages[dim_name]:.1f}" if dim_name in cohort_dim_averages else "-"
+                }
+                for dim_name in DIMENSIONS.keys()
+            ])
+            st.dataframe(avg_df, use_container_width=True, hide_index=True)
+        else:
+            st.info(
+                "Cohort averages aren't available yet. They appear once every leader "
+                "in this cohort has completed their self-assessment, and once the "
+                "cohort is large enough for a meaningful average.",
+                icon=":material/info:"
+            )
+
         st.markdown("---")
         st.subheader("Leader Status")
 
