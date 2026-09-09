@@ -1145,6 +1145,16 @@ def _apply_rater_correction(db, leader_info, base_url, rater, new_email, new_rel
     (e.g. added via this dashboard's single-add or Quick Add forms, which
     don't currently write to the roster - a separate, pre-existing gap, not
     introduced by this fix).
+
+    DOES NOT send an invitation itself, even when the address changes -
+    FIXED 2026-09-09, per Ian hitting this live on production: correcting a
+    leader's Self rater email silently fired their self-assessment invite
+    with no warning, which surprised him and isn't what he wants. Sending is
+    now a separate, explicit step the caller offers via a confirm prompt (see
+    render_links_tab's confirm_send_key handling) rather than a side effect
+    of saving a correction. Returns whether the email genuinely changed for
+    a not-yet-completed rater, so the caller knows whether to offer that
+    confirm prompt at all.
     """
     old_email = rater.get('admin_email') or ''
     if old_email:
@@ -1160,16 +1170,13 @@ def _apply_rater_correction(db, leader_info, base_url, rater, new_email, new_rel
             cursor.execute("UPDATE raters SET admin_email = ? WHERE id = ?", (new_email, rater['id']))
             conn.commit()
             conn.close()
-        return
+        return False
+
+    email_changed = bool(new_email) and new_email != (rater.get('email') or '')
 
     db.update_rater(rater['id'], email=new_email or None, relationship=new_relationship)
 
-    # Only re-invite when the address actually changed - a relationship tweak
-    # alone doesn't alter the invitation copy, so re-sending would just be noise.
-    if EMAIL_AVAILABLE and is_email_configured() and new_email and new_email != (rater.get('email') or ''):
-        updated = db.get_rater(rater['id'])
-        if updated:
-            send_rater_invitation(updated, leader_info['name'], base_url, db)
+    return email_changed
 
 
 def render_links_tab(db):
@@ -1707,8 +1714,18 @@ def render_links_tab(db):
                         if error:
                             st.error(error)
                         else:
-                            _apply_rater_correction(db, selected_leader, base_url, rater, new_email or None, new_rel)
+                            email_changed = _apply_rater_correction(
+                                db, selected_leader, base_url, rater, new_email or None, new_rel
+                            )
                             st.session_state[editing_key] = False
+                            # FIXED 2026-09-09: this used to send the invitation
+                            # automatically the moment the address changed - Ian
+                            # hit this live and didn't want it firing without
+                            # warning. Now it only offers to, via the confirm
+                            # prompt below, and only when there's actually
+                            # something that could send it.
+                            if email_changed and EMAIL_AVAILABLE and is_email_configured():
+                                st.session_state[f'confirm_send_rater_{rater["id"]}'] = True
                             st.toast("Rater details updated.")
                             st.rerun()
                     if cancel_clicked:
@@ -1717,6 +1734,36 @@ def render_links_tab(db):
 
                     st.code(link, language=None)
                     continue
+
+                # Confirm-send prompt after an email correction - see the
+                # FIXED 2026-09-09 note on _apply_rater_correction. Deliberately
+                # a separate explicit step rather than an automatic send, and
+                # deliberately not tied to visibility of anything else on the
+                # row (a skipped confirm just leaves the ordinary Send button
+                # below available, same as any other not-yet-invited rater).
+                confirm_send_key = f'confirm_send_rater_{rater["id"]}'
+                if st.session_state.get(confirm_send_key):
+                    st.info(
+                        f"Email updated to {admin_email}. Send the invitation to this address now?",
+                        icon=":material/mail:"
+                    )
+                    confirm_col1, confirm_col2, _confirm_spacer = st.columns([1.3, 1, 4.4])
+                    with confirm_col1:
+                        if st.button("Send invitation now", key=f"confirm_send_yes_{rater['id']}",
+                                     type="primary", use_container_width=True):
+                            updated = db.get_rater(rater['id'])
+                            if updated:
+                                success, msg = send_rater_invitation(updated, selected_leader['name'], base_url, db)
+                                if success:
+                                    st.toast(f"Sent to {admin_email}", icon=":material/check_circle:")
+                                else:
+                                    st.toast(f"Failed: {msg}", icon=":material/error:")
+                            st.session_state[confirm_send_key] = False
+                            st.rerun()
+                    with confirm_col2:
+                        if st.button("Not now", key=f"confirm_send_no_{rater['id']}", use_container_width=True):
+                            st.session_state[confirm_send_key] = False
+                            st.rerun()
 
                 # Layout: Name | Email | Edit | Actions | Delete
                 col1, col2, col3, col4, col5 = st.columns([2.1, 2.1, 0.5, 1.8, 0.5])
