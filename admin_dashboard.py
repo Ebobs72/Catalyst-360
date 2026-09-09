@@ -716,8 +716,16 @@ def render_leaders_tab(db):
 
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
-        st.write("Preview:")
-        st.dataframe(df.head())
+        # Drop any column that's entirely empty - a common artefact of a
+        # trailing comma in the source CSV (header row or every data row),
+        # which pandas otherwise surfaces as a confusing "Unnamed: N" column
+        # full of blanks. Safe to drop outright, not just hide from the
+        # preview: the import loop below reads columns by name
+        # (name/email/retailer/cohort), so an extra empty column was never
+        # read from either way.
+        df = df.dropna(axis=1, how='all')
+        st.write(f"Preview ({len(df)} row{'s' if len(df) != 1 else ''}):")
+        st.dataframe(df)
 
         if st.button("Import All"):
             errors = []
