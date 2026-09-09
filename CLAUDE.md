@@ -4467,6 +4467,53 @@ Two real UX bugs Ian hit directly on the new production admin dashboard.
   isolated scratch SQLite file for the empty-state check, deleted
   immediately after.
 
+### Bulk Import Leaders: Full Preview, Dropped Phantom Empty Column — FIXED 2026-09-09
+Same day as the fixes above, Ian's own follow-up questions after
+actually using Bulk Import for a real 16-leader CSV: why did the preview
+only show 5 rows, what did "Unnamed: 4" / "None" mean, and did the row
+starting at 0 matter (answered directly: no, that's just pandas' own
+display index, unrelated to the CSV's real line numbers).
+
+- `render_leaders_tab`'s CSV preview (`admin_dashboard.py`) used
+  `st.dataframe(df.head())` - always the first 5 rows, with no
+  indication more existed. All rows were always actually imported on
+  "Import All" (that loop already iterated the full `df`, never
+  `df.head()`) - only the PREVIEW was truncated, but with nothing
+  saying so, it looked like the file itself had only been read
+  partially. Fixed: `st.dataframe(df)` (the full frame - Streamlit's
+  own grid handles the scrolling for a longer list, same as any other
+  data table in this app), with the heading changed to
+  `f"Preview ({len(df)} rows):"` so the real count is stated plainly.
+- Ian's uploaded CSV had a trailing comma on every line (header and
+  data rows alike, a common artefact of some spreadsheet exports),
+  which pandas surfaces as a genuine extra column with no name
+  ("Unnamed: 4") and no values in it on any row. Harmless to the actual
+  import even before this fix - the import loop reads columns by name
+  (`name`/`email`/`retailer`/`cohort`), so a stray unnamed column was
+  never read either way - but confusing to look at. Fixed by
+  `df = df.dropna(axis=1, how='all')` right after reading the CSV,
+  before the preview renders - drops any column that's entirely empty
+  across every row. Applied to `df` itself, not a separate preview-only
+  copy, since the import logic downstream never needed that column and
+  dropping it there too is simpler than keeping two slightly different
+  versions of the same dataframe in sync.
+- VERIFIED LIVE through the real upload widget (a synthetic `DataTransfer`
+  file drop, same technique used earlier in this project for CSV
+  uploads with no OS file picker available to this tooling), with a
+  16-row CSV reproducing Ian's exact reported shape (a trailing comma
+  on every line): preview correctly read "Preview (16 rows):", the
+  table showed real data with no "Unnamed"/`None` column anywhere, and
+  the first 10 rows were confirmed genuinely present and distinct (not
+  just a repeated first page) by reading the rendered grid directly.
+  Never clicked "Import All" against the real dev database for this
+  check - the fix only touches what's read/dropped/displayed before
+  that button exists, and the import loop itself was already reading
+  from the same (now cleaned) `df` both before and after this change,
+  so a full import dry-run wasn't needed to confirm the fix. No test
+  data left behind - the synthetic CSV lived only in the browser's
+  upload widget, never actually imported, and the scratch file used to
+  build it was deleted after.
+
 ## 9. Working style the human prefers
 
 - Name trade-offs explicitly BEFORE building; propose a better way if you see one.
