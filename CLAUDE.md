@@ -4514,6 +4514,60 @@ display index, unrelated to the CSV's real line numbers).
   upload widget, never actually imported, and the scratch file used to
   build it was deleted after.
 
+### Bulk Import: Case-Sensitive Column Headers Rejected a Real CSV — FIXED 2026-09-09
+Same day again, Ian's own next real attempt at Bulk Import Leaders hit a
+genuine wall: "Import stopped" with "missing name" on every single row,
+despite the preview looking completely correct just before clicking
+Import All.
+
+- **Root cause, confirmed from Ian's own earlier screenshot, not
+  guessed**: his real CSV's header row read `Name,Email,Retailer,Cohort`
+  - naturally capitalised, the way most people title a spreadsheet
+  column, not the lowercase `name`/`email`/`retailer`/`cohort` this
+  app's own instructions show. The validation loop does
+  `row.get('name')` - an exact, case-sensitive lookup - so a column
+  literally called `Name` never matches, and EVERY row fails at the
+  very first check, in exactly the "Row 2" through "Row N, all missing
+  name" pattern Ian saw. The preview looked fine because `st.dataframe`
+  just displays whatever columns exist, entirely unaware that the
+  validation logic downstream cares about their exact case.
+- **Same bug, same root cause, found by checking rather than assuming
+  the admin side was the only place it could bite**: the Leader
+  Portal's own rater CSV importer (`_parse_rater_csv` in
+  `leader_portal.py`) has the identical case-sensitive check
+  (`required = ['name', 'email', 'relationship']`,
+  `c not in import_df.columns`) - a leader uploading a CSV with
+  `Name`/`Email`/`Relationship` would hit the same wall, just with a
+  different-looking error (a missing-columns message shown up front,
+  since that importer checks columns before processing any rows, rather
+  than failing per-row).
+- Fixed in BOTH places, same one-line mechanism:
+  `df.columns = df.columns.str.strip().str.lower()`
+  (`import_df.columns` in `leader_portal.py`) immediately after
+  `pd.read_csv(...)`, before anything downstream looks a column up by
+  name - normalises case AND surrounding whitespace, so `Name `, `NAME`,
+  or ` name` all resolve to the same `name` the rest of the code
+  expects. This runs before the admin side's own empty-column drop from
+  earlier today, though order between the two doesn't matter - one
+  operates on header names, the other on column content.
+- **VERIFIED LIVE, this time actually clicking Import All rather than
+  stopping at the preview** (the earlier same-day fix had deliberately
+  not gone that far, since it only touched the preview itself) - for
+  BOTH importers, reproducing Ian's exact header casing:
+  - Admin Bulk Import Leaders: a 3-row CSV with `Name,Email,Retailer,
+    Cohort` headers showed the correctly-lowercased preview, and
+    clicking Import All actually created all 3 leaders - confirmed via
+    direct database query (correct name/email/dealership/cohort on
+    each), not just the lack of an error.
+  - Leader Portal's rater CSV import: a 2-row CSV with `Name,Email,
+    Relationship` headers showed "Ready to import 2 people" with
+    correctly parsed relationships (Peer -> Peers, Direct Report ->
+    DRs), and clicking Import All genuinely added both raters to leader
+    1's list - confirmed via direct database query.
+  - All 3 test leaders and both test raters (plus leader 1's roster
+    entries for the two test raters) deleted after verification; leader
+    1's 13-rater / 12-entry-roster baseline confirmed unchanged.
+
 ## 9. Working style the human prefers
 
 - Name trade-offs explicitly BEFORE building; propose a better way if you see one.

@@ -716,6 +716,17 @@ def render_leaders_tab(db):
 
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
+        # Normalise header casing/whitespace BEFORE anything below looks up
+        # a column by name. FIXED 2026-09-09, a real bug found live: the
+        # row-validation loop reads row.get('name')/'email'/'retailer'/
+        # 'cohort' - an exact, case-sensitive match - so a CSV exported
+        # from Excel/Numbers with "Name"/"Email" (naturally capitalised,
+        # not the lowercase this app's own instructions show) silently
+        # failed EVERY row with "missing name", even though the preview
+        # (which just displays whatever columns exist, uncorrected)
+        # looked completely fine - confirmed live, this exact mismatch was
+        # the actual cause of a real "Import stopped" report.
+        df.columns = df.columns.str.strip().str.lower()
         # Drop any column that's entirely empty - a common artefact of a
         # trailing comma in the source CSV (header row or every data row),
         # which pandas otherwise surfaces as a confusing "Unnamed: N" column
