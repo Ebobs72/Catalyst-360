@@ -63,52 +63,59 @@ def render_admin_dashboard(db):
     st.markdown(f'{logo_html}<p class="main-title">BENTLEY COMPASS 360</p>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">Administrator Dashboard</p>', unsafe_allow_html=True)
     
-    # Navigation tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    # Navigation tabs. Cohorts got its own top-level tab 2026-09-09 - it used
+    # to sit two levels deep (Settings tab -> Cohorts sub-tab), which Ian
+    # found himself avoiding by going via Leaders instead. Moved here so
+    # cohort management (add/delete, the dashboard filter) is a single click
+    # away, not nested under Settings alongside Email/Database/App Info,
+    # which are genuinely different in kind (configuration, not day-to-day
+    # cohort admin).
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         ":material/bar_chart: Overview",
         ":material/group: Leaders",
+        ":material/folder: Cohorts",
         ":material/rocket_launch: Leader Portals",
         ":material/mail: Links & Tracking",
         ":material/description: Reports",
         ":material/settings: Settings"
     ])
-    
+
     with tab1:
         render_overview_tab(db)
-    
+
     with tab2:
         render_leaders_tab(db)
-    
+
     with tab3:
-        render_portal_management_tab(db)
-    
+        render_cohort_management(db)
+
     with tab4:
-        render_links_tab(db)
-    
+        render_portal_management_tab(db)
+
     with tab5:
-        render_reports_tab(db)
-    
+        render_links_tab(db)
+
     with tab6:
+        render_reports_tab(db)
+
+    with tab7:
         render_settings_tab(db)
 
 
 def render_settings_tab(db):
     """Render the settings/admin tab."""
-    
-    settings_subtab1, settings_subtab2, settings_subtab3, settings_subtab4 = st.tabs(
-        [":material/folder: Cohorts", ":material/mail: Email", ":material/database: Database", ":material/info: App Info"]
+
+    settings_subtab1, settings_subtab2, settings_subtab3 = st.tabs(
+        [":material/mail: Email", ":material/database: Database", ":material/info: App Info"]
     )
-    
+
     with settings_subtab1:
-        render_cohort_management(db)
-    
-    with settings_subtab2:
         render_email_settings(db)
-    
-    with settings_subtab3:
+
+    with settings_subtab2:
         render_database_management(db)
-    
-    with settings_subtab4:
+
+    with settings_subtab3:
         render_app_info(db)
 
 
@@ -657,40 +664,46 @@ def render_leaders_tab(db):
 
     leaders = db.get_all_leaders()
 
+    # No early return here even when empty - Bulk Import Leaders below must
+    # stay reachable regardless of how many leaders already exist. FIXED
+    # 2026-09-09: this used to `return` right here on an empty leader list,
+    # which meant Bulk Import (defined later in this same function) was
+    # invisible until at least one leader had been added manually first -
+    # confirmed live, not assumed, by loading a genuinely empty leaders
+    # table and finding the whole Bulk Import section absent.
     if not leaders:
         st.info("No leaders added yet.")
-        return
+    else:
+        search_query = st.text_input(
+            "Search leaders", key="leaders_tab_search",
+            placeholder="Name or retailer...", label_visibility="collapsed"
+        )
+        leaders = _search_leaders(leaders, search_query)
+        if search_query and not leaders:
+            st.info(f"No leaders match \"{search_query}\".")
 
-    search_query = st.text_input(
-        "Search leaders", key="leaders_tab_search",
-        placeholder="Name or retailer...", label_visibility="collapsed"
-    )
-    leaders = _search_leaders(leaders, search_query)
-    if search_query and not leaders:
-        st.info(f"No leaders match \"{search_query}\".")
+        for leader in leaders:
+            with st.expander(f"**{leader['name']}** - {leader.get('dealership', 'No retailer')}"):
+                col1, col2, col3 = st.columns([2, 2, 1])
 
-    for leader in leaders:
-        with st.expander(f"**{leader['name']}** - {leader.get('dealership', 'No retailer')}"):
-            col1, col2, col3 = st.columns([2, 2, 1])
-            
-            with col1:
-                st.write(f"**Email:** {leader.get('email', 'Not set')}")
-                st.write(f"**Cohort:** {leader.get('cohort', 'Not set')}")
-            
-            with col2:
-                st.write(f"**Retailer:** {leader.get('dealership', 'Not set')}")
-                st.write(f"**Assessment Year:** {leader.get('assessment_year', 1)}")
-            
-            with col3:
-                if st.button("Delete", key=f"delete_leader_{leader['id']}", type="secondary"):
-                    if st.session_state.get(f"confirm_delete_{leader['id']}"):
-                        db.delete_leader(leader['id'])
-                        st.success(f"Deleted {leader['name']}")
-                        st.rerun()
-                    else:
-                        st.session_state[f"confirm_delete_{leader['id']}"] = True
-                        st.warning("Click again to confirm deletion")
-    
+                with col1:
+                    st.write(f"**Email:** {leader.get('email', 'Not set')}")
+                    st.write(f"**Cohort:** {leader.get('cohort', 'Not set')}")
+
+                with col2:
+                    st.write(f"**Retailer:** {leader.get('dealership', 'Not set')}")
+                    st.write(f"**Assessment Year:** {leader.get('assessment_year', 1)}")
+
+                with col3:
+                    if st.button("Delete", key=f"delete_leader_{leader['id']}", type="secondary"):
+                        if st.session_state.get(f"confirm_delete_{leader['id']}"):
+                            db.delete_leader(leader['id'])
+                            st.success(f"Deleted {leader['name']}")
+                            st.rerun()
+                        else:
+                            st.session_state[f"confirm_delete_{leader['id']}"] = True
+                            st.warning("Click again to confirm deletion")
+
     # Bulk import
     st.markdown("---")
     st.subheader("Bulk Import Leaders")
