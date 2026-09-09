@@ -1341,6 +1341,53 @@ class Database:
             ORDER BY created_at
         """, (leader_id,))
 
+    def get_incomplete_self_raters_with_invitation_status(self):
+        """
+        Every incomplete Self rater ACROSS ALL LEADERS (leader_name attached
+        via the join), each flagged with whether their latest self-
+        assessment invitation attempt succeeded - the single source of
+        truth behind the admin dashboard's bulk self-assessment invite/
+        reminder actions (Leader Portal Management tab, "Self-Assessment
+        Invitations" section).
+
+        Mirrors get_raters_pending_invitation's own "latest attempt only"
+        logic (see that function's docstring for the full reasoning - a
+        failed re-send must reopen "not yet invited" status, not be masked
+        by an earlier successful send to a since-corrected address), but
+        deliberately the mirror image of it in two ways: Self ONLY
+        (get_raters_pending_invitation explicitly excludes Self, since that
+        function backs the per-rater invitation list a leader manages for
+        the people THEY nominated), and GLOBAL rather than scoped to one
+        leader_id, since the admin's own bulk send needs to reach every
+        leader at once, not one at a time.
+
+        Returns one query with an `already_invited` flag rather than two
+        separate pending/reminder-eligible queries - the WHERE clause each
+        would need is the same condition negated, and one query is simpler
+        than keeping two queries' conditions from drifting apart.
+        """
+        return self._fetchall("""
+            SELECT r.*, l.name as leader_name,
+                CASE WHEN r.id IN (
+                    SELECT el.rater_id
+                    FROM email_log el
+                    JOIN (
+                        SELECT rater_id, MAX(id) as max_id
+                        FROM email_log
+                        WHERE email_type = 'invitation' AND rater_id IS NOT NULL
+                        GROUP BY rater_id
+                    ) latest ON el.id = latest.max_id
+                    WHERE el.success = 1
+                ) THEN 1 ELSE 0 END as already_invited
+            FROM raters r
+            JOIN leaders l ON r.leader_id = l.id
+            WHERE r.relationship = 'Self'
+              AND r.completed_at IS NULL
+              AND r.email IS NOT NULL
+              AND l.status = 'active'
+            ORDER BY r.created_at
+        """)
+
     def get_failed_invitation_emails(self, leader_id):
         """
         Email addresses among this leader's raters whose LATEST invitation
