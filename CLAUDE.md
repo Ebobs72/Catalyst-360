@@ -4410,6 +4410,63 @@ assumed complete because the table already exists:**
   settled - the point of this note is to make that dependency explicit
   and visible to whoever picks this up next, not to pre-empt it.
 
+### Admin Dashboard: Bulk Import Hidden Until a Leader Exists, Cohorts Buried Under Settings — FIXED 2026-09-09
+Two real UX bugs Ian hit directly on the new production admin dashboard.
+
+- **Bug 1, Bulk Import Leaders invisible on a genuinely empty leaders
+  table.** `render_leaders_tab` (`admin_dashboard.py`) used to `return`
+  early right after the "Existing Leaders" heading whenever
+  `db.get_all_leaders()` came back empty (`if not leaders: st.info(...);
+  return`) - but "Bulk Import Leaders" is defined LATER in the same
+  function, after that return, so the early exit took the whole rest of
+  the function down with it, not just the leader-listing section it was
+  actually meant to skip. Confirmed the mechanism directly: an isolated
+  scratch SQLite database (not the real dev DB, to avoid disturbing
+  leader 1's baseline fixture) confirmed `get_all_leaders()` genuinely
+  returns `[]` on a fresh table - exactly the state that used to hide
+  Bulk Import. Fixed by converting the early `return` into a plain
+  `if/else` - the empty-state message renders on its own, and everything
+  after it (search, the leader list, Bulk Import) is no longer nested
+  inside anything that could skip it. VERIFIED LIVE that the existing-
+  leaders case still shows Bulk Import correctly (no regression); the
+  now-genuinely-unreachable-early-return path was confirmed correct via
+  direct code-path reading plus the isolated DB check above, not a live
+  screenshot of an empty admin dashboard - swapping out the real dev
+  database file while the server was running to force that exact state
+  was judged more disruptive than the fix's own risk warranted, given
+  the change is a simple, fully-inspectable control-flow correction.
+- **Bug 2, Cohort management two clicks deep.** `render_cohort_management`
+  used to live inside Settings' own sub-tab bar (Settings -> Cohorts),
+  alongside Email/Database/App Info - which are genuinely different in
+  kind (one-time configuration, not day-to-day cohort admin) from
+  something Ian needs regularly enough that he'd been routing through
+  Leaders instead just to avoid the extra click. Moved to its own
+  top-level tab, `render_admin_dashboard`'s nav now Overview / Leaders /
+  **Cohorts** / Leader Portals / Links & Tracking / Reports / Settings.
+  Settings' own sub-tab bar dropped from four to three (Email / Database
+  / App Info) rather than keeping Cohorts in both places - a single
+  screen with two entry points was judged more confusing than moving it
+  outright, and `render_cohort_management` itself has no dependency on
+  which tab bar calls it. VERIFIED LIVE: Cohorts now renders directly
+  from the main nav (Add New Cohort / Existing Cohorts / Dashboard
+  Filter, unchanged content), and Settings correctly shows only its
+  remaining three sub-tabs, confirmed via screenshot.
+- Both fixes are on `production`, matching the branch this session was
+  already on when Ian raised the bugs (via the live deployment he was
+  using) - cherry-picked to `sandbox` immediately after, per this
+  project's now-established dual-branch practice (see the "New
+  Production Environment" entry above for why `production` exists
+  alongside `sandbox`, both distinct from Mark's untouched `main`). The
+  CLAUDE.md header's original "FIRST ACTION: confirm sandbox" instruction
+  predates that later addition and is stale against everything documented
+  since - flagged rather than silently followed, since every task from
+  the elimination-leak fix onward has committed to both branches, not
+  sandbox alone.
+- No test data created or needed - both fixes were verified against the
+  existing local dev database (leader 1's baseline) plus one disposable,
+  isolated scratch SQLite file for the empty-state check, deleted
+  immediately after.
+
 ## 9. Working style the human prefers
 
 - Name trade-offs explicitly BEFORE building; propose a better way if you see one.
