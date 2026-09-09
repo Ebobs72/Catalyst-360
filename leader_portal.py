@@ -2234,6 +2234,13 @@ def _render_csv_import(db, leader_id, existing_raters, nomination_roster):
     if uploaded_file:
         try:
             import_df = pd.read_csv(uploaded_file)
+            # Normalise header casing/whitespace before _parse_rater_csv's
+            # required-column check runs - same fix as the admin dashboard's
+            # leader importer (2026-09-09), same root cause: a CSV with
+            # "Name"/"Email"/"Relationship" (naturally capitalised, e.g. an
+            # Excel export) failed this exact-match column check even
+            # though the file was otherwise perfectly valid.
+            import_df.columns = import_df.columns.str.strip().str.lower()
             rows, problems, warnings = _parse_rater_csv(import_df, existing_raters, nomination_roster)
             for problem in problems:
                 st.error(problem)
