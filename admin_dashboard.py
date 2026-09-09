@@ -878,7 +878,7 @@ def render_portal_management_tab(db):
         st.metric("Raters Nominated", len(portal_sent_with_raters))
     
     st.markdown("---")
-    
+
     # Section 1: Ready for Portal Email
     st.subheader(":material/send: Send Portal Invitations")
     
@@ -991,18 +991,8 @@ def render_portal_management_tab(db):
         st.info("No leaders have nominated raters yet.")
     
     st.markdown("---")
-    
-    # Section 4: Awaiting Self-Assessment
-    with st.expander(f"Awaiting Self-Assessment ({len(no_self_assessment)})", icon=":material/assignment:"):
-        if no_self_assessment:
-            for leader in no_self_assessment:
-                st.write(f"• {leader['name']} ({leader.get('dealership', 'No retailer')})")
-        else:
-            st.info("All leaders have completed their self-assessment.")
-    
-    st.markdown("---")
-    
-    # Section 5: All Portal Links (for reference)
+
+    # Section 4: All Portal Links (for reference)
     st.subheader(":material/link: All Portal Links")
     
     with st.expander("View/Generate Portal Links"):
@@ -1197,9 +1187,164 @@ def render_links_tab(db):
         st.success("Email sending is enabled", icon=":material/mail:")
     else:
         st.info("Email not configured — go to Settings :material/arrow_forward: Email to set up", icon=":material/mail:")
-    
+
     st.markdown("---")
-    
+
+    # Get base URL. Moved ABOVE the leader selector 2026-09-09 (was defined
+    # further down, only needed by the per-leader flow below it) so the new
+    # bulk self-assessment section immediately below can use the same value
+    # rather than needing its own separate text input.
+    base_url = st.text_input(
+        "Base URL for links",
+        value=get_app_base_url(),
+        help="Your deployed app URL. Set [app] base_url in this deployment's secrets "
+             "so it defaults correctly and links never point at another environment."
+    )
+
+    st.markdown("---")
+
+    # Bulk Self-Assessment Invitations. MOVED HERE 2026-09-09 from the
+    # Leader Portals tab, per Ian's own correction: that tab is specifically
+    # about the NOMINATION PORTAL (a portal_token link, sent only after
+    # self-assessment is done), a different mechanism from this - a
+    # self-assessment invitation uses the exact same rater-link mechanism
+    # (send_rater_invitation, the ?t=<token> link) as everything else THIS
+    # tab already manages, and this is where Ian's own instinct already
+    # went looking when the gap was first found. See CLAUDE.md, "Bulk
+    # Self-Assessment Invitations and Reminders", for the full history -
+    # this section's own logic is unchanged from that build, only its
+    # location and the two small adjustments noted below.
+    st.subheader(":material/assignment: Bulk Self-Assessment Invitations")
+    st.caption(
+        "Send or remind self-assessment invitations across every leader at once, rather than "
+        "one at a time below. Adding a leader (single form or CSV import) only creates their "
+        "self-assessment link - it doesn't send it."
+    )
+
+    self_raters = db.get_incomplete_self_raters_with_invitation_status()
+    not_yet_invited = [r for r in self_raters if not r['already_invited']]
+    awaiting_reminder = [r for r in self_raters if r['already_invited']]
+    # A handful of legacy leaders predate "adding a leader always creates
+    # their Self rater row" - kept visible rather than silently omitted.
+    # Derived directly from `leaders` (self_completed == 0, no Self rater
+    # in the query above) rather than reusing render_portal_management_
+    # tab's own no_self_assessment categorisation - that lived in a
+    # different function this section no longer sits inside.
+    self_rater_leader_ids = {r['leader_id'] for r in self_raters}
+    no_self_link = [l for l in leaders if l.get('self_completed', 0) == 0 and l['id'] not in self_rater_leader_ids]
+
+    if not not_yet_invited and not awaiting_reminder and not no_self_link:
+        st.info("No leaders currently awaiting their self-assessment invitation or reminder.")
+
+    if not_yet_invited:
+        st.success(f"{len(not_yet_invited)} leader(s) are ready for their self-assessment invitation")
+
+        for rater in not_yet_invited:
+            col1, col2, col3 = st.columns([3, 2, 1])
+            with col1:
+                st.write(f"**{rater['leader_name']}**")
+            with col2:
+                st.write(f":material/mail: {rater.get('email', 'No email')}")
+            with col3:
+                send_clicked = email_configured and st.button("Send", key=f"send_self_invite_{rater['id']}")
+
+            # Feedback renders full-width, below the row, not trapped inside
+            # the narrow button column above - a failure message squeezed
+            # into 1/6 of the row wraps one word per line, found live while
+            # verifying this exact button (same class of bug already fixed
+            # once in the admin rater-correction feature's Save/Cancel
+            # column).
+            if send_clicked:
+                success, msg = send_rater_invitation(rater, rater['leader_name'], base_url, db)
+                if success:
+                    st.success(f"Sent to {rater['leader_name']}", icon=":material/check_circle:")
+                    st.rerun()
+                else:
+                    st.error(f"Failed: {msg}")
+
+        st.markdown("---")
+        if email_configured:
+            if st.button(f"Send Self-Assessment Invitations to All ({len(not_yet_invited)})",
+                        icon=":material/send:", type="primary", key="bulk_send_self_invites"):
+                with st.spinner("Sending self-assessment invitations..."):
+                    sent, failed = 0, 0
+                    for rater in not_yet_invited:
+                        success, _ = send_rater_invitation(rater, rater['leader_name'], base_url, db)
+                        if success:
+                            sent += 1
+                        else:
+                            failed += 1
+                    if sent > 0:
+                        st.success(f"Sent {sent} invitation(s)", icon=":material/check_circle:")
+                    if failed > 0:
+                        st.warning(f"{failed} failed", icon=":material/warning:")
+                    st.rerun()
+        st.markdown("---")
+
+    if awaiting_reminder:
+        st.warning(f"{len(awaiting_reminder)} leader(s) have been invited but haven't completed their self-assessment yet")
+
+        for rater in awaiting_reminder:
+            # Button column widened to 1.5 (not the 1 used for the plain,
+            # icon-less "Send" button above) - "Remind" plus its
+            # notifications icon wrapped onto three lines at 1/6 of the
+            # row, found live at this project's own 902px standard test
+            # width.
+            col1, col2, col3 = st.columns([2.5, 2, 1.5])
+            with col1:
+                st.write(f"**{rater['leader_name']}**")
+            with col2:
+                st.write(f":material/mail: {rater.get('email', 'No email')}")
+            with col3:
+                if email_configured:
+                    if st.button("Remind", icon=":material/notifications:", key=f"remind_self_{rater['id']}"):
+                        success, msg = send_rater_reminder(rater, rater['leader_name'], base_url, db)
+                        if success:
+                            st.toast(f"Reminder sent to {rater['leader_name']}")
+                        elif msg == "Reminded recently":
+                            # Not a failure - the 48h throttle working as designed.
+                            st.toast(f"{rater['leader_name']} was reminded within the last 48h", icon=":material/schedule:")
+                        else:
+                            st.toast(f"Failed: {msg}", icon=":material/error:")
+
+        st.markdown("---")
+        if email_configured:
+            if st.button(f"Send Reminder to All ({len(awaiting_reminder)})",
+                        icon=":material/notifications:", key="bulk_remind_self"):
+                sent, throttled, failed = 0, 0, 0
+                for rater in awaiting_reminder:
+                    success, msg = send_rater_reminder(rater, rater['leader_name'], base_url, db)
+                    if success:
+                        sent += 1
+                    elif msg == "Reminded recently":
+                        throttled += 1
+                    else:
+                        failed += 1
+                if sent > 0:
+                    st.success(f"Sent {sent} reminder(s)", icon=":material/check_circle:")
+                if throttled > 0:
+                    # Not a failure - the 48h throttle, same distinction
+                    # send_bulk_reminders itself already established.
+                    st.info(
+                        f"{throttled} rater(s) were reminded within the last 48 hours, "
+                        f"so weren't reminded again.",
+                        icon=":material/schedule:"
+                    )
+                if failed > 0:
+                    st.warning(f"{failed} failed to send", icon=":material/warning:")
+        st.markdown("---")
+
+    if no_self_link:
+        with st.expander(f"No self-assessment link yet ({len(no_self_link)})", icon=":material/link_off:"):
+            st.caption(
+                "These leaders have no Self rater row at all, so there's nothing to send or "
+                "remind yet - add one via the Leaders tab, or from the form below."
+            )
+            for leader in no_self_link:
+                st.write(f"• {leader['name']} ({leader.get('dealership', 'No retailer')})")
+
+    st.markdown("---")
+
     # Leader selector
     leader_options = {l['id']: f"{l['name']} ({l.get('dealership', 'No retailer')})" for l in leaders}
     selected_leader_id = st.selectbox(
@@ -1207,19 +1352,11 @@ def render_links_tab(db):
         options=list(leader_options.keys()),
         format_func=lambda x: leader_options[x]
     )
-    
+
     selected_leader = next(l for l in leaders if l['id'] == selected_leader_id)
-    
+
     st.markdown("---")
-    
-    # Get base URL
-    base_url = st.text_input(
-        "Base URL for links",
-        value=get_app_base_url(),
-        help="Your deployed app URL. Set [app] base_url in this deployment's secrets "
-             "so it defaults correctly and links never point at another environment."
-    )
-    
+
     # Add raters section
     st.subheader(f"Add Raters for {selected_leader['name']}")
     

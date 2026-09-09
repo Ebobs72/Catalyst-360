@@ -4568,6 +4568,140 @@ Import All.
     entries for the two test raters) deleted after verification; leader
     1's 13-rater / 12-entry-roster baseline confirmed unchanged.
 
+### Bulk Self-Assessment Invitations and Reminders — BUILT 2026-09-09
+Ian's own question, prompted by using Bulk Import Leaders for real: after
+importing many leaders at once, the only way to send their self-
+assessment invitation was Links & Tracking, one leader at a time - the
+Leader Portal Management tab already had bulk actions for the LATER
+stages (portal invitations, nomination reminders), but nothing for this,
+the actual FIRST step in a leader's lifecycle.
+
+- **New `db.get_incomplete_self_raters_with_invitation_status()`**
+  (database.py) - every incomplete Self rater across ALL leaders
+  (leader_name attached via a join), each flagged whether their latest
+  invitation attempt succeeded. Deliberately the mirror image of the
+  existing `get_raters_pending_invitation` (which explicitly EXCLUDES
+  Self and is scoped to one leader_id) - this one is Self-only and
+  global, since the admin's own bulk send needs to reach every leader at
+  once. One query with an `already_invited` flag, not two separate
+  pending/reminder-eligible queries, so the two conditions can't drift
+  apart from each other.
+- **`render_portal_management_tab`'s "Self-Assessment Invitations"
+  section MOVED to be first**, ahead of Send Portal Invitations - it
+  used to be a bare, passive read-only expander ("Awaiting Self-
+  Assessment") at the very END of this tab; now it's a real actionable
+  section (matching the summary metrics row above, which already led
+  with this exact stage) with the same per-leader Send/Remind buttons
+  AND bulk "Send to All"/"Send Reminder to All" buttons already
+  established for the later stages, reusing that exact UI pattern
+  rather than inventing a new one.
+- **A handful of legacy leaders predate "adding a leader always creates
+  a Self rater row"** (found live: two old test fixtures, "Paginate Test
+  Peers" and "Visual Test Leader", have no Self rater row at all) -
+  these can't be sent anything, but are kept visible in a small "No
+  self-assessment link yet" expander rather than silently dropped from
+  what the old bare list used to show.
+- **Bulk reminder tally correctly separates throttled from failed**,
+  same discipline as `send_bulk_reminders` itself (see "Correction:
+  Remove the Your Progress Gating Entirely" and the Leader Portal
+  Redesign build above for why this distinction matters - a throttled
+  skip is the 48h window working as designed, not a delivery problem).
+  Couldn't reuse `send_bulk_invitations`/`send_bulk_reminders` directly
+  for the bulk buttons here - both take a single shared `leader_name`
+  for a batch of one leader's several raters, but this is the opposite
+  shape (many leaders, one Self rater each, each with a DIFFERENT
+  leader_name) - so the tally logic (sent/throttled/failed) is
+  replicated inline in the loop instead, matching those functions'
+  own established behaviour rather than diverging from it.
+- **A real layout bug found live while verifying, fixed under the
+  standing screenshot-review authority**: the per-leader "Remind" button
+  (with its notifications icon) wrapped onto three lines
+  (`Re`/`min`/`d`) in a column sized for the plain, icon-less "Send"
+  button next to it - widened that column (1 -> 1.5 of the row).
+  Separately, the individual "Send" button's own error message
+  (`st.error(f"Failed: {msg}")`) was rendered INSIDE the narrow button
+  column, wrapping one word per line - the exact same class of bug
+  already fixed once in the admin rater-correction feature's Save/
+  Cancel column. Fixed the same way: the button click is captured
+  inside the column, but the resulting success/error message renders
+  full-width below the row, outside the column layout entirely.
+- **VERIFIED LIVE with a constructed, realistic scenario**, not just
+  code review: a temporary fake local SMTP (`.streamlit/secrets.toml`,
+  removed after) so `is_email_configured()` would return True and the
+  Send/Remind buttons would genuinely render and genuinely attempt a
+  send - 3 leaders never invited, 2 invited and reminder-eligible, 1
+  invited but still within the 48h throttle window.
+  - Confirmed the query itself splits correctly (3 not-yet-invited, 3
+    already-invited including the throttled one) before touching the UI.
+  - "Send Self-Assessment Invitations to All (3)" genuinely attempted
+    all 3 sends (confirmed via direct `email_log` query - all three
+    logged as failed, "Connection refused", against the fake SMTP
+    target - not silently skipped).
+  - "Send Reminder to All (3)" correctly reported "1 rater(s) were
+    reminded within the last 48 hours, so weren't reminded again." AND
+    "2 failed to send" as two SEPARATE messages, never conflated into
+    one bucket.
+  - The individual "Send" button's error message confirmed rendering
+    full-width and legible after the column-layout fix, screenshotted
+    before and after.
+  - The "No self-assessment link yet" expander correctly listed both
+    legacy leaders with no Self rater row, changing nothing else.
+  - All 6 test leaders (plus their raters/ratings/comments/email_log
+    rows) and the temporary secrets file deleted after verification;
+    leader 1's 13-rater baseline confirmed unchanged.
+
+### Bulk Self-Assessment Invitations: Moved to Links & Tracking — CORRECTED 2026-09-09
+Same day, Ian's own question right after the build above: "is Leader
+Portals the most appropriate place for this?" It wasn't - moved to
+Links & Tracking, above the existing "Select Leader" dropdown.
+
+- **Why Leader Portals was wrong**: that tab's own stated purpose is
+  specifically the NOMINATION PORTAL (a `portal_token` link, sent only
+  after self-assessment is done) - a different mechanism from a self-
+  assessment invitation, which is just another rater-link invitation
+  (`send_rater_invitation`, the `?t=<token>` link) - the exact thing
+  Links & Tracking already exists to manage for every other rater type.
+  Telling detail, found while moving it: that tab's own long-standing
+  workflow text already said "Leaders complete self-assessment (via
+  Links & Tracking)" - the correct home was already documented in the
+  UI copy, just never actually built there.
+- **The move itself, not a rebuild**: the section's own logic
+  (`get_incomplete_self_raters_with_invitation_status`, the not-yet-
+  invited/awaiting-reminder split, the bulk buttons, the "no self-
+  assessment link yet" expander) is completely unchanged - relocated
+  from `render_portal_management_tab` to `render_links_tab`, sitting
+  above the "Select Leader" dropdown so it reads as a genuine bulk
+  extension of what that tab already does, not a bolt-on. `base_url`
+  (previously computed further down, only needed by the per-leader flow)
+  moved up to before the leader selector so both the new bulk section
+  and the existing per-leader flow share the one value - no duplicate
+  text input.
+- **One derivation had to change, not just relocate**: `no_self_link`
+  (legacy leaders with no Self rater row at all) previously reused
+  `render_portal_management_tab`'s own `no_self_assessment` list, built
+  by a per-leader categorisation loop that lives in that OTHER function.
+  Recomputed directly from `leaders` (`self_completed == 0` and not
+  already covered by the Self-rater query) instead, since that loop
+  isn't available here - same result, different derivation.
+- `render_portal_management_tab` reverted to its original four-section
+  structure (Send Portal Invitations leads again, sections renumbered
+  back down), since the workflow/metrics text there was never wrong -
+  only the misplaced NEW section needed to move, not anything that was
+  already there.
+- **VERIFIED LIVE, full re-test after the move, not assumed safe because
+  the code looked identical**: confirmed the section is genuinely gone
+  from Leader Portals (screenshotted) and genuinely present on Links &
+  Tracking, above the leader selector (screenshotted). Rebuilt the exact
+  same test scenario as the original build (3 never-invited, 2
+  reminder-eligible, 1 throttled, via the same temporary fake-SMTP
+  `.streamlit/secrets.toml`) and re-ran every check: the invitation/
+  reminder split, the bulk "Send to All"/"Send Reminder to All" tallies
+  (throttled correctly kept separate from failed), the individual
+  "Send" button's full-width error message, and the "no self-assessment
+  link yet" expander all behaved identically to the pre-move build. All
+  6 test leaders and the temporary secrets file deleted after
+  verification; leader 1's 13-rater baseline confirmed unchanged.
+
 ## 9. Working style the human prefers
 
 - Name trade-offs explicitly BEFORE building; propose a better way if you see one.
