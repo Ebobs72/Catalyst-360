@@ -1155,6 +1155,29 @@ def _apply_rater_correction(db, leader_info, base_url, rater, new_email, new_rel
     of saving a correction. Returns whether the email genuinely changed for
     a not-yet-completed rater, so the caller knows whether to offer that
     confirm prompt at all.
+
+    A Self correction ALSO syncs leaders.email - FIXED 2026-09-10, a second
+    real gap Ian hit the day after the fix above: he corrected Danny
+    Monaghan's Self rater email (raters.email/admin_email, what Links &
+    Tracking reads), but the Leaders tab kept showing the old address, even
+    after a refresh. Root cause: leaders.email is a genuinely SEPARATE
+    column from the Self rater's own email - it's what Quick Add copies onto
+    a newly-created Self rater (which is how Danny's Self row got the wrong,
+    line-manager address in the first place, since leaders.email hadn't
+    been set to his own yet), and it's what leader-facing sends (the
+    nomination-portal invitation, admin failure notices) actually go to -
+    see send_portal_invitation/send_portal_reminder/send_admin_notification
+    in email_sender.py, all keyed off leader['email'], never the Self
+    rater's own row. So this was never purely cosmetic: leaving leaders.email
+    stale would have kept sending Danny's portal invite to the wrong person
+    too. Since the Self rater IS the leader (never a different person the
+    way every other relationship is), there's no legitimate case where the
+    two addresses should diverge - kept in step unconditionally, matching
+    the nomination_roster sync above. Compared against leader_info['email'],
+    not rater['email'], so even a Save with no actual change to the rater's
+    own email still repairs a leaders.email left stale by an earlier
+    correction (the fix for exactly that: re-opening Edit and clicking Save
+    on the now-correct value backfills it, no direct DB access needed).
     """
     old_email = rater.get('admin_email') or ''
     if old_email:
@@ -1162,6 +1185,10 @@ def _apply_rater_correction(db, leader_info, base_url, rater, new_email, new_rel
             leader_info['id'], old_email,
             new_email=new_email or None, new_relationship=new_relationship
         )
+
+    is_self = rater.get('relationship') == 'Self'
+    if is_self and new_email and new_email != (leader_info.get('email') or ''):
+        db.update_leader(leader_info['id'], email=new_email)
 
     if rater.get('completed'):
         if new_email:
