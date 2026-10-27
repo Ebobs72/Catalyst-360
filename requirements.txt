@@ -14,3 +14,9 @@ matplotlib>=3.7.0
 numpy>=1.24.0
 pandas>=2.0.0
 libsql>=0.1.11
+# Floor, not a pin. certifi is the CA bundle `requests` uses for the Anthropic
+# API call in report_generator.py, and it is only a transitive dependency, so
+# it otherwise floats to whatever was cached at the last build. 2026.10.19 is
+# the first release without the compromised eMudhra intermediates (Render
+# advisory, 2026-10-19). A rebuild alone does not refresh it.
+certifi>=2026.10.19
